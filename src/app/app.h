@@ -112,6 +112,7 @@ private:
     int selected_ = 0;
     float scroll_ = 0.0f;
     bool hud_ = true;
+    bool hdr_ = false;
     int upscale_ = 1;
     bool quit_ = false;
     bool capture_requested_ = false;

@@ -2,15 +2,43 @@
 
 #include <d2d1_1.h>
 
+#include <cmath>
 #include <cstdint>
 
 // Palette and small colour helpers. Values are 0xRRGGBB; alpha is separate.
 namespace brp::theme {
 
+inline bool& HdrFlag() {
+    static bool hdr = false;
+    return hdr;
+}
+
+// UI colours must be PQ-encoded when the swapchain is HDR10.
+inline void SetHdr(bool enabled) {
+    HdrFlag() = enabled;
+}
+
+inline float PqEncode(float srgb) {
+    float lin = std::pow(srgb, 2.2f) * (100.0f / 10000.0f);
+    const float m1 = 0.1593017578125f;
+    const float m2 = 78.84375f;
+    const float c1 = 0.8359375f;
+    const float c2 = 18.8515625f;
+    const float c3 = 18.6875f;
+    const float p = std::pow(lin, m1);
+    return std::pow((c1 + c2 * p) / (1.0f + c3 * p), m2);
+}
+
 inline D2D1_COLOR_F Rgba(uint32_t rgb, float alpha = 1.0f) {
-    return D2D1::ColorF(static_cast<float>((rgb >> 16) & 0xFFu) / 255.0f,
-                        static_cast<float>((rgb >> 8) & 0xFFu) / 255.0f,
-                        static_cast<float>(rgb & 0xFFu) / 255.0f, alpha);
+    float r = static_cast<float>((rgb >> 16) & 0xFFu) / 255.0f;
+    float g = static_cast<float>((rgb >> 8) & 0xFFu) / 255.0f;
+    float b = static_cast<float>(rgb & 0xFFu) / 255.0f;
+    if (HdrFlag()) {
+        r = PqEncode(r);
+        g = PqEncode(g);
+        b = PqEncode(b);
+    }
+    return D2D1::ColorF(r, g, b, alpha);
 }
 
 inline uint32_t Scale(uint32_t rgb, float factor) {

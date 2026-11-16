@@ -19,6 +19,8 @@ struct PsParams {
     float mode;
     float src_w;
     float src_h;
+    float hdr;
+    float pad[3];
 };
 
 struct CsParams {
@@ -101,27 +103,11 @@ bool Presenter::Init(HWND hwnd, const PresenterConfig& cfg) {
         }
     }
 
-    DXGI_SWAP_CHAIN_DESC1 desc{};
-    desc.Width = static_cast<UINT>(cfg_.output_width);
-    desc.Height = static_cast<UINT>(cfg_.output_height);
-    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    desc.Stereo = FALSE;
-    desc.SampleDesc.Count = 1;
-    desc.SampleDesc.Quality = 0;
-    desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_SHADER_INPUT;
-    desc.BufferCount = 2;
-    desc.Scaling = DXGI_SCALING_STRETCH;
-    desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
-    desc.Flags = (tearing_ && cfg_.allow_tearing) ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
-
-    hr = factory->CreateSwapChainForHwnd(device_.Get(), hwnd_, &desc, nullptr, nullptr, &swapchain_);
-    if (FAILED(hr)) {
-        std::fprintf(stderr, "CreateSwapChainForHwnd failed: 0x%08lX\n",
-                     static_cast<unsigned long>(hr));
+        factory_ = factory;
+    if (!CreateSwapchainForFormat()) {
         return false;
     }
-    factory->MakeWindowAssociation(hwnd_, DXGI_MWA_NO_ALT_ENTER);
+    factory_->MakeWindowAssociation(hwnd_, DXGI_MWA_NO_ALT_ENTER);
 
     if (!CreateBackbufferViews() || !CreateSourceTexture() || !CreateShaders() ||
         !CreateTimingQueries()) {
@@ -325,6 +311,54 @@ bool Presenter::SetSourceFrame(const uint8_t* rgba, int width, int height) {
     external_source_ = true;
     return true;
 }
+bool Presenter::CreateSwapchainForFormat() {
+    const DXGI_FORMAT format =
+        cfg_.hdr ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM;
+
+    DXGI_SWAP_CHAIN_DESC1 desc{};
+    desc.Width = static_cast<UINT>(cfg_.output_width);
+    desc.Height = static_cast<UINT>(cfg_.output_height);
+    desc.Format = format;
+    desc.Stereo = FALSE;
+    desc.SampleDesc.Count = 1;
+    desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_SHADER_INPUT;
+    desc.BufferCount = 2;
+    desc.Scaling = DXGI_SCALING_STRETCH;
+    desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+    desc.Flags = (tearing_ && cfg_.allow_tearing) ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+
+    swapchain_.Reset();
+    const HRESULT hr = factory_->CreateSwapChainForHwnd(device_.Get(), hwnd_, &desc, nullptr,
+                                                        nullptr, &swapchain_);
+    if (FAILED(hr)) {
+        std::fprintf(stderr, "CreateSwapChainForHwnd failed: 0x%08lX\n",
+                     static_cast<unsigned long>(hr));
+        return false;
+    }
+
+    if (cfg_.hdr) {
+        ComPtr<IDXGISwapChain3> swap3;
+        if (SUCCEEDED(swapchain_.As(&swap3))) {
+            swap3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);
+        }
+    }
+    return true;
+}
+
+bool Presenter::SetHdr(bool enabled) {
+    if (cfg_.hdr == enabled) {
+        return true;
+    }
+    rtv_.Reset();
+    backbuffer_.Reset();
+    swapchain_.Reset();
+    cfg_.hdr = enabled;
+    if (!CreateSwapchainForFormat()) {
+        return false;
+    }
+    return CreateBackbufferViews();
+}
 void Presenter::Render(double time_seconds) {
     const auto cpu_start = std::chrono::steady_clock::now();
     BeginTiming();
@@ -356,6 +390,7 @@ void Presenter::Render(double time_seconds) {
     // 2. Upscale + optional sharpen into the backbuffer.
     PsParams ps{};
     ps.sharpen = (cfg_.upscale_mode == 3) ? 0.45f : 0.35f;
+    ps.hdr = cfg_.hdr ? 1.0f : 0.0f;
     ps.mode = static_cast<float>(cfg_.upscale_mode);
     ps.src_w = static_cast<float>(cfg_.source_width);
     ps.src_h = static_cast<float>(cfg_.source_height);

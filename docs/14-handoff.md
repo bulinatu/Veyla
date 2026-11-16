@@ -179,3 +179,13 @@ Verified: audio header 2ch/48kHz received during a live session; video 1080p60 a
 3. Frame generation (RIFE/TensorRT) opt-in, latency shown.
 4. DualSense haptic audio (USB audio-haptic path).
 
+
+---
+
+## Colour + HDR
+
+- swscale now receives explicit BT.709/BT.2020 + limited-range info (fixes washed-out image).
+- HDR10 path implemented: swapchain R10G10B10A2 + PQ color space, shader PQ encode, UI colours PQ-encoded via theme::SetHdr.
+- HDR is applied at STARTUP (profile.hdr); live swapchain recreation fails with E_ACCESSDENIED on the same HWND, so the dropdown writes the setting and says restart.
+- Verified SDR streaming still works after the changes.
+

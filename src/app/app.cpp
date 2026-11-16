@@ -174,6 +174,7 @@ bool App::Init(Win32Window* window) {
     cfg.source_height = 1080;
     cfg.vsync = true;
     cfg.allow_tearing = true;
+    cfg.hdr = hdr_;
     cfg.upscale_mode = upscale_;
 
     if (!presenter_.Init(window->hwnd(), cfg)) {
@@ -424,6 +425,16 @@ void App::ApplyDropdown(int id, int index) {
             audio_buffer_ms_ = kBufferSizes[std::clamp(index, 0, 3)];
             OpenAudioDevice();
             break;
+        case W_Hdr: {
+            hdr_ = index == 1;
+            profile_.hdr = hdr_;
+            {
+                std::string save_detail;
+                session::Save(profile_, session::DefaultProfilePath(), save_detail);
+            }
+            break;
+            break;
+        }
         case W_InputSource:
             input_source_ = std::clamp(index, 0, 2);
             pad_.SetBackend(kInputBackends[input_source_]);
@@ -1051,7 +1062,7 @@ void App::RenderSettings(double t) {
             DrawDropdown(L"Frame generation", {L"Off  ·  needs RIFE model"}, 0, y, W_FrameGen,
                          false);
             y += kRowH;
-            DrawDropdown(L"HDR output", {L"Off  ·  waits for PS5"}, 0, y, W_Hdr, false);
+            DrawDropdown(L"HDR output", {L"Off", L"On (HDR10, restart)"}, hdr_ ? 1 : 0, y, W_Hdr, true);
             break;
         }
 

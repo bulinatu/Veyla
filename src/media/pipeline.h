@@ -19,6 +19,7 @@ struct PresenterConfig {
     int source_height = 1080;
     bool vsync = false;
     bool allow_tearing = true;
+    bool hdr = false;
     int upscale_mode = 2;  // 0 bilinear, 1 catmull-rom, 2 catmull-rom + sharpen
 };
 
@@ -67,6 +68,8 @@ public:
     // Exclusive/borderless fullscreen toggle for exact output resolution.
     bool SetFullscreen(bool enabled);
     bool is_fullscreen() const { return fullscreen_; }
+    bool SetHdr(bool enabled);
+    bool hdr() const { return cfg_.hdr; }
 
     // Copies the current backbuffer to a 32-bit BMP. Must be called between
     // Render() and Present(): the backbuffer is only readable there.
@@ -101,9 +104,11 @@ private:
     bool tearing_ = false;
     bool fullscreen_ = false;
     bool external_source_ = false;
+    bool CreateSwapchainForFormat();
 
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
+    Microsoft::WRL::ComPtr<IDXGIFactory2> factory_;
     Microsoft::WRL::ComPtr<IDXGISwapChain1> swapchain_;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> backbuffer_;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv_;
