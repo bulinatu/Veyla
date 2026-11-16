@@ -2,7 +2,15 @@
 
 A better PlayStation 5 → PC Remote Play client.
 
-**Status:** Phase 0 — research & feasibility (no code yet).
+**Status:** Phase 1 — toolchain, fork vendored, presentation path measured on real hardware. No decoder wired yet.
+
+**What exists right now**
+
+- `brp-bench`: a working D3D11 flip-model presenter + GPU post-process chain (synthetic 1080p frame → upscale → present) with per-frame GPU timestamps. Measures 0.19 ms p50 at 4K on the target machine. See [docs/07-bench-log.md](docs/07-bench-log.md).
+- `vendor/chiaki-ng`: the forked protocol core, pinned as a submodule (42 C sources ready to become `brp-session`).
+- Docs: protocol limits, feasibility matrix, architecture, 8-phase roadmap, decision log.
+
+**Not yet:** decode, RTP wiring, PSN OAuth, shell, neural stages.
 
 ---
 
@@ -38,6 +46,17 @@ That split is the whole design of this project:
 - Not DLSS. DLSS needs engine motion vectors and depth buffers. A video stream has neither. The video-domain equivalents are RTX Video Super Resolution, FSR/NIS, and driver-level frame generation.
 - Not affiliated with Sony. No Sony SDK, no leaked keys, clean-room protocol work from the open-source community.
 
+## Build
+
+```powershell
+.\scripts\build.ps1          # configure + build (Release, VS 2022 generator)
+.\scripts\bench.ps1          # resolution x upscaler matrix -> build\bench.csv
+python tools\imgstat.py build\shots\m0.bmp
+```
+
+Keys in `brp-bench`: `1` bilinear, `2` Catmull-Rom, `3` Catmull-Rom + sharpen, `ESC` quit.
+Useful flags: `--width/--height` output size, `--src-width/--src-height` source size, `--frames N` run-then-exit, `--limit FPS`, `--shot path.bmp`.
+
 ## Docs
 
 | Doc | Contents |
@@ -47,6 +66,8 @@ That split is the whole design of this project:
 | [docs/03-feasibility.md](docs/03-feasibility.md) | Your feature list, one line at a time: possible / possible-with-caveats / not-as-described + workaround |
 | [docs/04-architecture.md](docs/04-architecture.md) | Proposed stack, module map, post-process graph, decoder matrix, latency budget |
 | [docs/05-roadmap.md](docs/05-roadmap.md) | Phased plan with acceptance criteria and measurable targets |
+| [docs/06-decisions.md](docs/06-decisions.md) | ADR log: fork, neural stages, network defaults, UI, measurement policy |
+| [docs/07-bench-log.md](docs/07-bench-log.md) | Measured results on the target machine, with interpretation |
 
 ## Legal note
 

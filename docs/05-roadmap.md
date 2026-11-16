@@ -18,9 +18,11 @@ Each phase has a **measurable** exit criterion. No phase is "done" because it co
 Build chiaki-ng on Windows, stream a PS5, and measure before changing anything.
 
 **Deliverables**
-- Reproducible build (CMake + vcpkg manifest pinned).
-- A measurement harness: per-frame decode time, network jitter, dropped frames, actual received bitrate, glass-to-glass estimate.
-- Baseline numbers at 1080p60 H.264 and HEVC, 15/30/50 Mbps, HDR on/off.
+- [x] Reproducible build (`scripts/build.ps1`, VS 2022 generator, pinned submodule)
+- [x] Measurement harness for the presentation/post-process path (`brp-bench`) — see [07-bench-log.md](07-bench-log.md)
+- [x] Image metrics tool for detail/clipping regression (`tools/imgstat.py`)
+- [ ] HEVC 1080p60 decode added to the harness loop (NVDEC)
+- [ ] Baseline numbers for the official app vs chiaki-ng vs our build, same network, same scene
 
 **Exit criterion:** a table of numbers for the official app vs chiaki-ng vs our build on the same network, same game, same scene. If we can't measure it, we can't claim it.
 
