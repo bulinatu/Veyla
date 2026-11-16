@@ -49,6 +49,7 @@ enum WidgetId {
     W_MicLed,
     W_Probe = 40,
     W_Pair = 41,
+    W_Bitrate = 43,
     W_PairHome = 42,
 };
 
@@ -433,6 +434,13 @@ void App::ApplyDropdown(int id, int index) {
                 session::Save(profile_, session::DefaultProfilePath(), save_detail);
             }
             break;
+            break;
+        }
+        case W_Bitrate: {
+            static const int kBitrates[] = {20000, 35000, 50000, 75000, 100000};
+            profile_.bitrate_kbps = kBitrates[std::clamp(index, 0, 4)];
+            std::string save_detail;
+            session::Save(profile_, session::DefaultProfilePath(), save_detail);
             break;
         }
         case W_InputSource:
@@ -1167,6 +1175,20 @@ void App::RenderSettings(double t) {
                         Widen(std::to_string(profile_.bitrate_kbps / 1000) + " Mbps · " +
                               profile_.codec + (profile_.hdr ? " · HDR" : " · SDR")),
                         y);
+            y += kRowH;
+
+            {
+                int bitrate_index = 2;
+                const int rates[] = {20000, 35000, 50000, 75000, 100000};
+                for (int i = 0; i < 5; ++i) {
+                    if (rates[i] == profile_.bitrate_kbps) {
+                        bitrate_index = i;
+                    }
+                }
+                DrawDropdown(L"Bitrate",
+                             {L"20 Mbps", L"35 Mbps", L"50 Mbps", L"75 Mbps", L"100 Mbps"},
+                             bitrate_index, y, W_Bitrate);
+            }
             y += kRowH;
 
             DrawPinRow(y);
