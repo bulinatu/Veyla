@@ -211,8 +211,12 @@ if(EXISTS "${FFMPEG_ROOT}/lib/avcodec.lib")
     target_link_libraries(decode_probe PRIVATE brp_decode)
     add_executable(scale_probe tools/scale_probe/main.cpp)
     target_link_libraries(scale_probe PRIVATE brp_decode)
+    add_executable(mv_dump tools/mv_dump/main.cpp)
+    target_link_libraries(mv_dump PRIVATE brp_decode)
     add_custom_command(TARGET decode_probe POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${FFMPEG_ROOT}/bin" "$<TARGET_FILE_DIR:decode_probe>")
+    add_custom_command(TARGET mv_dump POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${FFMPEG_ROOT}/bin" "$<TARGET_FILE_DIR:mv_dump>")
 endif()
 
 # --- chiaki streaming dependencies (nanopb runtime, jerasure, gf-complete) ---

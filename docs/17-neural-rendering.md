@@ -140,19 +140,26 @@ the synthetic pattern). Magpie post-processes the raw result with
 yet, and a real video stream has no motion vectors or depth buffer to feed the
 model.
 
-Probe results on this machine (2026-11-16, animated input at 60 Hz):
+Probe results on this machine (2026-11-16):
 
-- **Zero motion + zero depth, or the MVec/Depth parameters omitted:** `EvaluateFeature`
-  returns success but the output texture is not written (it keeps its previous
-  contents, e.g. the magenta prefill). Presets 0/1, styles 0/1 behave this way.
-- **Style 2 with zero guides:** writes only partially / with artifacts; not usable.
-- **Non-zero synthetic guides (0.5 px motion, depth 0.5):** writes a full frame that
-  differs from the input, but shows striping/chroma artifacts because the guides are
-  fake. This proves the model expects genuine motion vectors.
+- **HEVC (the PS5 stream codec) does not export motion vectors in this FFmpeg
+  build.** Setting `AV_CODEC_EXPORT_DATA_MVS` + `AV_CODEC_FLAG2_EXPORT_MVS`
+  produces only SEI side data. H.264 does export `AV_FRAME_DATA_MOTION_VECTORS`
+  (verified with `tools/mv_dump` on a 1080p clip: 8–9k vectors/frame).
+- **With real H.264 motion vectors:** preset 0 / style 0 writes an image that is
+  byte-identical to the input (pass-through, alpha all 255); presets 1/2 and
+  styles 1/2 do not write the output at all (it keeps its previous contents).
+  Zero/omitted guides behave the same. Non-zero synthetic guides make it write
+  an artifacted frame.
+- The raw output is not written to alpha (alpha 255), so there is no hidden
+  residual channel in this configuration.
 
-Conclusion: DLSSNR on a decoded 2D video stream needs real motion vectors (game
-motion, optical flow, or HEVC block motion converted to screen space) plus the
-residual composite. VSR remains the shipped neural path.
+Conclusion: the single-pass feature 18 path we can drive is a pass-through; the
+enhancement in Magpie comes from its multi-pass (`pass2_`/`pass3_`) and colour/
+detail composite shaders, which are not ported. DLSSNR is therefore **not
+integrated**. VSR remains the shipped neural path. `tools/mv_dump` and the
+`files` mode of `tools/dlssnr_probe` keep the real-MV experiment reproducible for
+the next attempt.
 
 Realistic next steps:
 

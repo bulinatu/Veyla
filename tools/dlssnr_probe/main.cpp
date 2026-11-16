@@ -27,6 +27,7 @@
 
 #include <nvsdk_ngx.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -627,6 +628,41 @@ int main(int argc, char** argv) {
     const float zero_depth_pattern = 0.0f;
     const int guide_mode = argc > 5 ? std::atoi(argv[5]) : 3;
     const bool animate = argc > 6 && std::atoi(argv[6]) != 0;
+    std::vector<std::vector<uint8_t>> file_frames;
+    std::vector<std::vector<uint8_t>> file_motion;
+    if (argc > 7) {
+        namespace fs = std::filesystem;
+        for (int index = 1; index < 16; ++index) {
+            char name[32];
+            std::snprintf(name, sizeof(name), "frame%02d", index);
+            const fs::path rgba_path = fs::path(argv[7]) / (std::string(name) + ".rgba");
+            const fs::path mv_path = fs::path(argv[7]) / (std::string(name) + ".mv");
+            const size_t expected = static_cast<size_t>(kWidth) * kHeight * 4;
+            if (!fs::exists(rgba_path) || !fs::exists(mv_path)) {
+                break;
+            }
+            std::vector<uint8_t> rgba(expected);
+            std::vector<uint8_t> motion(expected);
+            std::FILE* f = nullptr;
+            if (fopen_s(&f, rgba_path.string().c_str(), "rb") == 0 && f) {
+                const size_t got = fread(rgba.data(), 1, expected, f);
+                fclose(f);
+                if (got != expected) break;
+            } else {
+                break;
+            }
+            if (fopen_s(&f, mv_path.string().c_str(), "rb") == 0 && f) {
+                const size_t got = fread(motion.data(), 1, expected, f);
+                fclose(f);
+                if (got != expected) break;
+            } else {
+                break;
+            }
+            file_frames.push_back(std::move(rgba));
+            file_motion.push_back(std::move(motion));
+        }
+        std::printf("loaded %zu file frames from %s\n", file_frames.size(), argv[7]);
+    }
     const bool guide_motion = (guide_mode & 1) != 0;
     const bool guide_depth = (guide_mode & 2) != 0;
     const auto frame_a = MakeFrame(kWidth, kHeight, 0);
@@ -699,9 +735,17 @@ int main(int argc, char** argv) {
         list->ResourceBarrier(1, &b);
     };
 
-    constexpr int kRuns = 4;
+    const int kRuns = file_frames.empty() ? 4 : static_cast<int>(file_frames.size());
     for (int run = 0; run < kRuns; ++run) {
-        if (animate) {
+        if (!file_frames.empty()) {
+            devices.context->UpdateSubresource(input11.Get(), 0, nullptr,
+                                               file_frames[run].data(), kWidth * 4, 0);
+            devices.context->UpdateSubresource(motion11.Get(), 0, nullptr,
+                                               file_motion[run].data(), kWidth * 4, 0);
+            devices.context4->Signal(fence11.Get(), 100 + static_cast<UINT64>(run));
+            devices.context->Flush();
+            queue->Wait(fence12.Get(), 100 + static_cast<UINT64>(run));
+        } else if (animate) {
             const auto& pixels = (run & 1) ? frame_b : frame_a;
             devices.context->UpdateSubresource(input11.Get(), 0, nullptr, pixels.data(),
                                                kWidth * 4, 0);
@@ -750,6 +794,40 @@ int main(int argc, char** argv) {
             "build/shots/dlssnr-input.bmp");
     SaveBmp(devices.d11.Get(), devices.context.Get(), output11.Get(),
             "build/shots/dlssnr-output.bmp");
+    {
+        // Inspect the alpha channel: some DLSSNR modes carry a residual/mask
+        // there instead of changing RGB.
+        D3D11_TEXTURE2D_DESC td{};
+        output11->GetDesc(&td);
+        td.Usage = D3D11_USAGE_STAGING;
+        td.BindFlags = 0;
+        td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        td.MiscFlags = 0;
+        ComPtr<ID3D11Texture2D> staging;
+        if (SUCCEEDED(devices.d11->CreateTexture2D(&td, nullptr, &staging))) {
+            devices.context->CopyResource(staging.Get(), output11.Get());
+            D3D11_MAPPED_SUBRESOURCE mapped{};
+            if (SUCCEEDED(devices.context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+                int amin = 255, amax = 0;
+                long long asum = 0;
+                long long count = 0;
+                for (int y = 0; y < static_cast<int>(td.Height); y += 4) {
+                    const auto* row = static_cast<const uint8_t*>(mapped.pData) +
+                                      static_cast<size_t>(y) * mapped.RowPitch;
+                    for (int x = 0; x < static_cast<int>(td.Width); x += 4) {
+                        const int a = row[x * 4 + 3];
+                        if (a < amin) amin = a;
+                        if (a > amax) amax = a;
+                        asum += a;
+                        ++count;
+                    }
+                }
+                std::printf("output alpha: min %d max %d avg %.1f\n", amin, amax,
+                            count ? static_cast<double>(asum) / count : 0.0);
+                devices.context->Unmap(staging.Get(), 0);
+            }
+        }
+    }
     std::printf("wrote build/shots/dlssnr-input.bmp and dlssnr-output.bmp\n");
 
     if (feature && snippet_release_feature) {
