@@ -153,3 +153,15 @@ Key chiaki APIs: `chiaki_session_init`, `chiaki_session_set_video_sample_cb`,
 ```
 
 Pipeline numbers are in `docs/07-bench-log.md`.
+
+---
+
+## Latest increments (after the block above)
+
+- Fullscreen: F11 toggles Presenter::SetFullscreen, D2D target released first.
+- media::Decoder now uses **D3D11VA** (hw decode + system transfer): 4.83 ms/frame
+  for 1080p HEVC 10-bit (sample: 	hird_party/sample_hevc.mp4, gitignored).
+- Upscaler mode 3 = **Lanczos3 + clamped contrast-adaptive sharpening** (RCAS-style).
+  Measured at 1440p: crushed blacks 10.1% (mode 2 unsharp) -> 3.7% (mode 3).
+  UI dropdown has 4 options; SetUpscaleMode clamps 0..3; keys 1..4.
+- FFmpeg DLL copy is a POST_BUILD rule on decode_probe.
