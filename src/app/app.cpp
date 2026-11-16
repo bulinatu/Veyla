@@ -268,7 +268,7 @@ void App::DispatchClick() {
                 } else if (it->index == W_Rumble) {
                     TriggerRumble();
                 } else if (it->index == W_Probe) {
-                    StartProbe();
+                    ConnectConsole();
                 } else if (it->index == W_PairHome) {
                     screen_ = Screen::Settings;
                     tab_ = Tab::Connection;
@@ -466,6 +466,20 @@ void App::TriggerRumble() {
     output_dirty_ = true;
 }
 
+void App::ConnectConsole() {
+    if (!profile_.has_console() || profile_.needs_pairing()) {
+        StartProbe();
+        return;
+    }
+    std::string error;
+    if (streaming_.Start(profile_, 1920, 1080, profile_.bitrate_kbps, error)) {
+        stream_active_ = true;
+        screen_ = Screen::Stream;
+        std::fprintf(stderr, "[app] streaming started\n");
+    } else {
+        std::fprintf(stderr, "[app] start failed: %s\n", error.c_str());
+    }
+}
 void App::StartProbe() {
     probe_.Start(profile_.host, 9295);
 }
@@ -580,6 +594,17 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
 
     if (pointer_.clicked) {
         DispatchClick();
+    }
+
+    if (stream_active_) {
+        streaming_.SendController(pad_.state());
+        if (streaming_.TakeFrame(stream_frame_)) {
+            presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
+                                       stream_frame_.height);
+        }
+        if (streaming_.state() == session::StreamState::Failed) {
+            stream_active_ = false;
+        }
     }
 
     if (pad_.is_sony() &&

@@ -307,13 +307,32 @@ void Presenter::CollectTiming() {
     }
 }
 
+bool Presenter::SetSourceFrame(const uint8_t* rgba, int width, int height) {
+    if (!rgba || width <= 0 || height <= 0) {
+        return false;
+    }
+    if (!source_ || cfg_.source_width != width || cfg_.source_height != height) {
+        cfg_.source_width = width;
+        cfg_.source_height = height;
+        source_.Reset();
+        source_srv_.Reset();
+        source_uav_.Reset();
+        if (!CreateSourceTexture()) {
+            return false;
+        }
+    }
+    context_->UpdateSubresource(source_.Get(), 0, nullptr, rgba, static_cast<UINT>(width) * 4, 0);
+    external_source_ = true;
+    return true;
+}
 void Presenter::Render(double time_seconds) {
     const auto cpu_start = std::chrono::steady_clock::now();
     BeginTiming();
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
 
-    // 1. Synthetic source frame (stands in for hw decode output).
+    // 1. Source frame: decoded stream texture if present, else synthetic.
+    if (!external_source_) {
     CsParams cs{};
     cs.time = static_cast<float>(time_seconds);
     if (SUCCEEDED(context_->Map(cs_cb_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -332,6 +351,7 @@ void Presenter::Render(double time_seconds) {
 
     ID3D11UnorderedAccessView* no_uavs[] = {nullptr};
     context_->CSSetUnorderedAccessViews(0, 1, no_uavs, nullptr);
+    }
 
     // 2. Upscale + optional sharpen into the backbuffer.
     PsParams ps{};

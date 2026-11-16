@@ -12,6 +12,7 @@
 #include "net/reachability.h"
 #include "platform/gamepad.h"
 #include "session/pairing.h"
+#include "session/streaming.h"
 #include "session/profile.h"
 #include "ui/ui_renderer.h"
 
@@ -100,6 +101,7 @@ private:
     void ApplyControllerOutput(bool force);
     void TriggerRumble();
     void StartProbe();
+    void ConnectConsole();
 
     Win32Window* window_ = nullptr;
     Presenter presenter_;
@@ -153,6 +155,10 @@ private:
 
     // connection
     net::Reachability probe_;
+    session::Streaming streaming_;
+    media::DecodedFrame stream_frame_;
+    bool stream_active_ = false;
+
     session::Pairing pairing_;
     std::string pin_;
     bool pin_focus_ = false;

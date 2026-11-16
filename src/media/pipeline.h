@@ -58,6 +58,9 @@ public:
     ID3D11Texture2D* backbuffer() const { return backbuffer_.Get(); }
     ID3D11RenderTargetView* rtv() const { return rtv_.Get(); }
 
+    // Uploads a decoded RGBA frame as the source instead of the synthetic one.
+    bool SetSourceFrame(const uint8_t* rgba, int width, int height);
+
     void Clear(const float rgba[4]);
     void PresentNow(bool vsync);
 
@@ -97,6 +100,7 @@ private:
     PresenterConfig cfg_{};
     bool tearing_ = false;
     bool fullscreen_ = false;
+    bool external_source_ = false;
 
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;

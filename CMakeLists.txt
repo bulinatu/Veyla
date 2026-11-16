@@ -44,8 +44,9 @@ add_executable(brp
     src/audio/audio_engine.cpp
     src/net/reachability.cpp
     src/session/discovery.cpp
+    src/session/streaming.cpp
 )
-target_link_libraries(brp PRIVATE brp_ui brp_session hid setupapi xinput ole32 avrt uuid ws2_32)
+target_link_libraries(brp PRIVATE brp_ui brp_decode brp_session hid setupapi xinput ole32 avrt uuid ws2_32)
 
 # Diagnostic only: isolates D2D/D3D11 interop problems from app code.
 add_executable(d2d_probe tools/d2d_probe/main.cpp)
@@ -115,7 +116,13 @@ add_library(brp_session STATIC
     ${CHIAKI_ROOT}/lib/src/launchspec.c
     ${CHIAKI_ROOT}/lib/src/discovery.c
     ${CHIAKI_ROOT}/lib/src/discoveryservice.c
-    ${CMAKE_SOURCE_DIR}/build/gen/takion.pb.c    src/session/rp_strings.c
+    ${CMAKE_SOURCE_DIR}/build/gen/takion.pb.c    ${CHIAKI_ROOT}/lib/src/feedback.c
+    ${CHIAKI_ROOT}/lib/src/feedbacksender.c
+    ${CHIAKI_ROOT}/lib/src/controller.c
+    ${CHIAKI_ROOT}/lib/src/orientation.c
+    ${CHIAKI_ROOT}/third-party/nanopb/pb_encode.c
+    ${CHIAKI_ROOT}/third-party/nanopb/pb_decode.c
+    ${CHIAKI_ROOT}/third-party/nanopb/pb_common.c    src/session/rp_strings.c
     src/session/aia_stub.c
     src/session/pairing.cpp
 )
@@ -183,3 +190,5 @@ target_include_directories(brp_session PUBLIC
 file(GLOB BRP_GF_SRC "${CHIAKI_ROOT}/third-party/gf-complete/src/*.c")
 file(GLOB BRP_JER_SRC "${CHIAKI_ROOT}/third-party/jerasure/src/*.c")
 target_sources(brp_session PRIVATE ${BRP_GF_SRC} ${BRP_JER_SRC})
+target_sources(brp_session PRIVATE "${CMAKE_SOURCE_DIR}/src/session/holepunch_stub.c")
+target_sources(brp_session PRIVATE "${CHIAKI_ROOT}/lib/src/fec.c")
