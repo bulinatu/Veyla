@@ -277,7 +277,27 @@ bool Decoder::Convert(const void* frame_ptr, DecodedFrame& out) {
         return false;
     }
 
-    uint8_t* dst[4] = {out.rgba.data(), nullptr, nullptr, nullptr};
+        // Explicit colour handling: the stream is limited-range BT.709 (BT.2020 for
+    // HDR). Without this swscale assumes BT.601 limited and colours wash out.
+    {
+        const int* src_coeffs = sws_getCoefficients(SWS_CS_ITU709);
+        switch (source->colorspace) {
+            case AVCOL_SPC_BT2020_NCL:
+            case AVCOL_SPC_BT2020_CL:
+                src_coeffs = sws_getCoefficients(SWS_CS_BT2020);
+                break;
+            case AVCOL_SPC_SMPTE170M:
+            case AVCOL_SPC_BT470BG:
+                src_coeffs = sws_getCoefficients(SWS_CS_ITU601);
+                break;
+            default:
+                break;
+        }
+        const int src_range = source->color_range == AVCOL_RANGE_JPEG ? 1 : 0;
+        sws_setColorspaceDetails(Sws(scaler_), src_coeffs, src_range,
+                                 sws_getCoefficients(SWS_CS_DEFAULT), 1, 0, 1 << 16, 1 << 16);
+    }
+uint8_t* dst[4] = {out.rgba.data(), nullptr, nullptr, nullptr};
     int dst_linesize[4] = {source->width * 4, 0, 0, 0};
     sws_scale(Sws(scaler_), source->data, source->linesize, 0, source->height, dst, dst_linesize);
 
