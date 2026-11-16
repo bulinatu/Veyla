@@ -105,6 +105,7 @@ private:
     // adaptive jitter buffer
     std::atomic<int> buffer_target_{1};
     std::atomic<int> buffer_drops_{0};
+    bool primed_ = false;
     int last_queue_ = 0;
     double last_drought_ = -100.0;
     double last_recovery_ = 0.0;

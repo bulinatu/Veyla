@@ -211,6 +211,7 @@ private:
     session::Streaming streaming_;
     media::DecodedFrame stream_frame_;
     bool stream_active_ = false;
+    session::Streaming::StreamStats stream_stats_{};
 
     // frame generation (NVIDIA VFG)
     media::NvVfx nv_vfx_;

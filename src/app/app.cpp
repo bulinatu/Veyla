@@ -1471,6 +1471,7 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     if (stream_active_ && clock_ - decode_probe_at >= 1.0) {
         // Consume every second so decode_ms_max is a true per-second peak.
         last_stats = streaming_.ConsumeStats();
+        stream_stats_ = last_stats;
         decode_probe_at = clock_;
         if (decode_probe) {
             const double interval_fps =
@@ -2335,6 +2336,18 @@ void App::RenderStream(double t) {
                 ui_.Text(text.c_str(), {dec.left + 12.0f, dec.top, dec.right - 12.0f, dec.bottom},
                          11.5f, th::Rgba(th::kInk, 0.9f));
             }
+
+            // Live pacing telemetry: a rising buffer means jitter, lost > 0
+            // means network/FEC, drops are skipped stale frames.
+            wchar_t net[160];
+            swprintf_s(net, L"buf %d  -  drops %d  -  lost %d  -  %.0f kbps",
+                       stream_stats_.buffer, stream_stats_.buffer_drops, stream_stats_.lost,
+                       stream_stats_.kbps);
+            const D2D1_RECT_F net_chip{24.0f, 210.0f, 24.0f + 360.0f, 210.0f + 30.0f};
+            ui_.FillRounded(net_chip, 9.0f, th::Rgba(0x000000, 0.50f));
+            ui_.Text(net, {net_chip.left + 12.0f, net_chip.top, net_chip.right - 12.0f,
+                           net_chip.bottom},
+                     11.5f, th::Rgba(th::kInk, 0.9f));
         }
 
         ui_.FillCircle(w - 40.0f, 44.0f, 5.0f, th::Rgba(th::kOnline));

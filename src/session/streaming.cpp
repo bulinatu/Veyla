@@ -198,6 +198,7 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
     audio_frames_.store(0);
     buffer_target_.store(1);
     buffer_drops_.store(0);
+    primed_ = false;
     last_drought_ = -100.0;
     last_recovery_ = 0.0;
     last_queue_ = 0;
@@ -488,11 +489,13 @@ bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer) {
     const int max_buffer = std::clamp(buffer, 0, 6);
 
     if (frames_.empty()) {
+        primed_ = false;
         // An empty queue while streaming means the producer is behind. Add one
-        // frame of slack (up to the user's maximum), but only once per 500 ms
-        // so a single bad moment does not jump straight to the ceiling.
+        // frame of slack only when the previous drought was long ago (jitter),
+        // not when the source is persistently slower than the display (raising
+        // would just add repeats). At most one step per drought.
         if (state_.load() == StreamState::Streaming && max_buffer > 0 &&
-            seconds - last_drought_ >= 0.5) {
+            seconds - last_drought_ >= 3.0) {
             const int target = buffer_target_.load();
             if (target < max_buffer) {
                 buffer_target_.store(target + 1);
@@ -516,17 +519,21 @@ bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer) {
                            ? 0
                            : std::clamp(buffer_target_.load(), 1, max_buffer);
     const int wanted = target + 1;
+    // Prime the buffer once, then present every tick. Waiting on every tick
+    // would halve the frame rate whenever the producer is slightly slower than
+    // the display; waiting only while unprimed keeps playback at the producer
+    // rate and rebuilds the buffer after a real dropout.
+    if (!primed_) {
+        if (static_cast<int>(frames_.size()) < wanted) {
+            return false;
+        }
+        primed_ = true;
+    }
     // Bound latency: skip at most one extra frame per presentation tick. This
     // avoids both an unbounded queue and a sudden multi-frame jump.
     if (static_cast<int>(frames_.size()) > wanted) {
         frames_.pop_front();
         buffer_drops_.fetch_add(1);
-    }
-    // Keep `target` frames buffered after this pop. Waiting here (instead of
-    // presenting immediately) is what actually builds the jitter buffer; the
-    // previous frame stays on screen for the one tick it takes to fill.
-    if (static_cast<int>(frames_.size()) < wanted) {
-        return false;
     }
 
     out = std::move(frames_.front());
