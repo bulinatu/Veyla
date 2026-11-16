@@ -295,6 +295,13 @@ void App::HandleKey(int vk) {
         capture_requested_ = true;
         return;
     }
+    if (vk == VK_F11) {
+        const bool target = !presenter_.is_fullscreen();
+        ui_.ReleaseTarget();
+        presenter_.SetFullscreen(target);
+        ui_.BindSwapchain(presenter_.backbuffer());
+        return;
+    }
 
     switch (screen_) {
         case Screen::Home:

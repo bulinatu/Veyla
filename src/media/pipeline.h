@@ -61,6 +61,10 @@ public:
     void Clear(const float rgba[4]);
     void PresentNow(bool vsync);
 
+    // Exclusive/borderless fullscreen toggle for exact output resolution.
+    bool SetFullscreen(bool enabled);
+    bool is_fullscreen() const { return fullscreen_; }
+
     // Copies the current backbuffer to a 32-bit BMP. Must be called between
     // Render() and Present(): the backbuffer is only readable there.
     bool CaptureToBmp(const char* path);
@@ -92,6 +96,7 @@ private:
     HWND hwnd_ = nullptr;
     PresenterConfig cfg_{};
     bool tearing_ = false;
+    bool fullscreen_ = false;
 
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;

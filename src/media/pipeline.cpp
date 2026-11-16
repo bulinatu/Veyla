@@ -394,6 +394,28 @@ void Presenter::Present() {
     PresentNow(cfg_.vsync);
 }
 
+bool Presenter::SetFullscreen(bool enabled) {
+    if (fullscreen_ == enabled) {
+        return true;
+    }
+    ID3D11RenderTargetView* null_rtv = nullptr;
+    context_->OMSetRenderTargets(1, &null_rtv, nullptr);
+    rtv_.Reset();
+    backbuffer_.Reset();
+
+    if (FAILED(swapchain_->SetFullscreenState(enabled ? TRUE : FALSE, nullptr))) {
+        return false;
+    }
+    fullscreen_ = enabled;
+
+    DXGI_SWAP_CHAIN_DESC1 desc{};
+    if (SUCCEEDED(swapchain_->GetDesc1(&desc))) {
+        cfg_.output_width = static_cast<int>(desc.Width);
+        cfg_.output_height = static_cast<int>(desc.Height);
+    }
+    return CreateBackbufferViews();
+}
+
 bool Presenter::CaptureToBmp(const char* path) {
     if (!backbuffer_) {
         return false;
