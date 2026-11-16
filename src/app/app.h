@@ -11,6 +11,7 @@
 #include "media/pipeline.h"
 #include "net/reachability.h"
 #include "platform/gamepad.h"
+#include "session/pairing.h"
 #include "session/profile.h"
 #include "ui/ui_renderer.h"
 
@@ -55,6 +56,7 @@ private:
         Dropdown,
         DropdownItem,
         Button,
+        PinField,
     };
 
     struct HitRegion {
@@ -85,6 +87,7 @@ private:
     void DrawDropdown(const wchar_t* label, const std::vector<std::wstring>& options, int selected,
                       float y, int id, bool enabled = true);
     void DrawButton(const wchar_t* label, const D2D1_RECT_F& rect, int id, bool primary);
+    void DrawPinRow(float y);
     void DrawPopup();
 
     void AddHit(Hit hit, int index, const D2D1_RECT_F& rect);
@@ -150,6 +153,9 @@ private:
 
     // connection
     net::Reachability probe_;
+    session::Pairing pairing_;
+    std::string pin_;
+    bool pin_focus_ = false;
 };
 
 }  // namespace brp

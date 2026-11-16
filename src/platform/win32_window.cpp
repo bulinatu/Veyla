@@ -77,6 +77,12 @@ int Win32Window::ConsumeKey() {
     return k;
 }
 
+int Win32Window::ConsumeChar() {
+    int c = last_char_;
+    last_char_ = 0;
+    return c;
+}
+
 bool Win32Window::ConsumeClick() {
     const bool clicked = mouse_.clicked;
     mouse_.clicked = false;
@@ -131,6 +137,10 @@ LRESULT Win32Window::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
 
         case WM_KEYDOWN:
             last_key_ = static_cast<int>(wparam);
+            return 0;
+
+        case WM_CHAR:
+            last_char_ = static_cast<int>(wparam);
             return 0;
 
         case WM_MOUSEMOVE: {

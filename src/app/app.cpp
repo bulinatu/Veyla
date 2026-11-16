@@ -47,6 +47,7 @@ enum WidgetId {
     W_PlayerLeds,
     W_MicLed,
     W_Probe = 40,
+    W_Pair = 41,
 };
 
 constexpr float kContentX = 344.0f;
@@ -196,10 +197,12 @@ void App::AddHit(Hit hit, int index, const D2D1_RECT_F& rect) {
 }
 
 void App::DispatchClick() {
+    std::fprintf(stderr, "[click] %d,%d\n", pointer_.x, pointer_.y);
     for (auto it = hits_.rbegin(); it != hits_.rend(); ++it) {
         if (!Contains(it->rect, pointer_.x, pointer_.y)) {
             continue;
         }
+        std::fprintf(stderr, "[hit] %d %d\n", static_cast<int>(it->hit), it->index);
 
         if (open_dropdown_ >= 0 && it->hit != Hit::DropdownItem) {
             if (it->hit == Hit::Dropdown) {
@@ -208,6 +211,10 @@ void App::DispatchClick() {
                 open_dropdown_ = -1;
             }
             return;
+        }
+
+        if (it->hit != Hit::PinField) {
+            pin_focus_ = false;
         }
 
         switch (it->hit) {
@@ -250,7 +257,14 @@ void App::DispatchClick() {
                     TriggerRumble();
                 } else if (it->index == W_Probe) {
                     StartProbe();
+                } else if (it->index == W_Pair) {
+                    if (pin_.size() == 8) {
+                        pairing_.Start(profile_, static_cast<uint32_t>(std::stoul(pin_)));
+                    }
                 }
+                break;
+            case Hit::PinField:
+                pin_focus_ = true;
                 break;
             case Hit::None:
                 break;
@@ -258,6 +272,7 @@ void App::DispatchClick() {
         return;
     }
     open_dropdown_ = -1;
+    pin_focus_ = false;
 }
 
 void App::HandleKey(int vk) {
@@ -285,6 +300,8 @@ void App::HandleKey(int vk) {
             if (vk == VK_ESCAPE) {
                 if (open_dropdown_ >= 0) {
                     open_dropdown_ = -1;
+                } else if (pin_focus_) {
+                    pin_focus_ = false;
                 } else {
                     screen_ = Screen::Home;
                 }
@@ -482,6 +499,29 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     pad_.Poll();
     probe_.Poll();
     HandlePad();
+
+    if (window_) {
+        const int ch = window_->ConsumeChar();
+        if (ch != 0 && pin_focus_) {
+            if (ch >= '0' && ch <= '9' && pin_.size() < 8) {
+                pin_ += static_cast<char>(ch);
+            } else if (ch == 8 && !pin_.empty()) {
+                pin_.pop_back();
+            }
+        }
+    }
+
+    pairing_.Poll();
+    if (pairing_.state() == session::PairState::Success) {
+        session::Credentials credentials;
+        if (pairing_.TakeCredentials(credentials)) {
+            profile_.credentials = credentials;
+            std::string detail;
+            session::Save(profile_, session::DefaultProfilePath(), detail);
+            pin_.clear();
+            pin_focus_ = false;
+        }
+    }
 
     if (pointer_.wheel != 0.0f && screen_ == Screen::Home) {
         const int steps = static_cast<int>(pointer_.wheel);
@@ -744,6 +784,33 @@ void App::DrawButton(const wchar_t* label, const D2D1_RECT_F& rect, int id, bool
              th::Rgba(th::kInk, alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
              DWRITE_TEXT_ALIGNMENT_CENTER);
     AddHit(Hit::Button, id, rect);
+}
+
+void App::DrawPinRow(float y) {
+    const float right = static_cast<float>(window_->width()) - 64.0f;
+    DrawSettingLabel(L"Pairing PIN", y, true);
+
+    const float box = 38.0f;
+    const float gap = 6.0f;
+    const float total = 8.0f * box + 7.0f * gap;
+    float x = right - total;
+
+    for (int i = 0; i < 8; ++i) {
+        const D2D1_RECT_F r{x, y + 10.0f, x + box, y + 54.0f};
+        ui_.FillRounded(r, 8.0f, th::Rgba(0xFFFFFF, pin_focus_ ? 0.10f : 0.06f));
+        ui_.StrokeRounded(r, 8.0f,
+                          pin_focus_ ? th::Rgba(th::kAccent, 0.8f) : th::Rgba(0xFFFFFF, 0.10f),
+                          1.0f);
+        wchar_t glyph[2] = {
+            i < static_cast<int>(pin_.size()) ? static_cast<wchar_t>(pin_[static_cast<size_t>(i)])
+                                              : static_cast<wchar_t>(L'\u00B7'),
+            0};
+        ui_.Text(glyph, {r.left, r.top, r.right, r.bottom}, 18.0f, th::Rgba(th::kInk),
+                 DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
+        x += box + gap;
+    }
+
+    AddHit(Hit::PinField, -1, {right - total, y + 6.0f, right, y + 58.0f});
 }
 
 void App::DrawPopup() {
@@ -1023,15 +1090,25 @@ void App::RenderSettings(double t) {
                         y);
             y += kRowH;
 
-            DrawButton(L"Test reachability", {kContentX, y + 6.0f, kContentX + 240.0f, y + 50.0f},
-                       W_Probe, true);
+            DrawPinRow(y);
             y += kRowH;
 
-            std::wstring detail = Widen(probe_.detail());
-            if (detail.empty()) {
-                detail = L"Checks whether something answers on the control port (9295).";
+            DrawButton(L"Test reachability", {kContentX, y + 6.0f, kContentX + 220.0f, y + 50.0f},
+                       W_Probe, true);
+            DrawButton(pairing_.state() == session::PairState::Running ? L"Pairing..." : L"Pair",
+                       {kContentX + 240.0f, y + 6.0f, kContentX + 400.0f, y + 50.0f}, W_Pair, true);
+            y += kRowH;
+
+            std::wstring detail;
+            if (pairing_.state() != session::PairState::Idle) {
+                detail = Widen(pairing_.message());
+            } else if (!probe_.detail().empty()) {
+                detail = Widen(probe_.detail());
+            } else {
+                detail = L"Click the PIN boxes and type the 8-digit code from the console "
+                         L"(Settings > System > Remote Play > Link Device).";
             }
-            ui_.Text(detail.c_str(), {kContentX, y, w - 64.0f, y + 44.0f}, 12.0f,
+            ui_.Text(detail.c_str(), {kContentX, y, w - 64.0f, y + 60.0f}, 12.0f,
                      th::Rgba(th::kMuted));
             break;
         }

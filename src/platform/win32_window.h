@@ -37,6 +37,9 @@ public:
     // Last WM_KEYDOWN virtual-key code, or 0. Consumes the value.
     int ConsumeKey();
 
+    // Last WM_CHAR character, or 0. Consumes the value.
+    int ConsumeChar();
+
     const MouseState& mouse() const { return mouse_; }
     bool ConsumeClick();
     float ConsumeWheel();
@@ -54,6 +57,7 @@ private:
     bool quit_ = false;
     bool resized_ = false;
     int last_key_ = 0;
+    int last_char_ = 0;
     MouseState mouse_{};
     bool hand_cursor_ = false;
     bool tracking_leave_ = false;
