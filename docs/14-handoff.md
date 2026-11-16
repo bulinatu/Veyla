@@ -165,3 +165,17 @@ Pipeline numbers are in `docs/07-bench-log.md`.
   Measured at 1440p: crushed blacks 10.1% (mode 2 unsharp) -> 3.7% (mode 3).
   UI dropdown has 4 options; SetUpscaleMode clamps 0..3; keys 1..4.
 - FFmpeg DLL copy is a POST_BUILD rule on decode_probe.
+
+---
+
+## AUDIO LIVE
+
+Opus sink -> FFmpeg decoder -> swresample 48k float stereo -> audio::Engine::Push.
+Verified: audio header 2ch/48kHz received during a live session; video 1080p60 at ~60 fps.
+
+## Next (in order)
+1. YUV->RGB in GPU (FP16) + BT.709/BT.2020 + PQ for #3/#11; swapchain R10G10B10A2 + HDR metadata.
+2. FSR1 (EASU+RCAS) or NIS as upscale modes 4/5.
+3. Frame generation (RIFE/TensorRT) opt-in, latency shown.
+4. DualSense haptic audio (USB audio-haptic path).
+
