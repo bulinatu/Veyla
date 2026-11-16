@@ -153,6 +153,26 @@ generated frame) makes 4x/240 Hz unrealistic; 3x/180 Hz would be borderline.
 
 ---
 
+## Pull pacing (smoothness)
+
+With VFG the UI presents at 120 Hz but the console produces 60 source frames per
+second. The app now asks for a new source frame only when the generated queue has
+two or fewer entries, instead of on every 120 Hz tick. This fills the generated
+queue instead of draining the decoder and roughly doubles generation throughput.
+
+`vfg_pace_probe` simulates the producer/consumer cadence on synthetic frames:
+
+```powershell
+.\scripts\build.ps1 -Target vfg_pace_probe
+.\build\Release\vfg_pace_probe.exe third_party\nvidia-vfx\runtime 10
+# ticks 1200, presented 1199 (119.9/s), generated 599 (59.9/s), avg 9.20 ms
+```
+
+The previous cadence generated ~31 frames/s (measured live); 60/s is the correct
+2x cadence and visibly smoother in motion.
+
+---
+
 ## Verification
 
 ```powershell

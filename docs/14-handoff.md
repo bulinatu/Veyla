@@ -260,9 +260,14 @@ next performance step, not a decoder selection issue.
 
 - swscale now receives explicit BT.709/BT.2020 + limited-range info (fixes washed-out image).
 - Chroma upsampling is selectable per session (`Settings -> Display -> Chroma
-  upsampling`): bilinear (fast), bicubic (default) or Lanczos, all with
-  `SWS_FULL_CHR_H_INT | SWS_ACCURATE_RND` so chroma is filtered at full resolution
-  rather than nearest/bilinear. Applies to the YUV->RGB stage in `decoder.cpp`.
+  upsampling`): bilinear (fast), **bicubic (default)** or Lanczos+accurate.
+  Measured at 1080p NV12 -> RGBA on this machine:
+  bilinear 2.6 ms, **bicubic 2.1 ms**, lanczos+accurate 5.6 ms,
+  bicubic + `SWS_FULL_CHR_H_INT` **10.0 ms**. `FULL_CHR_H_INT` was removed: it
+  ran synchronously on chiaki's video receive thread and pushed high-motion
+  frames past the 16.7 ms budget, which drained the socket and caused dropped
+  frames when moving the camera. Plain bicubic is both faster and sharper than
+  bilinear; the difference to full-chroma is subtle on video.
 - Source transfer is inspected (`AVFrame.color_trc == SMPTE2084`). A PQ/BT.2020
   stream is passed through untouched on an HDR10 swapchain and tone-mapped
   (PQ decode -> 100 nits SDR) on an SDR swapchain. SDR into an HDR container still
@@ -306,6 +311,32 @@ with NVIDIA's AI video upscaler, which writes directly at the render target size
 (1440p/2160p). The presenter is told the source is already final so it does not
 resample or sharpen twice. Measured 7.5–11 ms depending on target/quality; see
 `docs/17-neural-rendering.md`. VSR cannot be combined with VFG.
+
+`Neural Ultra preset (VSR Ultra + 2160p)` is a one-click maximum-GPU setting. At
+1440p, AI High is the verified default (~8–10 ms, 54–59 fps live); Ultra/2160p is
+12–17 ms in isolation and can exceed a 60 fps budget on a 1440p display.
+
+### Frame pacing / smoothness
+
+The decoder + YUV->RGBA conversion run on chiaki's video receive thread, so any
+per-frame cost above the frame budget is visible as motion drops. Two changes:
+
+- conversion cost cut from 10.0 ms to 2.1 ms (above);
+- `Streaming::TakeFrame` now keeps an **adaptive jitter buffer**: the target
+  starts at one frame, stays low while the producer is stable, rises by one (up
+  to the "Frame buffer" maximum) when the queue runs dry, and falls back after
+  five stable seconds. It also skips at most one stale frame per tick when the
+  queue is long, so latency is bounded without a multi-frame jump.
+
+`BRP_DECODE_PROBE=1` logs per second:
+`fps ... | kbps lost N | decode avg/max ms | queue N buf N drops N`.
+`lost > 0` means network/FEC, a rising `buf` means jitter, high `decode` means
+CPU. Verified live after the fix: decode 4.5 ms avg / 5.4 ms max at 60 fps,
+`lost 0`, `queue 1`.
+
+Frame generation now pulls a source frame only when its generated queue is low.
+`vfg_pace_probe` (synthetic 60 Hz source, 120 Hz presentation) reports
+**59.9 generated/s and 119.9 presented/s**; the earlier cadence generated ~31/s.
 
 Frame generation: see `docs/15-frame-generation.md` (NVIDIA VFG 2×).
 

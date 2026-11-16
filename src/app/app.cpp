@@ -86,6 +86,7 @@ enum WidgetId {
     W_Motion = 51,
     W_RenderTarget = 52,
     W_PairHome = 42,
+    W_NeuralMax = 61,
     W_ResumeOverlay = 60,
 };
 
@@ -629,6 +630,25 @@ void App::ApplyDropdown(int id, int index) {
             }
             profile_.vsr = level;
             stream_note_ = "RTX VSR enabled; it replaces frame generation.";
+            SaveProfile();
+            break;
+        }
+        case W_NeuralMax: {
+            vsr_quality_ = 4;  // AI Ultra
+            render_target_ = 3;  // 2160p
+            profile_.render_target = 3;
+            ApplyRenderTarget();
+            frame_gen_ = 0;
+            profile_.frame_gen = 0;
+            fg_queue_.clear();
+            fg_last_ = {};
+            if (vsr_quality_ > 0 && vsr_ready_) {
+                profile_.vsr = 4;
+                stream_note_ = "Neural Ultra: RTX VSR AI Ultra at 2160p (max GPU).";
+            } else {
+                profile_.vsr = 0;
+                stream_note_ = "Neural Ultra unavailable; using the regular upscaler.";
+            }
             SaveProfile();
             break;
         }
@@ -1338,23 +1358,15 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     if (stream_active_) {
         // Controller input is sent by the dedicated pad thread, independent of
         // the presentation loop.
-        if (streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
-            if (vsr_quality_ > 0 && vsr_ready_) {
-                std::string detail;
-                if (nv_vsr_.Process(stream_frame_.rgba.data(), stream_frame_.width,
-                                    stream_frame_.height, vsr_frame_, detail)) {
-                    presenter_.SetSourceView(vsr_frame_.srv.Get(), nv_vsr_.out_width(),
-                                             nv_vsr_.out_height(), stream_frame_.pq);
-                    presenter_.SetSourceFinal(true);
-                } else {
-                    vsr_note_ = L"RTX VSR: " + Widen(detail);
-                    std::fprintf(stderr, "[app] RTX VSR failed: %s\n", detail.c_str());
-                    DisableVsr();
-                    profile_.vsr = 0;
-                    presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
-                                              stream_frame_.height, stream_frame_.pq);
-                }
-            } else if (frame_gen_ >= 2 && fg_ready_) {
+        //
+        // With VFG the UI runs at 120/240 Hz but the console only produces 60
+        // source frames per second. Pulling a source frame on every tick would
+        // drain the decoder and make the adaptive buffer grow for no reason, so
+        // VFG requests a new source only when its generated queue is low.
+        const bool vfg_active = frame_gen_ >= 2 && fg_ready_;
+        if (vfg_active) {
+            if (fg_queue_.size() <= 2 &&
+                streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
                 std::vector<media::NvVfx::Frame> sequence;
                 std::string detail;
                 if (nv_vfx_.PushFrame(stream_frame_.rgba.data(), stream_frame_.width,
@@ -1374,6 +1386,23 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                     fg_ready_ = false;
                     fg_queue_.clear();
                     fg_last_ = {};
+                    presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
+                                              stream_frame_.height, stream_frame_.pq);
+                }
+            }
+        } else if (streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
+            if (vsr_quality_ > 0 && vsr_ready_) {
+                std::string detail;
+                if (nv_vsr_.Process(stream_frame_.rgba.data(), stream_frame_.width,
+                                    stream_frame_.height, vsr_frame_, detail)) {
+                    presenter_.SetSourceView(vsr_frame_.srv.Get(), nv_vsr_.out_width(),
+                                             nv_vsr_.out_height(), stream_frame_.pq);
+                    presenter_.SetSourceFinal(true);
+                } else {
+                    vsr_note_ = L"RTX VSR: " + Widen(detail);
+                    std::fprintf(stderr, "[app] RTX VSR failed: %s\n", detail.c_str());
+                    DisableVsr();
+                    profile_.vsr = 0;
                     presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
                                               stream_frame_.height, stream_frame_.pq);
                 }
@@ -1436,12 +1465,25 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                      nv_vsr_.out_height(), nv_vsr_.last_ms());
     }
 
-    static const bool decode_probe = std::getenv("BRP_DECODE_PROBE") != nullptr;    static double decode_probe_at = 0.0;
-    if (decode_probe && stream_active_ && clock_ - decode_probe_at >= 1.0) {
+    static const bool decode_probe = std::getenv("BRP_DECODE_PROBE") != nullptr;
+    static double decode_probe_at = 0.0;
+    static session::Streaming::StreamStats last_stats{};
+    if (stream_active_ && clock_ - decode_probe_at >= 1.0) {
+        // Consume every second so decode_ms_max is a true per-second peak.
+        last_stats = streaming_.ConsumeStats();
         decode_probe_at = clock_;
-        std::fprintf(stderr, "[app] fps %.1f decoder=%s audio=%d vfg=%d vsr=%d\n", streaming_.fps(),
-                     streaming_.decoder_name().c_str(), streaming_.audio_frames(), frame_gen_,
-                     vsr_quality_);
+        if (decode_probe) {
+            const double interval_fps =
+                last_stats.elapsed > 0.0 ? last_stats.frames / last_stats.elapsed : 0.0;
+            std::fprintf(
+                stderr,
+                "[app] fps %.1f dec=%s audio=%d vfg=%d vsr=%d | %0.f kbps lost %d | "
+                "decode %.2f/%.2f ms | queue %d buf %d drops %d\n",
+                interval_fps, streaming_.decoder_name().c_str(), streaming_.audio_frames(),
+                frame_gen_, vsr_quality_, last_stats.kbps, last_stats.lost,
+                last_stats.decode_ms_avg, last_stats.decode_ms_max, last_stats.queue,
+                last_stats.buffer, last_stats.buffer_drops);
+        }
     }
 
     if (pad_.is_sony() &&
@@ -1987,7 +2029,7 @@ void App::RenderSettings(double t) {
             y += kRowH;
             DrawDropdown(L"HDR output", {L"Off", L"On (HDR10, restart)"}, hdr_ ? 1 : 0, y, W_Hdr, true);
             y += kRowH;
-            DrawDropdown(L"Frame buffer", {L"0 (lowest latency)", L"1", L"2", L"3 (smoothest)"},
+            DrawDropdown(L"Frame buffer", {L"0 (fixed, lowest)", L"1 (adaptive)", L"2 (adaptive)", L"3 (adaptive max)"},
                          stream_buffer_, y, W_FrameBuffer);
             y += kRowH;
             DrawDropdown(L"Video decoder (next session)",
@@ -2018,6 +2060,10 @@ void App::RenderSettings(double t) {
                          th::Rgba(th::kMuted));
                 y += 24.0f;
             }
+
+            DrawButton(L"Neural Ultra preset (VSR Ultra + 2160p)",
+                       {kContentX, y + 6.0f, kContentX + 380.0f, y + 50.0f}, W_NeuralMax, false);
+            y += kRowH;
 
             if (frame_gen_ >= 2 && fg_ready_) {
                 wchar_t text[192];
@@ -2370,7 +2416,7 @@ void App::RenderStreamSettings(double t) {
     y += 56.0f;
     DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
     y += 56.0f;
-    DrawDropdown(L"Frame buffer", {L"0 (lowest latency)", L"1", L"2", L"3 (smoothest)"},
+    DrawDropdown(L"Frame buffer", {L"0 (fixed, lowest)", L"1 (adaptive)", L"2 (adaptive)", L"3 (adaptive max)"},
                  stream_buffer_, y, W_FrameBuffer);
     y += 56.0f;
     DrawDropdown(L"Video decoder (next session)",

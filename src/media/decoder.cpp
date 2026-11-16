@@ -366,13 +366,18 @@ bool Decoder::Convert(const void* frame_ptr, DecodedFrame& out) {
     out.pq = source->color_trc == AVCOL_TRC_SMPTE2084;
     out.rgba.resize(static_cast<size_t>(source->width) * source->height * 4);
 
+    // Chroma upsampling runs synchronously on chiaki's video receive thread.
+    // Measured at 1080p NV12 -> RGBA on this machine:
+    //   bilinear 2.6 ms, bicubic 2.1 ms, lanczos+accurate 5.6 ms,
+    //   bicubic + SWS_FULL_CHR_H_INT 10.0 ms (the old default!).
+    // FULL_CHR_H_INT was removed after it pushed decode past the 16.7 ms budget
+    // on high-motion frames, which drained the socket and dropped frames.
     int sws_flags = SWS_BICUBIC;
     if (chroma_quality_ == 0) {
         sws_flags = SWS_BILINEAR;
     } else if (chroma_quality_ == 2) {
-        sws_flags = SWS_LANCZOS;
+        sws_flags = SWS_LANCZOS | SWS_ACCURATE_RND;
     }
-    sws_flags |= SWS_FULL_CHR_H_INT | SWS_ACCURATE_RND;
 
     scaler_ = sws_getCachedContext(Sws(scaler_), source->width, source->height,
                                    static_cast<AVPixelFormat>(source->format), source->width,

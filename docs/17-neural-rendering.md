@@ -140,6 +140,20 @@ the synthetic pattern). Magpie post-processes the raw result with
 yet, and a real video stream has no motion vectors or depth buffer to feed the
 model.
 
+Probe results on this machine (2026-11-16, animated input at 60 Hz):
+
+- **Zero motion + zero depth, or the MVec/Depth parameters omitted:** `EvaluateFeature`
+  returns success but the output texture is not written (it keeps its previous
+  contents, e.g. the magenta prefill). Presets 0/1, styles 0/1 behave this way.
+- **Style 2 with zero guides:** writes only partially / with artifacts; not usable.
+- **Non-zero synthetic guides (0.5 px motion, depth 0.5):** writes a full frame that
+  differs from the input, but shows striping/chroma artifacts because the guides are
+  fake. This proves the model expects genuine motion vectors.
+
+Conclusion: DLSSNR on a decoded 2D video stream needs real motion vectors (game
+motion, optical flow, or HEVC block motion converted to screen space) plus the
+residual composite. VSR remains the shipped neural path.
+
 Realistic next steps:
 
 1. Port the residual composite (start with `residualTransfer = InPlace`) and

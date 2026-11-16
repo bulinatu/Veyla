@@ -252,15 +252,16 @@ void PrintResult(const char* step, NVSDK_NGX_Result result) {
                 NVSDK_NGX_SUCCEED(result) ? "OK" : "FAIL");
 }
 
-std::vector<uint8_t> MakeFrame(int width, int height) {
+std::vector<uint8_t> MakeFrame(int width, int height, int shift = 0) {
     std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4);
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             const size_t i = (static_cast<size_t>(y) * width + x) * 4;
-            uint8_t r = static_cast<uint8_t>(x * 255 / (width - 1));
+            const int sx = (x + shift) % width;
+            uint8_t r = static_cast<uint8_t>(sx * 255 / (width - 1));
             uint8_t g = static_cast<uint8_t>(y * 255 / (height - 1));
-            uint8_t b = static_cast<uint8_t>(((x / 64 + y / 64) & 1) ? 190 : 60);
-            if (((x + y * 2) % 37) == 0) {
+            uint8_t b = static_cast<uint8_t>(((sx / 64 + y / 64) & 1) ? 190 : 60);
+            if (((sx + y * 2) % 37) == 0) {
                 r = 250;
                 g = 250;
                 b = 250;
@@ -272,15 +273,15 @@ std::vector<uint8_t> MakeFrame(int width, int height) {
                 g = 20;
                 b = 20;
             }
-            if (x > width * 3 / 4 && y > 80 && y < 300) {
-                const bool ink = ((x / 6) % 4 == 0) || ((y / 8) % 5 == 0);
+            if (sx > width * 3 / 4 && y > 80 && y < 300) {
+                const bool ink = ((sx / 6) % 4 == 0) || ((y / 8) % 5 == 0);
                 r = ink ? 245 : 10;
                 g = ink ? 245 : 10;
                 b = ink ? 245 : 10;
             }
             // Deterministic compression-like noise so a denoiser has something
             // to remove even on the synthetic pattern.
-            const int noise = ((x * 73856093) ^ (y * 19349663)) % 41 - 20;
+            const int noise = ((sx * 73856093) ^ (y * 19349663)) % 41 - 20;
             auto clamp8 = [](int v) {
                 return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
             };
@@ -606,7 +607,6 @@ int main(int argc, char** argv) {
         return SUCCEEDED(hr);
     };
 
-    const auto input_pixels = MakeFrame(kWidth, kHeight);
     std::vector<uint8_t> magenta(static_cast<size_t>(kWidth) * kHeight * 4, 0);
     for (size_t i = 0; i < magenta.size(); i += 4) {
         magenta[i + 0] = 255;
@@ -626,8 +626,12 @@ int main(int argc, char** argv) {
     const float depth_pattern = 0.5f;
     const float zero_depth_pattern = 0.0f;
     const int guide_mode = argc > 5 ? std::atoi(argv[5]) : 3;
+    const bool animate = argc > 6 && std::atoi(argv[6]) != 0;
     const bool guide_motion = (guide_mode & 1) != 0;
     const bool guide_depth = (guide_mode & 2) != 0;
+    const auto frame_a = MakeFrame(kWidth, kHeight, 0);
+    const auto frame_b = MakeFrame(kWidth, kHeight, 11);
+    const auto input_pixels = frame_a;
     if (!create_shared_rgba(input11, input12, input_pixels.data(), kWidth * 4) ||
         !create_shared_rgba(output11, output12, magenta.data(), kWidth * 4) ||
         !create_guide(DXGI_FORMAT_R16G16_FLOAT, motion11, motion12,
@@ -662,14 +666,17 @@ int main(int argc, char** argv) {
             "DLSSNR.ColorSubrectWidth", "DLSSNR.ColorSubrectHeight");
     subrect("DLSSNR.OutputSubrectBaseX", "DLSSNR.OutputSubrectBaseY",
             "DLSSNR.OutputSubrectWidth", "DLSSNR.OutputSubrectHeight");
-    subrect("DLSSNR.MVecSubrectBaseX", "DLSSNR.MVecSubrectBaseY",
-            "DLSSNR.MVecSubrectWidth", "DLSSNR.MVecSubrectHeight");
-    subrect("DLSSNR.DepthSubrectBaseX", "DLSSNR.DepthSubrectBaseY",
-            "DLSSNR.DepthSubrectWidth", "DLSSNR.DepthSubrectHeight");
+    const bool omit_guides = guide_mode == 5;
+    if (!omit_guides) {
+        subrect("DLSSNR.MVecSubrectBaseX", "DLSSNR.MVecSubrectBaseY",
+                "DLSSNR.MVecSubrectWidth", "DLSSNR.MVecSubrectHeight");
+        subrect("DLSSNR.DepthSubrectBaseX", "DLSSNR.DepthSubrectBaseY",
+                "DLSSNR.DepthSubrectWidth", "DLSSNR.DepthSubrectHeight");
+        parameters->Set("DLSSNR.MVec", motion12.Get());
+        parameters->Set("DLSSNR.Depth", depth12.Get());
+    }
     parameters->Set("DLSSNR.Color", input12.Get());
     parameters->Set("DLSSNR.Output", output12.Get());
-    parameters->Set("DLSSNR.MVec", motion12.Get());
-    parameters->Set("DLSSNR.Depth", depth12.Get());
     parameters->Set("DLSSNR.MVecScaleX", 1.0f);
     parameters->Set("DLSSNR.MVecScaleY", 1.0f);
     parameters->Set("DLSSNR.DepthInverted", 1);
@@ -694,6 +701,15 @@ int main(int argc, char** argv) {
 
     constexpr int kRuns = 4;
     for (int run = 0; run < kRuns; ++run) {
+        if (animate) {
+            const auto& pixels = (run & 1) ? frame_b : frame_a;
+            devices.context->UpdateSubresource(input11.Get(), 0, nullptr, pixels.data(),
+                                               kWidth * 4, 0);
+            const UINT64 input_value = 100 + static_cast<UINT64>(run);
+            devices.context4->Signal(fence11.Get(), input_value);
+            devices.context->Flush();
+            queue->Wait(fence12.Get(), input_value);
+        }
         allocator->Reset();
         list->Reset(allocator.Get(), nullptr);
         barrier(input12.Get(), D3D12_RESOURCE_STATE_COMMON,

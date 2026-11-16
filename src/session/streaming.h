@@ -42,8 +42,27 @@ public:
     StreamState state() const { return state_.load(); }
     std::string message() const;
 
-    // buffer: how many decoded frames to hold before presenting (jitter buffer).
+    // Adaptive jitter buffer: `buffer` is the maximum number of decoded frames
+    // to hold. The target starts at one frame (low latency), rises on an empty
+    // queue while streaming, and falls back after a stable period.
     bool TakeFrame(media::DecodedFrame& out, int buffer);
+    int buffer_target() const { return buffer_target_.load(); }
+    int buffer_drops() const { return buffer_drops_.load(); }
+
+    struct StreamStats {
+        int frames = 0;
+        int lost = 0;
+        double decode_ms_avg = 0.0;
+        double decode_ms_max = 0.0;
+        double kbps = 0.0;
+        int queue = 0;
+        int buffer = 0;
+        int buffer_drops = 0;
+        double elapsed = 0.0;
+    };
+    // Returns the counters collected since the previous call and resets them.
+    StreamStats ConsumeStats();
+
     int frame_count() const;
     int audio_frames() const { return audio_frames_.load(); }
     double fps() const;
@@ -82,6 +101,22 @@ private:
 
     std::mutex frame_mutex_;
     std::deque<media::DecodedFrame> frames_;
+
+    // adaptive jitter buffer
+    std::atomic<int> buffer_target_{1};
+    std::atomic<int> buffer_drops_{0};
+    int last_queue_ = 0;
+    double last_drought_ = -100.0;
+    double last_recovery_ = 0.0;
+
+    // per-interval video telemetry
+    std::atomic<int> stats_frames_{0};
+    std::atomic<int> stats_lost_{0};
+    std::atomic<long long> stats_decode_us_{0};
+    std::atomic<int> stats_decode_count_{0};
+    std::atomic<long long> stats_decode_max_us_{0};
+    std::atomic<long long> stats_bytes_{0};
+    std::chrono::steady_clock::time_point stats_started_{};
 
     std::atomic<int> frame_count_{0};
     std::chrono::steady_clock::time_point started_{};

@@ -193,8 +193,24 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
 
     initialised_ = true;
     started_ = std::chrono::steady_clock::now();
+    stats_started_ = started_;
     frame_count_.store(0);
     audio_frames_.store(0);
+    buffer_target_.store(1);
+    buffer_drops_.store(0);
+    last_drought_ = -100.0;
+    last_recovery_ = 0.0;
+    last_queue_ = 0;
+    stats_frames_.store(0);
+    stats_lost_.store(0);
+    stats_decode_us_.store(0);
+    stats_decode_count_.store(0);
+    stats_decode_max_us_.store(0);
+    stats_bytes_.store(0);
+    {
+        std::lock_guard<std::mutex> lock(frame_mutex_);
+        frames_.clear();
+    }
     {
         std::lock_guard<std::mutex> lock(mutex_);
         message_ = "Connecting to " + profile.host;
@@ -249,7 +265,9 @@ bool Streaming::VideoCallback(uint8_t* buf, size_t size, int32_t frames_lost, bo
 }
 
 void Streaming::OnVideo(uint8_t* buf, size_t size, int32_t frames_lost) {
-    (void)frames_lost;
+    const auto decode_start = std::chrono::steady_clock::now();
+    stats_lost_.fetch_add(frames_lost > 0 ? frames_lost : 0);
+    stats_bytes_.fetch_add(static_cast<long long>(size));
     if (!decoder_.Feed(buf, size)) {
         chiaki_session_request_idr(&session_);
         return;
@@ -261,14 +279,24 @@ void Streaming::OnVideo(uint8_t* buf, size_t size, int32_t frames_lost) {
         {
             std::lock_guard<std::mutex> lock(frame_mutex_);
             frames_.push_back(std::move(frame));
-            while (frames_.size() > 4) {
+            while (frames_.size() > 8) {
                 frames_.pop_front();
             }
         }
         ++decoded;
     }
+    const long long decode_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                    std::chrono::steady_clock::now() - decode_start)
+                                    .count();
+    stats_decode_us_.fetch_add(decode_us);
+    stats_decode_count_.fetch_add(1);
+    long long previous_max = stats_decode_max_us_.load();
+    while (decode_us > previous_max &&
+           !stats_decode_max_us_.compare_exchange_weak(previous_max, decode_us)) {
+    }
     if (decoded > 0) {
         frame_count_.fetch_add(decoded);
+        stats_frames_.fetch_add(decoded);
         if (state_.load() != StreamState::Streaming) {
             state_.store(StreamState::Streaming);
             std::lock_guard<std::mutex> lock(mutex_);
@@ -454,12 +482,81 @@ std::string Streaming::message() const {
 
 bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer) {
     std::lock_guard<std::mutex> lock(frame_mutex_);
-    if (static_cast<int>(frames_.size()) <= buffer || frames_.empty()) {
+    const auto now = std::chrono::steady_clock::now();
+    const double seconds =
+        std::chrono::duration<double>(now - started_).count();
+    const int max_buffer = std::clamp(buffer, 0, 6);
+
+    if (frames_.empty()) {
+        // An empty queue while streaming means the producer is behind. Add one
+        // frame of slack (up to the user's maximum), but only once per 500 ms
+        // so a single bad moment does not jump straight to the ceiling.
+        if (state_.load() == StreamState::Streaming && max_buffer > 0 &&
+            seconds - last_drought_ >= 0.5) {
+            const int target = buffer_target_.load();
+            if (target < max_buffer) {
+                buffer_target_.store(target + 1);
+            }
+            last_drought_ = seconds;
+            last_recovery_ = seconds;
+        }
         return false;
     }
+
+    // Stable for five seconds: give latency back, one frame at a time.
+    if (seconds - last_recovery_ >= 5.0) {
+        const int target = buffer_target_.load();
+        if (target > 1) {
+            buffer_target_.store(target - 1);
+        }
+        last_recovery_ = seconds;
+    }
+
+    const int target = max_buffer == 0
+                           ? 0
+                           : std::clamp(buffer_target_.load(), 1, max_buffer);
+    const int wanted = target + 1;
+    // Bound latency: skip at most one extra frame per presentation tick. This
+    // avoids both an unbounded queue and a sudden multi-frame jump.
+    if (static_cast<int>(frames_.size()) > wanted) {
+        frames_.pop_front();
+        buffer_drops_.fetch_add(1);
+    }
+    // Keep `target` frames buffered after this pop. Waiting here (instead of
+    // presenting immediately) is what actually builds the jitter buffer; the
+    // previous frame stays on screen for the one tick it takes to fill.
+    if (static_cast<int>(frames_.size()) < wanted) {
+        return false;
+    }
+
     out = std::move(frames_.front());
     frames_.pop_front();
+    last_queue_ = static_cast<int>(frames_.size());
     return true;
+}
+
+Streaming::StreamStats Streaming::ConsumeStats() {
+    StreamStats stats;
+    const auto now = std::chrono::steady_clock::now();
+    stats.elapsed = std::chrono::duration<double>(now - stats_started_).count();
+    stats_started_ = now;
+    stats.frames = stats_frames_.exchange(0);
+    stats.lost = stats_lost_.exchange(0);
+    const int count = stats_decode_count_.exchange(0);
+    const long long total_us = stats_decode_us_.exchange(0);
+    const long long max_us = stats_decode_max_us_.exchange(0);
+    const long long bytes = stats_bytes_.exchange(0);
+    stats.decode_ms_avg = count > 0 ? static_cast<double>(total_us) / count / 1000.0 : 0.0;
+    stats.decode_ms_max = static_cast<double>(max_us) / 1000.0;
+    stats.kbps = stats.elapsed > 0.0 ? static_cast<double>(bytes) * 8.0 / stats.elapsed / 1000.0
+                                     : 0.0;
+    stats.buffer = buffer_target_.load();
+    stats.buffer_drops = buffer_drops_.exchange(0);
+    {
+        std::lock_guard<std::mutex> lock(frame_mutex_);
+        stats.queue = last_queue_;
+    }
+    return stats;
 }
 
 int Streaming::frame_count() const {
