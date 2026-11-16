@@ -51,6 +51,11 @@ int main(int argc, char** argv) {
             if (state == brp::session::PairState::Success) {
                 brp::session::Credentials credentials;
                 if (pairing.TakeCredentials(credentials)) {
+                    profile.credentials = credentials;
+                    std::string save_detail;
+                    if (brp::session::Save(profile, brp::session::DefaultProfilePath(), save_detail)) {
+                        std::printf("saved     %s\n", save_detail.c_str());
+                    }
                     std::printf("rp_key    %02x%02x... (%zu bytes)\n", credentials.rp_key[0],
                                 credentials.rp_key[1], credentials.rp_key.size());
                 }

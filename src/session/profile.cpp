@@ -213,7 +213,7 @@ std::string Profile::status_line() const {
 
 std::string AccountIdBase64(uint64_t numeric) {
     uint8_t bytes[8];
-    for (int i = 7; i >= 0; --i) {
+    for (int i = 0; i < 8; ++i) {
         bytes[i] = static_cast<uint8_t>(numeric & 0xFFu);
         numeric >>= 8;
     }
