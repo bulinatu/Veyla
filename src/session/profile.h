@@ -50,6 +50,8 @@ struct Profile {
     std::string audio_device_id;
     int audio_buffer_ms = 20;
     int input_source = 0;
+    int frame_buffer = 1;
+    int pad_rate_hz = 250;
 
     bool has_console() const { return !target_id.empty(); }
     bool needs_pairing() const { return !credentials.present(); }

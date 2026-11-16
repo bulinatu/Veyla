@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <mutex>
 #include <string>
 
@@ -39,7 +40,8 @@ public:
     StreamState state() const { return state_.load(); }
     std::string message() const;
 
-    bool TakeFrame(media::DecodedFrame& out);
+    // buffer: how many decoded frames to hold before presenting (jitter buffer).
+    bool TakeFrame(media::DecodedFrame& out, int buffer);
     int frame_count() const;
     int audio_frames() const { return audio_frames_.load(); }
     double fps() const;
@@ -70,8 +72,7 @@ private:
     std::string message_;
 
     std::mutex frame_mutex_;
-    media::DecodedFrame latest_;
-    bool has_new_frame_ = false;
+    std::deque<media::DecodedFrame> frames_;
 
     std::atomic<int> frame_count_{0};
     std::chrono::steady_clock::time_point started_{};

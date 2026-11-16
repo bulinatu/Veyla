@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -117,6 +118,7 @@ public:
     void Poll();
 
     const PadState& state() const { return state_; }
+    PadState snapshot() const;
     uint32_t ConsumePressed();
     bool held(uint32_t mask) const { return (state_.buttons & mask) != 0; }
 
@@ -151,6 +153,7 @@ private:
     std::string name_;
     double retry_at_ = 0.0;
 
+    mutable std::mutex mutex_;
     PadState state_;
     uint32_t pressed_ = 0;
     Backend backend_ = Backend::Auto;

@@ -4,7 +4,9 @@
 
 #include <d2d1_1.h>
 
+#include <atomic>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "audio/audio_engine.h"
@@ -36,6 +38,7 @@ struct GameEntry {
 
 class App {
 public:
+    ~App();
     bool Init(Win32Window* window);
     void Resize(int width, int height);
     void Frame(double time_seconds, const PointerState& pointer);
@@ -103,6 +106,9 @@ private:
     void StartProbe();
     void ConnectConsole();
     void SaveProfile();
+    void StartPadThread();
+    void StopPadThread();
+    void PadThreadMain();
     void DisconnectStream();
 
     Win32Window* window_ = nullptr;
@@ -115,6 +121,10 @@ private:
     float scroll_ = 0.0f;
     bool hud_ = true;
     bool hdr_ = false;
+    int stream_buffer_ = 1;
+    int pad_rate_hz_ = 250;
+    std::thread pad_thread_;
+    std::atomic<bool> pad_run_{false};
     int upscale_ = 1;
     bool quit_ = false;
     bool capture_requested_ = false;

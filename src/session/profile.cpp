@@ -366,7 +366,9 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"hud\": " << (profile.hud ? "true" : "false") << ",\n";
     json << "  \"audio_device_id\": \"" << EscapeJson(profile.audio_device_id) << "\",\n";
     json << "  \"audio_buffer_ms\": " << profile.audio_buffer_ms << ",\n";
-    json << "  \"input_source\": " << profile.input_source << "\n";
+    json << "  \"input_source\": " << profile.input_source << ",\n";
+    json << "  \"frame_buffer\": " << profile.frame_buffer << ",\n";
+    json << "  \"pad_rate_hz\": " << profile.pad_rate_hz << "\n";
     json << "}\n";
 
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
@@ -420,6 +422,8 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     if (ExtractNumber(json, "upscaler", number)) p.upscaler = static_cast<int>(number);
     if (ExtractNumber(json, "audio_buffer_ms", number)) p.audio_buffer_ms = static_cast<int>(number);
     if (ExtractNumber(json, "input_source", number)) p.input_source = static_cast<int>(number);
+    if (ExtractNumber(json, "frame_buffer", number)) p.frame_buffer = static_cast<int>(number);
+    if (ExtractNumber(json, "pad_rate_hz", number)) p.pad_rate_hz = static_cast<int>(number);
     ExtractBool(json, "hud", p.hud);
 
     profile = std::move(p);

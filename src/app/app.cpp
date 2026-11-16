@@ -53,6 +53,8 @@ enum WidgetId {
     W_Resolution = 44,
     W_Fps = 45,
     W_Disconnect = 46,
+    W_FrameBuffer = 47,
+    W_PadRate = 48,
     W_PairHome = 42,
 };
 
@@ -165,6 +167,8 @@ bool App::Init(Win32Window* window) {
     hud_ = profile_.hud;
     audio_buffer_ms_ = std::clamp(profile_.audio_buffer_ms, 10, 100);
     input_source_ = std::clamp(profile_.input_source, 0, 2);
+    stream_buffer_ = std::clamp(profile_.frame_buffer, 0, 3);
+    pad_rate_hz_ = std::clamp(profile_.pad_rate_hz, 60, 500);
     th::SetHdr(hdr_);
 
     // Prefer a console found on the LAN over the cached (often WAN) address.
@@ -488,6 +492,20 @@ void App::ApplyDropdown(int id, int index) {
             session::Save(profile_, session::DefaultProfilePath(), save_detail);
             break;
         }
+        case W_FrameBuffer: {
+            static const int kBuffers[] = {0, 1, 2, 3};
+            stream_buffer_ = kBuffers[std::clamp(index, 0, 3)];
+            profile_.frame_buffer = stream_buffer_;
+            SaveProfile();
+            break;
+        }
+        case W_PadRate: {
+            static const int kRates[] = {60, 125, 250, 500};
+            pad_rate_hz_ = kRates[std::clamp(index, 0, 3)];
+            profile_.pad_rate_hz = pad_rate_hz_;
+            SaveProfile();
+            break;
+        }
         case W_Bitrate: {
             static const int kBitrates[] = {20000, 35000, 50000, 75000, 100000};
             profile_.bitrate_kbps = kBitrates[std::clamp(index, 0, 4)];
@@ -539,6 +557,39 @@ void App::TriggerRumble() {
     output_dirty_ = true;
 }
 
+App::~App() {
+    StopPadThread();
+}
+
+void App::StartPadThread() {
+    if (pad_run_.load()) {
+        return;
+    }
+    pad_run_.store(true);
+    pad_thread_ = std::thread(&App::PadThreadMain, this);
+}
+
+void App::StopPadThread() {
+    if (!pad_run_.load()) {
+        return;
+    }
+    pad_run_.store(false);
+    if (pad_thread_.joinable()) {
+        pad_thread_.join();
+    }
+}
+
+void App::PadThreadMain() {
+    while (pad_run_.load()) {
+        pad_.Poll();
+        if (stream_active_) {
+            streaming_.SendController(pad_.snapshot());
+        }
+        const int hz = pad_rate_hz_ < 60 ? 60 : (pad_rate_hz_ > 500 ? 500 : pad_rate_hz_);
+        std::this_thread::sleep_for(std::chrono::microseconds(1000000 / hz));
+    }
+}
+
 void App::SaveProfile() {
     std::string detail;
     session::Save(profile_, session::DefaultProfilePath(), detail);
@@ -557,6 +608,7 @@ if (!audio_.is_open()) {
     std::string error;
     if (streaming_.Start(profile_, profile_.width, profile_.height, profile_.bitrate_kbps, error)) {
         stream_active_ = true;
+        StartPadThread();
         screen_ = Screen::Stream;
         std::fprintf(stderr, "[app] streaming started\n");
     } else {
@@ -564,6 +616,7 @@ if (!audio_.is_open()) {
     }
 }
 void App::DisconnectStream() {
+    StopPadThread();
     streaming_.Stop();
     stream_active_ = false;
     stream_note_ = "Disconnected. The console may take a few seconds to release the session.";
@@ -622,7 +675,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     last_time_ = time_seconds;
     dt = std::clamp(dt, 0.0, 0.1);
 
-    pad_.Poll();
+    if (!pad_run_.load()) {
+        pad_.Poll();
+    }
     probe_.Poll();
     HandlePad();
 
@@ -688,7 +743,7 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
 
     if (stream_active_) {
         streaming_.SendController(pad_.state());
-        if (streaming_.TakeFrame(stream_frame_)) {
+        if (streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
             presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
                                        stream_frame_.height);
         }
@@ -1146,6 +1201,9 @@ void App::RenderSettings(double t) {
                          W_FrameGen, false);
             y += kRowH;
             DrawDropdown(L"HDR output", {L"Off", L"On (HDR10, restart)"}, hdr_ ? 1 : 0, y, W_Hdr, true);
+            y += kRowH;
+            DrawDropdown(L"Frame buffer", {L"0 (lowest latency)", L"1", L"2", L"3 (smoothest)"},
+                         stream_buffer_, y, W_FrameBuffer);
             break;
         }
 
@@ -1197,6 +1255,16 @@ void App::RenderSettings(double t) {
             DrawDropdown(L"Input source", {kInputSourceNames[0], kInputSourceNames[1],
                                            kInputSourceNames[2]},
                          input_source_, y, W_InputSource);
+            y += kRowH;
+            {
+                int rate_index = 2;
+                const int rates[] = {60, 125, 250, 500};
+                for (int i = 0; i < 4; ++i) {
+                    if (rates[i] == pad_rate_hz_) rate_index = i;
+                }
+                DrawDropdown(L"Report rate", {L"60 Hz", L"125 Hz", L"250 Hz", L"500 Hz"},
+                             rate_index, y, W_PadRate);
+            }
             y += kRowH;
             DrawDropdown(L"Lightbar", {kLightbarNames[0], kLightbarNames[1], kLightbarNames[2],
                                        kLightbarNames[3], kLightbarNames[4], kLightbarNames[5],

@@ -230,8 +230,10 @@ void Streaming::OnVideo(uint8_t* buf, size_t size, int32_t frames_lost) {
     while (decoder_.Receive(frame)) {
         {
             std::lock_guard<std::mutex> lock(frame_mutex_);
-            latest_ = std::move(frame);
-            has_new_frame_ = true;
+            frames_.push_back(std::move(frame));
+            while (frames_.size() > 4) {
+                frames_.pop_front();
+            }
         }
         ++decoded;
     }
@@ -339,14 +341,13 @@ std::string Streaming::message() const {
     return message_;
 }
 
-bool Streaming::TakeFrame(media::DecodedFrame& out) {
+bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer) {
     std::lock_guard<std::mutex> lock(frame_mutex_);
-    if (!has_new_frame_) {
+    if (static_cast<int>(frames_.size()) <= buffer || frames_.empty()) {
         return false;
     }
-    out = std::move(latest_);
-    latest_ = {};
-    has_new_frame_ = false;
+    out = std::move(frames_.front());
+    frames_.pop_front();
     return true;
 }
 

@@ -490,6 +490,11 @@ void Gamepad::Poll() {
     }
 }
 
+PadState Gamepad::snapshot() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return state_;
+}
+
 uint32_t Gamepad::ConsumePressed() {
     const uint32_t pressed = pressed_;
     pressed_ = 0;
