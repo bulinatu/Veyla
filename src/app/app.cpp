@@ -48,6 +48,7 @@ enum WidgetId {
     W_MicLed,
     W_Probe = 40,
     W_Pair = 41,
+    W_PairHome = 42,
 };
 
 constexpr float kContentX = 344.0f;
@@ -257,6 +258,9 @@ void App::DispatchClick() {
                     TriggerRumble();
                 } else if (it->index == W_Probe) {
                     StartProbe();
+                } else if (it->index == W_PairHome) {
+                    screen_ = Screen::Settings;
+                    tab_ = Tab::Connection;
                 } else if (it->index == W_Pair) {
                     if (pin_.size() == 8) {
                         pairing_.Start(profile_, static_cast<uint32_t>(std::stoul(pin_)));
@@ -853,70 +857,91 @@ void App::RenderHome(double t) {
     const float h = static_cast<float>(window_->height());
 
     ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(th::kBgTop), th::Rgba(th::kBgBottom));
-
-    const GameEntry& game = games_[static_cast<size_t>(selected_)];
-    ui_.FillRadial(w * 0.50f, h * 0.55f, w * 0.62f, th::Rgba(game.accent, 0.20f),
-                   th::Rgba(game.accent, 0.0f));
-    ui_.FillRadial(w * 0.16f, h * 0.18f, w * 0.38f, th::Rgba(0x2B4C8C, 0.14f),
+    ui_.FillRadial(w * 0.5f, h * 0.42f, w * 0.55f, th::Rgba(0x2E6BFF, 0.18f),
+                   th::Rgba(0x2E6BFF, 0.0f));
+    ui_.FillRadial(w * 0.14f, h * 0.12f, w * 0.34f, th::Rgba(0x2B4C8C, 0.14f),
                    th::Rgba(0x2B4C8C, 0.0f));
 
     RenderTopBar();
-    DrawConsoleCard();
 
-    const float tile_h = std::clamp(h * 0.44f, 240.0f, 420.0f);
-    const float tile_w = tile_h * 0.75f;
-    const float gap = tile_h * 0.065f;
-    // Shift the rail left because the console card occupies the top right.
-    const float center_x = w * 0.46f;
-    const float center_y = h * 0.55f;
+    const float card_w = std::min(920.0f, w - 96.0f);
+    const float card_h = 340.0f;
+    const float x0 = (w - card_w) * 0.5f;
+    const float y0 = h * 0.46f - card_h * 0.5f;
 
-    std::vector<int> order(games_.size());
-    for (size_t i = 0; i < order.size(); ++i) {
-        order[i] = static_cast<int>(i);
+    const D2D1_RECT_F card{x0, y0, x0 + card_w, y0 + card_h};
+    ui_.FillRounded(card, 22.0f, th::Rgba(0xFFFFFF, 0.05f));
+    ui_.StrokeRounded(card, 22.0f, th::Rgba(0xFFFFFF, 0.09f), 1.0f);
+
+    ui_.Text(L"PLAYSTATION 5", {x0 + 36.0f, y0 + 26.0f, x0 + card_w - 36.0f, y0 + 48.0f}, 10.5f,
+             th::Rgba(th::kMuted, 0.9f), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+
+    const std::wstring name =
+        profile_.has_console() ? Widen(profile_.display_name()) : std::wstring(L"No console");
+    ui_.Text(name.c_str(), {x0 + 36.0f, y0 + 54.0f, x0 + card_w - 36.0f, y0 + 116.0f}, 42.0f,
+             th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+
+    uint32_t dot = th::kOffline;
+    std::wstring status;
+    switch (probe_.state()) {
+        case net::ProbeState::Checking:
+            dot = th::kAccent;
+            status = L"Checking the control port...";
+            break;
+        case net::ProbeState::Reachable:
+            dot = th::kOnline;
+            status = L"Reachable";
+            break;
+        case net::ProbeState::Unreachable:
+            dot = th::kOffline;
+            status = L"No answer on the control port";
+            break;
+        case net::ProbeState::NoAddress:
+            dot = th::kMuted;
+            status = L"No address configured";
+            break;
+        case net::ProbeState::Idle:
+        default:
+            status = Widen(profile_.status_line());
+            break;
     }
-    std::sort(order.begin(), order.end(), [&](int a, int b) {
-        return std::fabs(static_cast<float>(a) - scroll_) > std::fabs(static_cast<float>(b) - scroll_);
-    });
 
-    for (int idx : order) {
-        const float d = static_cast<float>(idx) - scroll_;
-        if (std::fabs(d) > 3.2f) {
-            continue;
-        }
-        const float k = std::min(std::fabs(d), 3.0f);
-        const float scale = 1.0f - 0.055f * k;
-        const float tw = tile_w * scale;
-        const float th = tile_h * scale;
-        const float x = center_x + d * (tile_w + gap) - tw * 0.5f;
-        const float y = center_y - th * 0.5f;
-        const D2D1_RECT_F rect{x, y, x + tw, y + th};
-        DrawTile(rect, games_[static_cast<size_t>(idx)], 1.0f - 0.30f * k, idx == selected_,
-                 hover_ == Hit::Tile && hover_index_ == idx);
-        AddHit(Hit::Tile, idx, rect);
-    }
+    ui_.FillCircle(x0 + 42.0f, y0 + 140.0f, 4.5f, th::Rgba(dot));
+    ui_.Text(status.c_str(), {x0 + 56.0f, y0 + 126.0f, x0 + card_w - 36.0f, y0 + 154.0f}, 14.0f,
+             th::Rgba(th::kInkDim));
 
-    const float rail_bottom = center_y + tile_h * 0.5f;
-    ui_.Text(game.title, {center_x - 600.0f, rail_bottom + 20.0f, center_x + 600.0f,
-                          rail_bottom + 66.0f},
-             34.0f, th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+    std::wstring address = profile_.host.empty() ? L"No address" : Widen(profile_.host);
+    address += profile_.needs_pairing() ? L"   ·   pairing needed" : L"   ·   paired";
+    ui_.Text(address.c_str(), {x0 + 36.0f, y0 + 158.0f, x0 + card_w - 36.0f, y0 + 182.0f}, 12.5f,
+             th::Rgba(th::kMuted));
+
+    const float button_y = y0 + 224.0f;
+    DrawButton(probe_.state() == net::ProbeState::Checking ? L"Checking..." : L"Connect",
+               {x0 + 36.0f, button_y, x0 + 196.0f, button_y + 52.0f}, W_Probe, true);
+
+    const D2D1_RECT_F pair_rect{x0 + 212.0f, button_y, x0 + 372.0f, button_y + 52.0f};
+    const bool pair_hover = hover_ == Hit::Button && hover_index_ == W_PairHome;
+    ui_.FillRounded(pair_rect, 12.0f, th::Rgba(0xFFFFFF, pair_hover ? 0.14f : 0.07f));
+    ui_.StrokeRounded(pair_rect, 12.0f, th::Rgba(0xFFFFFF, 0.12f), 1.0f);
+    ui_.Text(L"Pair", {pair_rect.left, pair_rect.top, pair_rect.right, pair_rect.bottom}, 13.5f,
+             th::Rgba(th::kInk, 0.92f), DWRITE_FONT_WEIGHT_SEMI_BOLD,
              DWRITE_TEXT_ALIGNMENT_CENTER);
-    ui_.Text(game.meta, {center_x - 600.0f, rail_bottom + 68.0f, center_x + 600.0f,
-                         rail_bottom + 94.0f},
-             15.0f, th::Rgba(th::kMuted), DWRITE_FONT_WEIGHT_NORMAL,
-             DWRITE_TEXT_ALIGNMENT_CENTER);
+    AddHit(Hit::Button, W_PairHome, pair_rect);
 
-    const D2D1_RECT_F stream_rect{center_x - 100.0f, rail_bottom + 104.0f,
-                                  center_x + 100.0f, rail_bottom + 150.0f};
-    const bool stream_hover = hover_ == Hit::Stream;
-    ui_.FillRounded(stream_rect, 23.0f, th::Rgba(th::kAccent, stream_hover ? 0.28f : 0.18f));
-    ui_.StrokeRounded(stream_rect, 23.0f, th::Rgba(th::kAccent, stream_hover ? 1.0f : 0.85f), 1.5f);
-    ui_.FillTriangle({stream_rect.left + 30.0f, rail_bottom + 120.0f},
-                     {stream_rect.left + 30.0f, rail_bottom + 134.0f},
-                     {stream_rect.left + 41.0f, rail_bottom + 127.0f}, th::Rgba(th::kInk));
-    ui_.Text(L"Stream", {stream_rect.left + 50.0f, stream_rect.top, stream_rect.right - 14.0f,
-                         stream_rect.bottom},
-             15.0f, th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    AddHit(Hit::Stream, -1, stream_rect);
+    const D2D1_RECT_F preview_rect{x0 + 388.0f, button_y, x0 + 552.0f, button_y + 52.0f};
+    const bool preview_hover = hover_ == Hit::Stream;
+    ui_.FillRounded(preview_rect, 12.0f, th::Rgba(0xFFFFFF, preview_hover ? 0.12f : 0.05f));
+    ui_.StrokeRounded(preview_rect, 12.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
+    ui_.Text(L"Preview pipeline", {preview_rect.left, preview_rect.top, preview_rect.right,
+                                   preview_rect.bottom},
+             13.0f, th::Rgba(th::kInk, 0.85f), DWRITE_FONT_WEIGHT_NORMAL,
+             DWRITE_TEXT_ALIGNMENT_CENTER);
+    AddHit(Hit::Stream, -1, preview_rect);
+
+    ui_.Text(L"Connect checks the console control port (9295). Pairing uses the 8-digit code "
+             L"from Settings > System > Remote Play > Link Device.",
+             {x0 + 36.0f, y0 + 288.0f, x0 + card_w - 36.0f, y0 + 316.0f}, 11.5f,
+             th::Rgba(th::kMuted, 0.85f));
 
     if (pad_.state().connected) {
         ui_.FillCircle(52.0f, h - 70.0f, 4.0f, th::Rgba(th::kOnline));
@@ -924,7 +949,7 @@ void App::RenderHome(double t) {
                  th::Rgba(th::kMuted));
     }
 
-    DrawHints(L"Click a game to select, click again to stream      Settings (top right)      Esc to quit");
+    DrawHints(L"Connect   reachability check      Pair   Settings > Connection      Esc   quit");
 }
 
 void App::RenderSettings(double t) {

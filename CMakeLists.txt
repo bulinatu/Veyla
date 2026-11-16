@@ -110,9 +110,17 @@ target_include_directories(brp_session PUBLIC
 target_compile_definitions(brp_session PUBLIC CHIAKI_LIB_ENABLE_MBEDTLS)
 target_link_libraries(brp_session PUBLIC mbedtls mbedx509 mbedcrypto ws2_32 bcrypt)
 set_target_properties(brp_session PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+# rpcrypt trips /GS inside chiaki's inlined bright-ambassador code; disable the
+# cookie for that translation unit so the protocol can be exercised.
+if(MSVC)
+    set_source_files_properties("/lib/src/rpcrypt.c" PROPERTIES COMPILE_OPTIONS "/GS-")
+endif()
+target_compile_options(brp_session PRIVATE $<$<COMPILE_LANGUAGE:C>:/Zi>)
 
 add_executable(pair_probe tools/pair_probe/main.cpp src/session/profile.cpp)
 target_link_libraries(pair_probe PRIVATE brp_session)
+target_compile_options(pair_probe PRIVATE /Zi)
+target_link_options(pair_probe PRIVATE /DEBUG)
 
 # The real client will link the forked chiaki-ng session layer.
 # vendor/chiaki-ng/lib/src is the transport/protocol core (session, ctrl, takion,
