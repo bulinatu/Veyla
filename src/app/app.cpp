@@ -55,6 +55,25 @@ int VsrIndex(int quality) {
     return 0;
 }
 
+const wchar_t* VsrQualityLabel(int quality) {
+    switch (quality) {
+        case 1:
+            return L"AI Low";
+        case 2:
+            return L"AI Medium";
+        case 3:
+            return L"AI High";
+        case 4:
+            return L"AI Ultra";
+        case 21:
+            return L"AI Stream M";
+        case 23:
+            return L"AI Stream U";
+        default:
+            return L"off";
+    }
+}
+
 enum WidgetId {
     W_Upscaler = 1,
     W_Hud,
@@ -2045,8 +2064,9 @@ void App::RenderSettings(double t) {
 
             if (vsr_quality_ > 0 && vsr_ready_) {
                 wchar_t text[192];
-                swprintf_s(text, L"RTX VSR active  -  %dx%d  -  last %.1f ms",
-                           nv_vsr_.out_width(), nv_vsr_.out_height(), nv_vsr_.last_ms());
+                swprintf_s(text, L"RTX VSR %s active  -  %dx%d  -  last %.1f ms",
+                           VsrQualityLabel(vsr_quality_), nv_vsr_.out_width(),
+                           nv_vsr_.out_height(), nv_vsr_.last_ms());
                 ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
                          th::Rgba(th::kMuted));
                 y += 24.0f;
@@ -2316,7 +2336,8 @@ void App::RenderStream(double t) {
             wchar_t stats[256];
             wchar_t fg_text[64] = L"";
             if (vsr_quality_ > 0 && vsr_ready_) {
-                swprintf_s(fg_text, L"  -  VSR %.1f ms", nv_vsr_.last_ms());
+                swprintf_s(fg_text, L"  -  VSR %s %.1f ms", VsrQualityLabel(vsr_quality_),
+                           nv_vsr_.last_ms());
             } else if (frame_gen_ >= 2 && fg_ready_) {
                 swprintf_s(fg_text, L"  -  VFG %dx gen %d", frame_gen_, fg_generated_);
             }
