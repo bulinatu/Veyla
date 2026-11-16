@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "audio/audio_engine.h"
 #include "media/pipeline.h"
 #include "platform/gamepad.h"
 #include "session/profile.h"
@@ -39,7 +40,7 @@ public:
     bool quit_requested() const { return quit_; }
 
 private:
-    enum class Screen { Home, Settings, Stream, Controller };
+    enum class Screen { Home, Settings, Stream, Controller, Audio };
 
     enum class Hit {
         None,
@@ -55,6 +56,10 @@ private:
         ControllerLeft,
         ControllerRight,
         ControllerAction,
+        AudioRow,
+        AudioLeft,
+        AudioRight,
+        AudioAction,
     };
 
     struct HitRegion {
@@ -67,6 +72,7 @@ private:
     void RenderSettings(double t);
     void RenderStream(double t);
     void RenderController(double t);
+    void RenderAudio(double t);
 
     void RenderTopBar();
     void DrawTile(const D2D1_RECT_F& rect, const GameEntry& game, float alpha, bool selected,
@@ -82,6 +88,8 @@ private:
     void HandlePad();
     void ChangeSetting(int direction);
     void ChangeControllerValue(int direction);
+    void ChangeAudioValue(int direction);
+    void OpenAudioDevice();
     void ApplyControllerOutput(bool force);
     void TriggerRumble();
 
@@ -94,6 +102,7 @@ private:
     float scroll_ = 0.0f;
     int setting_row_ = 0;
     int controller_row_ = 0;
+    int audio_row_ = 0;
     bool hud_ = true;
     int upscale_ = 1;
     bool quit_ = false;
@@ -124,6 +133,14 @@ private:
     double last_output_ = 0.0;
     bool output_dirty_ = true;
     bool last_send_ok_ = false;
+
+    // audio
+    audio::Engine audio_;
+    std::vector<audio::DeviceInfo> audio_devices_;
+    int audio_device_ = 0;
+    int audio_buffer_ms_ = 20;
+    bool audio_failed_ = false;
+    bool audio_opened_ = false;
 };
 
 }  // namespace brp

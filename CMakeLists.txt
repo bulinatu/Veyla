@@ -41,8 +41,9 @@ add_executable(brp
     src/app/app.cpp
     src/session/profile.cpp
     src/platform/gamepad.cpp
+    src/audio/audio_engine.cpp
 )
-target_link_libraries(brp PRIVATE brp_ui hid setupapi xinput)
+target_link_libraries(brp PRIVATE brp_ui hid setupapi xinput ole32 avrt uuid)
 
 # Diagnostic only: isolates D2D/D3D11 interop problems from app code.
 add_executable(d2d_probe tools/d2d_probe/main.cpp)

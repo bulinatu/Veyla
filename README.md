@@ -2,12 +2,13 @@
 
 A better PlayStation 5 → PC Remote Play client.
 
-**Status:** Phase 1 — the app runs with mouse + controller navigation and a working DualSense layer (input over Bluetooth/USB, lightbar, adaptive triggers, rumble, player LEDs). No console session yet.
+**Status:** Phase 1 — app with mouse/controller navigation, DualSense layer, and an in-process WASAPI audio engine (no drivers, no virtual cables). No console session yet.
 
 **What exists right now**
 
 - **`brp.exe` — the app.** PS5-inspired rail, settings, controller lab, and a stream screen running the real post-process pipeline with a live latency HUD. Mouse and controller navigation, no browser in the video path. See [docs/08-app.md](docs/08-app.md) and [docs/10-input.md](docs/10-input.md).
 - **DualSense support.** Raw HID (no DS4Windows) + XInput fallback. Parse: buttons, sticks, triggers, touch points, gyro/accel, battery. Output: lightbar RGB, 8 adaptive-trigger effects, rumble, player LEDs, mic LED. Bluetooth output uses the `0x31` report with CRC32.
+- **Audio.** WASAPI shared-mode engine inside the app: 48 kHz float stereo in, endpoint out. No virtual cable, no driver, no external DLL. The DualSense 3.5 mm jack is a normal USB audio endpoint — select it and audio goes to the controller. See [docs/11-audio.md](docs/11-audio.md).
 - **Session import.** Console identity + PSN account from a local PXPlay install (metadata only — PXPlay encrypts its keys; see [docs/09-session.md](docs/09-session.md)).
 - **`brp-bench`** — benchmark of the media path. 0.19 ms p50 at 1080p→4K on the target machine. See [docs/07-bench-log.md](docs/07-bench-log.md).
 - **`d2d_probe`**, **`tools/imgstat.py`** — diagnostics that earned their keep.
@@ -22,9 +23,10 @@ A better PlayStation 5 → PC Remote Play client.
 
 | Screen | Keys |
 |---|---|
-| Home | `Left`/`Right` select · `Enter` stream · `S` settings · `C` controller · `Esc` quit |
+| Home | `Left`/`Right` select · `Enter` stream · `S` settings · `C` controller · `M` audio · `Esc` quit |
 | Settings | `Up`/`Down` · `Left`/`Right` change · `Enter` open · `S`/`Esc` back |
 | Controller | `Up`/`Down` · `Left`/`Right` change · `Enter` rumble · `C`/`Esc` back |
+| Audio | `Up`/`Down` · `Left`/`Right` change · `Enter` test tone · `M`/`Esc` back |
 | Stream | `Esc` back · `H` HUD · `1`/`2`/`3` upscaler · `F12` screenshot |
 | Mouse | Click tiles / rows / buttons; wheel moves selection |
 
@@ -87,6 +89,7 @@ Useful flags: `--width/--height` output size, `--src-width/--src-height` source 
 | [docs/08-app.md](docs/08-app.md) | The app: screens, keys, code map, design rules, interop gotchas |
 | [docs/09-session.md](docs/09-session.md) | Session data: what PXPlay exposes, what is encrypted, our session file format |
 | [docs/10-input.md](docs/10-input.md) | Mouse, keyboard, controller navigation, DualSense input/output matrix |
+| [docs/11-audio.md](docs/11-audio.md) | Audio: WASAPI in-process, DualSense jack over USB, latency, A/V clock plan |
 
 ## Legal note
 

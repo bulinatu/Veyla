@@ -31,8 +31,9 @@ std::string EnvString(const char* name) {
     return value ? std::string(value) : std::string();
 }
 
-constexpr int kSettingCount = 8;
+constexpr int kSettingCount = 9;
 constexpr int kControllerCount = 7;
+constexpr int kAudioCount = 4;
 
 const wchar_t* kUpscalerNames[3] = {L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen"};
 
@@ -130,6 +131,8 @@ bool App::Init(Win32Window* window) {
         session_note_ = "No console configured yet.";
     }
 
+    audio_devices_ = audio::Engine::Enumerate();
+
     PresenterConfig cfg{};
     cfg.output_width = window->width();
     cfg.output_height = window->height();
@@ -198,7 +201,14 @@ void App::DispatchClick() {
             case Hit::SettingRow:
                 setting_row_ = it->index;
                 if (it->index == 7) {
+                    screen_ = Screen::Audio;
+                    audio_row_ = 0;
+                    if (!audio_opened_) {
+                        OpenAudioDevice();
+                    }
+                } else if (it->index == 8) {
                     screen_ = Screen::Controller;
+                    controller_row_ = 0;
                 }
                 break;
             case Hit::SettingLeft:
@@ -229,6 +239,26 @@ void App::DispatchClick() {
                     TriggerRumble();
                 }
                 break;
+            case Hit::AudioRow:
+                audio_row_ = it->index;
+                if (it->index == 3) {
+                    screen_ = Screen::Home;
+                }
+                break;
+            case Hit::AudioLeft:
+                audio_row_ = it->index;
+                ChangeAudioValue(-1);
+                break;
+            case Hit::AudioRight:
+                audio_row_ = it->index;
+                ChangeAudioValue(+1);
+                break;
+            case Hit::AudioAction:
+                audio_row_ = it->index;
+                if (it->index == 2) {
+                    audio_.PlayTestTone(0.6);
+                }
+                break;
             case Hit::None:
                 break;
         }
@@ -256,6 +286,12 @@ void App::HandleKey(int vk) {
             } else if (vk == 'C') {
                 screen_ = Screen::Controller;
                 controller_row_ = 0;
+            } else if (vk == 'M') {
+                screen_ = Screen::Audio;
+                audio_row_ = 0;
+                if (!audio_opened_) {
+                    OpenAudioDevice();
+                }
             } else if (vk == VK_ESCAPE) {
                 quit_ = true;
             }
@@ -272,6 +308,12 @@ void App::HandleKey(int vk) {
                 ChangeSetting(+1);
             } else if (vk == VK_RETURN) {
                 if (setting_row_ == 7) {
+                    screen_ = Screen::Audio;
+                    audio_row_ = 0;
+                    if (!audio_opened_) {
+                        OpenAudioDevice();
+                    }
+                } else if (setting_row_ == 8) {
                     screen_ = Screen::Controller;
                     controller_row_ = 0;
                 }
@@ -306,6 +348,26 @@ void App::HandleKey(int vk) {
             } else if (vk >= '1' && vk <= '3') {
                 upscale_ = vk - '1';
                 presenter_.SetUpscaleMode(upscale_);
+            }
+            break;
+
+        case Screen::Audio:
+            if (vk == VK_UP) {
+                audio_row_ = std::max(0, audio_row_ - 1);
+            } else if (vk == VK_DOWN) {
+                audio_row_ = std::min(kAudioCount - 1, audio_row_ + 1);
+            } else if (vk == VK_LEFT) {
+                ChangeAudioValue(-1);
+            } else if (vk == VK_RIGHT) {
+                ChangeAudioValue(+1);
+            } else if (vk == VK_RETURN) {
+                if (audio_row_ == 2) {
+                    audio_.PlayTestTone(0.6);
+                } else if (audio_row_ == 3) {
+                    screen_ = Screen::Home;
+                }
+            } else if (vk == VK_ESCAPE || vk == 'M') {
+                screen_ = Screen::Home;
             }
             break;
     }
@@ -378,9 +440,58 @@ void App::ChangeSetting(int direction) {
         }
     } else if (setting_row_ == 7) {
         if (direction != 0) {
+            screen_ = Screen::Audio;
+            audio_row_ = 0;
+            if (!audio_opened_) {
+                OpenAudioDevice();
+            }
+        }
+    } else if (setting_row_ == 8) {
+        if (direction != 0) {
             screen_ = Screen::Controller;
             controller_row_ = 0;
         }
+    }
+}
+
+void App::OpenAudioDevice() {
+    audio_.Close();
+    const std::string id =
+        audio_devices_.empty() ? std::string() : audio_devices_[audio_device_].id;
+    audio_failed_ = !audio_.Open(id, audio_buffer_ms_);
+    audio_opened_ = true;
+}
+
+void App::ChangeAudioValue(int direction) {
+    if (direction == 0) {
+        return;
+    }
+
+    switch (audio_row_) {
+        case 0:
+            if (!audio_devices_.empty()) {
+                const int count = static_cast<int>(audio_devices_.size());
+                audio_device_ = (audio_device_ + direction + count) % count;
+                OpenAudioDevice();
+            }
+            break;
+        case 1: {
+            const int sizes[] = {10, 20, 30, 40};
+            int index = 0;
+            for (int i = 0; i < 4; ++i) {
+                if (sizes[i] == audio_buffer_ms_) {
+                    index = i;
+                }
+            }
+            audio_buffer_ms_ = sizes[(index + direction + 4) % 4];
+            OpenAudioDevice();
+            break;
+        }
+        case 2:
+            audio_.PlayTestTone(0.6);
+            break;
+        default:
+            break;
     }
 }
 
@@ -506,6 +617,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         case Screen::Controller:
             RenderController(time_seconds);
             break;
+        case Screen::Audio:
+            RenderAudio(time_seconds);
+            break;
     }
     ui_.EndFrame();
 
@@ -531,6 +645,8 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
             path = "app-stream.bmp";
         } else if (screen_ == Screen::Controller) {
             path = "app-controller.bmp";
+        } else if (screen_ == Screen::Audio) {
+            path = "app-audio.bmp";
         }
         if (presenter_.CaptureToBmp(path)) {
             std::printf("captured %s\n", path);
@@ -706,7 +822,7 @@ void App::RenderHome(double t) {
     }
 
     DrawHints(L"Left / Right   Navigate      Enter   Stream      S   Settings      C   Controller"
-              L"      Esc   Quit");
+              L"      M   Audio      Esc   Quit");
 }
 
 void App::RenderSettings(double t) {
@@ -757,6 +873,10 @@ void App::RenderSettings(double t) {
         {L"Bitrate", bitrate_value, false},
         {L"Console", console_value, false},
         {L"PSN account", account_value, false},
+        {L"Audio output",
+         audio_.is_open() ? Widen(audio_.device_name())
+                          : (audio_failed_ ? std::wstring(L"open failed") : std::wstring(L"Open  ›")),
+         true},
         {L"Controller test", L"Open  ›", true},
     };
 
@@ -929,6 +1049,136 @@ void App::RenderController(double t) {
     }
 
     DrawHints(L"Up / Down   Select      Left / Right   Change      Enter   Rumble      C / Esc   Back");
+}
+
+void App::RenderAudio(double t) {
+    (void)t;
+    const float w = static_cast<float>(window_->width());
+    const float h = static_cast<float>(window_->height());
+
+    ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(0x0A1018), th::Rgba(th::kBgBottom));
+    ui_.FillRadial(w * 0.5f, -h * 0.1f, w * 0.7f, th::Rgba(0x1E5A4A, 0.30f),
+                   th::Rgba(0x1E5A4A, 0.0f));
+
+    const D2D1_RECT_F back{w - 132.0f, 28.0f, w - 40.0f, 64.0f};
+    ui_.FillRounded(back, 18.0f, th::Rgba(0xFFFFFF, hover_ == Hit::Back ? 0.12f : 0.06f));
+    ui_.StrokeRounded(back, 18.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
+    ui_.Text(L"Back", {back.left, back.top, back.right, back.bottom}, 13.0f,
+             th::Rgba(th::kInk, 0.9f), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER);
+    AddHit(Hit::Back, -1, back);
+
+    const float panel_w = std::min(1040.0f, w - 96.0f);
+    const float x0 = (w - panel_w) * 0.5f;
+
+    ui_.Text(L"Audio", {x0, 84.0f, x0 + panel_w, 146.0f}, 40.0f, th::Rgba(th::kInk),
+             DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    ui_.Text(L"WASAPI shared mode, in-process: no virtual cable, no driver. The DualSense "
+             L"3.5 mm jack is a standard USB audio endpoint (USB only).",
+             {x0, 148.0f, x0 + panel_w, 174.0f}, 13.0f, th::Rgba(th::kMuted));
+
+    std::wstring device_value;
+    if (audio_devices_.empty()) {
+        device_value = L"System default";
+    } else {
+        const audio::DeviceInfo& info = audio_devices_[static_cast<size_t>(audio_device_)];
+        device_value = Widen(info.name);
+        if (info.is_default) {
+            device_value += L"  (default)";
+        } else if (info.is_controller) {
+            device_value += L"  (controller)";
+        }
+    }
+
+    struct Row {
+        const wchar_t* label;
+        std::wstring value;
+        bool enabled;
+    };
+
+    const Row rows[kAudioCount] = {
+        {L"Output device", device_value, true},
+        {L"Buffer", Widen(std::to_string(audio_buffer_ms_) + " ms"), true},
+        {L"Test tone", L"Enter", true},
+        {L"Back", L"", true},
+    };
+
+    const float row_h = 56.0f;
+    float y = 204.0f;
+
+    for (int i = 0; i < kAudioCount; ++i) {
+        const D2D1_RECT_F row_rect{x0, y, x0 + panel_w, y + row_h - 6.0f};
+        const bool selected = i == audio_row_;
+        const bool hovered = hover_ == Hit::AudioRow && hover_index_ == i;
+
+        if (selected || hovered) {
+            ui_.FillRounded(row_rect, 12.0f, th::Rgba(0xFFFFFF, hovered ? 0.08f : 0.06f));
+        }
+        if (selected) {
+            ui_.FillRounded({x0 + 10.0f, y + 9.0f, x0 + 14.0f, y + row_h - 15.0f}, 2.0f,
+                            th::Rgba(th::kOnline, 0.95f));
+        }
+
+        ui_.Text(rows[i].label, {x0 + 28.0f, y, x0 + panel_w * 0.45f, y + row_h - 6.0f}, 16.0f,
+                 th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_NORMAL);
+        if (!rows[i].value.empty()) {
+            ui_.Text(rows[i].value.c_str(),
+                     {x0 + panel_w * 0.30f, y, x0 + panel_w - 28.0f, y + row_h - 6.0f}, 15.0f,
+                     th::Rgba(th::kInkDim), DWRITE_FONT_WEIGHT_NORMAL,
+                     DWRITE_TEXT_ALIGNMENT_TRAILING);
+        }
+
+        AddHit(Hit::AudioRow, i, row_rect);
+        if (i == 2) {
+            AddHit(Hit::AudioAction, i, row_rect);
+        } else if (i == 0 || i == 1) {
+            AddHit(Hit::AudioLeft, i,
+                   {row_rect.left, row_rect.top, row_rect.left + panel_w * 0.30f, row_rect.bottom});
+            AddHit(Hit::AudioRight, i,
+                   {row_rect.left + panel_w * 0.62f, row_rect.top, row_rect.right, row_rect.bottom});
+        }
+
+        y += row_h;
+    }
+
+    const D2D1_RECT_F live{x0, y + 14.0f, x0 + panel_w, y + 14.0f + 150.0f};
+    ui_.FillRounded(live, 14.0f, th::Rgba(0xFFFFFF, 0.04f));
+
+    if (audio_.is_open()) {
+        wchar_t line[512];
+        swprintf_s(line, L"Device      %s", Widen(audio_.device_name()).c_str());
+        ui_.Text(line, {live.left + 24.0f, live.top + 12.0f, live.right - 24.0f, live.top + 36.0f},
+                 13.0f, th::Rgba(th::kInkDim));
+
+        swprintf_s(line, L"Format      %s", Widen(audio_.format_text()).c_str());
+        ui_.Text(line, {live.left + 24.0f, live.top + 38.0f, live.right - 24.0f, live.top + 62.0f},
+                 13.0f, th::Rgba(th::kInkDim));
+
+        swprintf_s(line, L"Latency     %.1f ms        Underruns  %d", audio_.latency_ms(),
+                   audio_.underruns());
+        ui_.Text(line, {live.left + 24.0f, live.top + 64.0f, live.right - 24.0f, live.top + 88.0f},
+                 13.0f, th::Rgba(th::kInkDim));
+
+        // Peak meter
+        const D2D1_RECT_F meter{live.left + 24.0f, live.top + 104.0f, live.left + 24.0f + 320.0f,
+                                live.top + 120.0f};
+        ui_.FillRounded(meter, 4.0f, th::Rgba(0xFFFFFF, 0.08f));
+        const float level = std::clamp(audio_.peak(), 0.0f, 1.0f);
+        if (level > 0.001f) {
+            ui_.FillRounded({meter.left, meter.top, meter.left + 320.0f * level, meter.bottom},
+                            4.0f, th::Rgba(level > 0.98f ? 0xFF6B6B : th::kOnline, 0.9f));
+        }
+        ui_.Text(L"Peak", {meter.right + 16.0f, meter.top - 8.0f, meter.right + 90.0f,
+                           meter.bottom + 8.0f},
+                12.0f, th::Rgba(th::kMuted));
+    } else {
+        ui_.Text(audio_failed_
+                     ? L"Could not open the device. It may be in use exclusively or was removed."
+                     : L"Not started. Press Enter on Output device to open the endpoint.",
+                 {live.left + 24.0f, live.top + 12.0f, live.right - 24.0f, live.bottom - 12.0f},
+                 13.0f, th::Rgba(th::kMuted));
+    }
+
+    DrawHints(L"Up / Down   Select      Left / Right   Change      Enter   Play tone      M / Esc   Back");
 }
 
 void App::RenderStream(double t) {
