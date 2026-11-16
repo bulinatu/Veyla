@@ -13,6 +13,7 @@
 #include "audio/audio_engine.h"
 #include "media/nv_vfx.h"
 #include "media/nv_vsr.h"
+#include "media/nv_dlss_sr.h"
 #include "media/pipeline.h"
 #include "net/reachability.h"
 #include "platform/gamepad.h"
@@ -53,7 +54,7 @@ public:
 
 private:
     enum class Screen { Home, Settings, Stream, StreamSettings };
-    enum class Tab { Display, Audio, Controller, Connection, About };
+    enum class Tab { Display, Neural, Audio, Controller, Connection, About };
 
     enum class Hit {
         None,
@@ -130,6 +131,11 @@ private:
     bool EnsureVsr();
     std::wstring FindVsrRuntime() const;
     void DisableVsr();
+
+    bool DlssAvailable() const;
+    bool EnsureDlssSr(int in_width, int in_height);
+    std::wstring FindDlssRuntime() const;
+    void ApplyNeuralSettings();
 
     Win32Window* window_ = nullptr;
     Presenter presenter_;
@@ -230,6 +236,16 @@ private:
     int vsr_quality_ = 0;  // 0 off, else 1..4 / 21 / 23
     std::wstring vsr_note_;
     media::NvVsr::Frame vsr_frame_;
+
+    // neural rendering (DLSS Super Resolution, D3D12)
+    media::NvDlssSr dlss_sr_;
+    bool dlss_present_ = false;
+    bool dlss_ready_ = false;
+    int dlss_in_w_ = 0;
+    int dlss_in_h_ = 0;
+    std::wstring dlss_note_;
+    media::NvDlssSr::Frame dlss_frame_;
+    bool overlay_neural_ = false;
 
     // Connect flow: check the control port, wake the console if it is asleep,
     // then start the session.

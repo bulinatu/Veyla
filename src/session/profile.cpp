@@ -372,6 +372,9 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"pad_rate_hz\": " << profile.pad_rate_hz << ",\n";
     json << "  \"frame_gen\": " << profile.frame_gen << ",\n";
     json << "  \"vsr\": " << profile.vsr << ",\n";
+    json << "  \"neural_sr\": " << profile.neural_sr << ",\n";
+    json << "  \"dlss_preset\": " << profile.dlss_preset << ",\n";
+    json << "  \"dlss_quality\": " << profile.dlss_quality << ",\n";
     json << "  \"decoder\": " << profile.decoder << ",\n";
     json << "  \"chroma\": " << profile.chroma << ",\n";
     json << "  \"lightbar\": " << profile.lightbar << ",\n";
@@ -440,6 +443,9 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     if (ExtractNumber(json, "pad_rate_hz", number)) p.pad_rate_hz = static_cast<int>(number);
     if (ExtractNumber(json, "frame_gen", number)) p.frame_gen = static_cast<int>(number);
     if (ExtractNumber(json, "vsr", number)) p.vsr = static_cast<int>(number);
+    if (ExtractNumber(json, "neural_sr", number)) p.neural_sr = static_cast<int>(number);
+    if (ExtractNumber(json, "dlss_preset", number)) p.dlss_preset = static_cast<int>(number);
+    if (ExtractNumber(json, "dlss_quality", number)) p.dlss_quality = static_cast<int>(number);
     if (ExtractNumber(json, "decoder", number)) p.decoder = static_cast<int>(number);
     if (ExtractNumber(json, "chroma", number)) p.chroma = static_cast<int>(number);
     if (ExtractNumber(json, "lightbar", number)) p.lightbar = static_cast<int>(number);

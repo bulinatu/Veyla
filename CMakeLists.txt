@@ -14,10 +14,12 @@ add_library(brp_media STATIC
     src/media/pipeline.cpp
     src/media/nv_vfx.cpp
     src/media/nv_vsr.cpp
+    src/media/nv_dlss_sr.cpp
 )
 target_include_directories(brp_media PUBLIC src)
+target_include_directories(brp_media PRIVATE third_party/nvidia-ngx/include)
 target_compile_definitions(brp_media PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
-target_link_libraries(brp_media PUBLIC d3d11 dxgi d3dcompiler)
+target_link_libraries(brp_media PUBLIC d3d11 dxgi d3dcompiler d3d12)
 
 if (MSVC)
     target_compile_options(brp_media PRIVATE /W4 /permissive- /utf-8)
@@ -40,6 +42,11 @@ target_link_libraries(vfg_pace_probe PRIVATE brp_media)
 target_compile_options(vfg_pace_probe PRIVATE /Zi)
 target_link_options(vfg_pace_probe PRIVATE /DEBUG)
 
+add_executable(dlss_sr_module_probe tools/dlss_sr_module_probe/main.cpp)
+target_link_libraries(dlss_sr_module_probe PRIVATE brp_media)
+target_compile_options(dlss_sr_module_probe PRIVATE /Zi)
+target_link_options(dlss_sr_module_probe PRIVATE /DEBUG)
+
 add_executable(vsr_probe tools/vsr_probe/main.cpp)
 target_link_libraries(vsr_probe PRIVATE brp_media)
 target_compile_options(vsr_probe PRIVATE /Zi)
@@ -54,6 +61,18 @@ if(NGX_SDK_INC AND EXISTS "${NGX_SDK_INC}/nvsdk_ngx.h")
     target_link_libraries(dlssnr_probe PRIVATE d3d11 d3d12 dxgi)
     target_compile_options(dlssnr_probe PRIVATE /Zi)
     target_link_options(dlssnr_probe PRIVATE /DEBUG)
+
+    add_executable(dlss_sr_probe tools/dlss_sr_probe/main.cpp)
+    target_include_directories(dlss_sr_probe PRIVATE "${NGX_SDK_INC}")
+    target_link_libraries(dlss_sr_probe PRIVATE d3d11 dxgi)
+    target_compile_options(dlss_sr_probe PRIVATE /Zi)
+    target_link_options(dlss_sr_probe PRIVATE /DEBUG)
+
+    add_executable(dlss_sr_d3d12_probe tools/dlss_sr_d3d12_probe/main.cpp)
+    target_include_directories(dlss_sr_d3d12_probe PRIVATE "${NGX_SDK_INC}")
+    target_link_libraries(dlss_sr_d3d12_probe PRIVATE d3d11 d3d12 dxgi)
+    target_compile_options(dlss_sr_d3d12_probe PRIVATE /Zi)
+    target_link_options(dlss_sr_d3d12_probe PRIVATE /DEBUG)
 endif()
 
 # --- Application shell (Direct2D UI over the same D3D11 device) -------------

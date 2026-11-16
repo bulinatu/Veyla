@@ -55,6 +55,9 @@ struct Profile {
     int pad_rate_hz = 250;
     int frame_gen = 0;  // 0 off, 2/3/4 NVIDIA VFG multiplier
     int vsr = 0;        // 0 off, else RTX VSR quality level (1..4, 21, 23)
+    int neural_sr = 0;  // 1 = DLSS Super Resolution (D3D12), exclusive with VSR/VFG
+    int dlss_preset = 11;  // 11 K, 12 L, 13 M
+    int dlss_quality = 0;  // 0 balanced, 1 max quality
     int decoder = 0;    // 0 auto, 1 d3d11va, 2 d3d12va, 3 vulkan, 4 dxva2, 5 cuda, 6 software
     int chroma = 1;     // 0 bilinear, 1 bicubic, 2 lanczos
     int lightbar = 0;

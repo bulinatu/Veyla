@@ -106,6 +106,11 @@ enum WidgetId {
     W_RenderTarget = 52,
     W_PairHome = 42,
     W_NeuralMax = 61,
+    W_NeuralSr = 62,
+    W_DlssPreset = 63,
+    W_DlssQuality = 64,
+    W_NeuralOverlay = 65,
+    W_NeuralOverlayBack = 66,
     W_ResumeOverlay = 60,
 };
 
@@ -275,9 +280,23 @@ bool App::Init(Win32Window* window) {
     frame_gen_ = profile_.frame_gen >= 2 ? 2 : 0;
     nv_vfx_present_ = !FindFrameGenRuntime().empty();
 
+    // DLSS SR is the strongest neural path: it replaces VSR and VFG, which
+    // both consume the same decoded frame.
+    dlss_present_ = !FindDlssRuntime().empty();
+    if (profile_.neural_sr > 0) {
+        if (dlss_present_ && EnsureDlssSr(profile_.width, profile_.height)) {
+            vsr_quality_ = 0;
+            profile_.vsr = 0;
+            frame_gen_ = 0;
+            profile_.frame_gen = 0;
+        } else {
+            profile_.neural_sr = 0;
+        }
+    }
+
     // RTX VSR and VFG both consume the decoded frame; VSR wins at startup and
     // turns frame generation off, matching the UI exclusivity rule.
-    vsr_quality_ = profile_.vsr;
+    vsr_quality_ = profile_.neural_sr > 0 ? 0 : profile_.vsr;
     bool valid_vsr = false;
     for (int level : kVsrLevels) {
         if (level != 0 && level == vsr_quality_) {
@@ -297,6 +316,9 @@ bool App::Init(Win32Window* window) {
             vsr_quality_ = 0;
             profile_.vsr = 0;
         }
+    }
+    if (profile_.neural_sr > 0) {
+        frame_gen_ = 0;
     }
     if (frame_gen_ >= 2 && (!nv_vfx_present_ || !EnsureFrameGen())) {
         frame_gen_ = 0;
@@ -401,6 +423,7 @@ void App::DispatchClick() {
                     DisconnectStream();
                 } else if (it->index == W_ResumeOverlay) {
                     screen_ = Screen::Stream;
+                    overlay_neural_ = false;
                     open_dropdown_ = -1;
                 } else if (it->index == W_Pair) {
                     if (pin_.size() == 8) {
@@ -464,10 +487,10 @@ void App::HandleKey(int vk) {
             } else if (vk == 'S') {
                 screen_ = Screen::Home;
             } else if (vk == VK_TAB || vk == VK_RIGHT) {
-                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 1) % 5);
+                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 1) % 6);
                 open_dropdown_ = -1;
             } else if (vk == VK_LEFT) {
-                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 4) % 5);
+                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 5) % 6);
                 open_dropdown_ = -1;
             }
             break;
@@ -475,6 +498,7 @@ void App::HandleKey(int vk) {
         case Screen::Stream:
             if (vk == VK_TAB) {
                 screen_ = Screen::StreamSettings;
+                overlay_neural_ = false;
                 open_dropdown_ = -1;
                 mouse_active_at_ = clock_;
             } else if (vk == VK_ESCAPE) {
@@ -598,6 +622,12 @@ void App::ApplyDropdown(int id, int index) {
                 profile_.vsr = 0;
                 stream_note_ = "Frame generation replaced RTX VSR.";
             }
+            if (value > 0 && profile_.neural_sr > 0) {
+                profile_.neural_sr = 0;
+                dlss_ready_ = false;
+                dlss_sr_.Shutdown();
+                stream_note_ = "Frame generation replaced DLSS Super Resolution.";
+            }
             frame_gen_ = value;
             profile_.frame_gen = value;
             fg_queue_.clear();
@@ -640,6 +670,12 @@ void App::ApplyDropdown(int id, int index) {
                 SaveProfile();
                 break;
             }
+            if (profile_.neural_sr > 0) {
+                profile_.neural_sr = 0;
+                dlss_ready_ = false;
+                dlss_sr_.Shutdown();
+                stream_note_ = "RTX VSR replaced DLSS Super Resolution.";
+            }
             if (frame_gen_ >= 2 || profile_.frame_gen >= 2) {
                 frame_gen_ = 0;
                 profile_.frame_gen = 0;
@@ -653,6 +689,11 @@ void App::ApplyDropdown(int id, int index) {
             break;
         }
         case W_NeuralMax: {
+            if (profile_.neural_sr > 0) {
+                profile_.neural_sr = 0;
+                dlss_ready_ = false;
+                dlss_sr_.Shutdown();
+            }
             vsr_quality_ = 4;  // AI Ultra
             render_target_ = 3;  // 2160p
             profile_.render_target = 3;
@@ -671,6 +712,43 @@ void App::ApplyDropdown(int id, int index) {
             SaveProfile();
             break;
         }
+        case W_NeuralSr: {
+            profile_.neural_sr = index == 1 ? 1 : 0;
+            ApplyNeuralSettings();
+            stream_note_ = profile_.neural_sr
+                               ? "DLSS Super Resolution enabled (D3D12, zero depth)."
+                               : "DLSS Super Resolution off.";
+            break;
+        }
+        case W_DlssPreset: {
+            static const int kPresets[] = {11, 12, 13};
+            profile_.dlss_preset = kPresets[std::clamp(index, 0, 2)];
+            if (profile_.neural_sr > 0) {
+                ApplyNeuralSettings();
+                stream_note_ = "DLSS model preset applied live.";
+            } else {
+                SaveProfile();
+            }
+            break;
+        }
+        case W_DlssQuality: {
+            profile_.dlss_quality = std::clamp(index, 0, 1);
+            if (profile_.neural_sr > 0) {
+                ApplyNeuralSettings();
+                stream_note_ = "DLSS quality applied live.";
+            } else {
+                SaveProfile();
+            }
+            break;
+        }
+        case W_NeuralOverlay:
+            overlay_neural_ = true;
+            open_dropdown_ = -1;
+            break;
+        case W_NeuralOverlayBack:
+            overlay_neural_ = false;
+            open_dropdown_ = -1;
+            break;
         case W_Hud:
             hud_ = index == 1;
             profile_.hud = hud_;
@@ -832,6 +910,13 @@ void App::ApplyRenderTarget() {
             vsr_note_ = note;
         }
     }
+    if (profile_.neural_sr > 0) {
+        if (!EnsureDlssSr(profile_.width, profile_.height)) {
+            profile_.neural_sr = 0;
+            dlss_ready_ = false;
+            dlss_sr_.Shutdown();
+        }
+    }
 }
 
 int App::present_hz() const {
@@ -969,6 +1054,101 @@ void App::DisableVsr() {
     nv_vsr_.Shutdown();
 }
 
+std::wstring App::FindDlssRuntime() const {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    std::vector<fs::path> candidates;
+
+    wchar_t exe_path[MAX_PATH] = {};
+    if (::GetModuleFileNameW(nullptr, exe_path, MAX_PATH) > 0) {
+        const fs::path exe_dir = fs::path(exe_path).parent_path();
+        candidates.push_back(exe_dir / "nvidia-ngx" / "runtime");
+        candidates.push_back(exe_dir);
+        candidates.push_back(exe_dir / ".." / ".." / "third_party" / "nvidia-ngx" / "runtime");
+    }
+    const fs::path cwd = fs::current_path(ec);
+    if (!ec) {
+        candidates.push_back(cwd / "third_party" / "nvidia-ngx" / "runtime");
+        candidates.push_back(cwd / "nvidia-ngx" / "runtime");
+    }
+    for (const fs::path& dir : candidates) {
+        if (fs::exists(dir / "nvngx_dlss.dll", ec) && !ec) {
+            return fs::absolute(dir, ec).wstring();
+        }
+        ec.clear();
+    }
+    return {};
+}
+
+bool App::DlssAvailable() const {
+    return dlss_present_ || dlss_sr_.runtime_loaded();
+}
+
+bool App::EnsureDlssSr(int in_width, int in_height) {
+    std::string detail;
+    if (!dlss_sr_.runtime_loaded()) {
+        const std::wstring dir = FindDlssRuntime();
+        if (dir.empty()) {
+            dlss_note_ =
+                L"DLSS runtime missing: put nvngx_dlss.dll in third_party\\nvidia-ngx\\runtime";
+            return false;
+        }
+        if (!dlss_sr_.LoadRuntime(dir, detail)) {
+            dlss_note_ = L"DLSS runtime: " + Widen(detail);
+            std::fprintf(stderr, "[app] DLSS runtime failed: %s\n", detail.c_str());
+            return false;
+        }
+    }
+    const int out_w = presenter_.render_width();
+    const int out_h = presenter_.render_height();
+    if (in_width <= 0 || in_height <= 0 || out_w <= in_width || out_h <= in_height) {
+        dlss_note_ = L"DLSS SR needs an upscale target larger than the stream (1440p or 2160p)";
+        std::fprintf(stderr, "[app] DLSS size rejected: %dx%d -> %dx%d\n", in_width, in_height,
+                     out_w, out_h);
+        return false;
+    }
+    if (!dlss_sr_.Initialize(presenter_.device(), presenter_.context(), in_width, in_height,
+                             out_w, out_h, profile_.dlss_preset, profile_.dlss_quality,
+                             detail)) {
+        dlss_note_ = L"DLSS SR init: " + Widen(detail);
+        std::fprintf(stderr, "[app] DLSS init failed: %s\n", detail.c_str());
+        return false;
+    }
+    dlss_ready_ = true;
+    dlss_in_w_ = in_width;
+    dlss_in_h_ = in_height;
+    dlss_note_ = L"DLSS SR ready";
+    return true;
+}
+
+void App::ApplyNeuralSettings() {
+    if (profile_.neural_sr > 0) {
+        if (!DlssAvailable()) {
+            profile_.neural_sr = 0;
+            dlss_note_ = L"DLSS SR unavailable: runtime not found";
+            SaveProfile();
+            return;
+        }
+        DisableVsr();
+        profile_.vsr = 0;
+        frame_gen_ = 0;
+        profile_.frame_gen = 0;
+        fg_queue_.clear();
+        fg_last_ = {};
+        if (!EnsureDlssSr(profile_.width, profile_.height)) {
+            profile_.neural_sr = 0;
+            dlss_ready_ = false;
+            dlss_sr_.Shutdown();
+        }
+    } else {
+        dlss_ready_ = false;
+        dlss_in_w_ = 0;
+        dlss_in_h_ = 0;
+        dlss_sr_.Shutdown();
+    }
+    SaveProfile();
+}
+
 App::~App() {
     StopPadThread();
 }
@@ -1097,6 +1277,19 @@ void App::StartStream() {
     pad_.SetConsoleFeedback(PadConsoleFeedback{});
     feedback_version_ = 0;
 
+    if (profile_.neural_sr > 0) {
+        if (!EnsureDlssSr(profile_.width, profile_.height)) {
+            const std::wstring note = dlss_note_;
+            profile_.neural_sr = 0;
+            dlss_ready_ = false;
+            dlss_sr_.Shutdown();
+            SaveProfile();
+            dlss_note_ = note;
+            stream_note_ = "DLSS SR unavailable; using the regular upscaler.";
+            std::fprintf(stderr, "[app] DLSS SR disabled: %ls\n", dlss_note_.c_str());
+        }
+        frame_gen_ = 0;
+    }
     if (vsr_quality_ > 0 && !EnsureVsr()) {
         const std::wstring note = vsr_note_;
         DisableVsr();
@@ -1410,7 +1603,28 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                 }
             }
         } else if (streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
-            if (vsr_quality_ > 0 && vsr_ready_) {
+            if (profile_.neural_sr > 0 &&
+                (stream_frame_.width != dlss_in_w_ || stream_frame_.height != dlss_in_h_)) {
+                dlss_ready_ = EnsureDlssSr(stream_frame_.width, stream_frame_.height);
+            }
+            if (profile_.neural_sr > 0 && dlss_ready_) {
+                std::string detail;
+                if (dlss_sr_.Process(stream_frame_.rgba.data(), stream_frame_.width,
+                                     stream_frame_.height, dlss_frame_, detail)) {
+                    presenter_.SetSourceView(dlss_frame_.srv.Get(), dlss_sr_.out_width(),
+                                             dlss_sr_.out_height(), stream_frame_.pq);
+                    presenter_.SetSourceFinal(true);
+                } else {
+                    dlss_note_ = L"DLSS SR: " + Widen(detail);
+                    std::fprintf(stderr, "[app] DLSS SR failed: %s\n", detail.c_str());
+                    profile_.neural_sr = 0;
+                    dlss_ready_ = false;
+                    dlss_sr_.Shutdown();
+                    SaveProfile();
+                    presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
+                                              stream_frame_.height, stream_frame_.pq);
+                }
+            } else if (vsr_quality_ > 0 && vsr_ready_) {
                 std::string detail;
                 if (nv_vsr_.Process(stream_frame_.rgba.data(), stream_frame_.width,
                                     stream_frame_.height, vsr_frame_, detail)) {
@@ -1995,8 +2209,8 @@ void App::RenderSettings(double t) {
                  th::Rgba(th::kMuted));
     }
 
-    const wchar_t* tab_names[] = {L"Display", L"Audio", L"Controller", L"Connection", L"About"};
-    for (int i = 0; i < 5; ++i) {
+    const wchar_t* tab_names[] = {L"Display", L"Neural", L"Audio", L"Controller", L"Connection", L"About"};
+    for (int i = 0; i < 6; ++i) {
         const D2D1_RECT_F tab{48.0f, 148.0f + i * 54.0f, 300.0f, 148.0f + i * 54.0f + 44.0f};
         const bool selected = static_cast<int>(tab_) == i;
         const bool hovered = hover_ == Hit::Tab && hover_index_ == i;
@@ -2104,6 +2318,54 @@ void App::RenderSettings(double t) {
                          {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
                          th::Rgba(th::kMuted));
             }
+            break;
+        }
+
+        case Tab::Neural: {
+            const bool available = DlssAvailable();
+            DrawDropdown(L"DLSS Super Resolution (D3D12)",
+                         {L"Off", L"On  -  neural upscale"}, profile_.neural_sr > 0 ? 1 : 0, y,
+                         W_NeuralSr, available);
+            y += kRowH;
+            DrawDropdown(L"Upscale target",
+                         {L"Window / display", L"1080p", L"1440p", L"2160p"}, render_target_, y,
+                         W_RenderTarget);
+            y += kRowH;
+            DrawDropdown(L"DLSS model preset",
+                         {L"K (Transformer 1, stable)", L"L (Transformer 2, best)",
+                          L"M (Transformer 2, sharp)"},
+                         profile_.dlss_preset == 12 ? 1 : (profile_.dlss_preset == 13 ? 2 : 0),
+                         y, W_DlssPreset, available);
+            y += kRowH;
+            DrawDropdown(L"DLSS quality", {L"Balanced", L"Max Quality"},
+                         std::clamp(profile_.dlss_quality, 0, 1), y, W_DlssQuality, available);
+            y += kRowH;
+
+            if (profile_.neural_sr > 0 && dlss_ready_) {
+                wchar_t text[192];
+                swprintf_s(text, L"DLSS SR active  -  %dx%d  -  last %.1f ms",
+                           dlss_sr_.out_width(), dlss_sr_.out_height(), dlss_sr_.last_ms());
+                ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
+                y += 24.0f;
+            } else if (!available) {
+                ui_.Text(
+                    L"DLSS runtime missing: nvngx_dlss.dll in third_party\\nvidia-ngx\\runtime",
+                    {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f, th::Rgba(th::kMuted));
+                y += 24.0f;
+            } else if (!dlss_note_.empty()) {
+                ui_.Text(dlss_note_.c_str(), {kContentX, y + 2.0f, w - 64.0f, y + 26.0f},
+                         12.0f, th::Rgba(th::kMuted));
+                y += 24.0f;
+            }
+
+            ui_.Text(
+                L"Depth: zero contract (Magpie captured-colour)   -   Motion: zero, history reset per frame",
+                {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 11.5f, th::Rgba(th::kMuted));
+            y += 26.0f;
+            ui_.Text(
+                L"Presets L/M need a 580+ driver; K is the safe default. Changes apply live.",
+                {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 11.5f, th::Rgba(th::kMuted));
             break;
         }
 
@@ -2335,7 +2597,9 @@ void App::RenderStream(double t) {
         if (stream_active_) {
             wchar_t stats[256];
             wchar_t fg_text[64] = L"";
-            if (vsr_quality_ > 0 && vsr_ready_) {
+            if (profile_.neural_sr > 0 && dlss_ready_) {
+                swprintf_s(fg_text, L"  -  DLSS SR %.1f ms", dlss_sr_.last_ms());
+            } else if (vsr_quality_ > 0 && vsr_ready_) {
                 swprintf_s(fg_text, L"  -  VSR %s %.1f ms", VsrQualityLabel(vsr_quality_),
                            nv_vsr_.last_ms());
             } else if (frame_gen_ >= 2 && fg_ready_) {
@@ -2421,8 +2685,61 @@ void App::RenderStreamSettings(double t) {
     const D2D1_RECT_F panel{300.0f, 70.0f, w - 40.0f, h - 70.0f};
     ui_.FillRounded(panel, 18.0f, th::Rgba(0x0B1220, 0.96f));
     ui_.StrokeRounded(panel, 18.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
-    ui_.Text(L"Stream settings", {kContentX, 92.0f, w - 64.0f, 130.0f}, 24.0f,
-             th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    ui_.Text(overlay_neural_ ? L"Neural rendering" : L"Stream settings",
+             {kContentX, 92.0f, w - 64.0f, 130.0f}, 24.0f, th::Rgba(th::kInk),
+             DWRITE_FONT_WEIGHT_SEMI_BOLD);
+
+    if (overlay_neural_) {
+        DrawButton(L"Stream settings", {w - 300.0f, 92.0f, w - 64.0f, 130.0f},
+                   W_NeuralOverlayBack, false);
+        float y = 150.0f;
+        const bool available = DlssAvailable();
+        DrawDropdown(L"DLSS Super Resolution (D3D12)",
+                     {L"Off", L"On  -  neural upscale"}, profile_.neural_sr > 0 ? 1 : 0, y,
+                     W_NeuralSr, available);
+        y += 56.0f;
+        DrawDropdown(L"DLSS model preset",
+                     {L"K (Transformer 1, stable)", L"L (Transformer 2, best)",
+                      L"M (Transformer 2, sharp)"},
+                     profile_.dlss_preset == 12 ? 1 : (profile_.dlss_preset == 13 ? 2 : 0), y,
+                     W_DlssPreset, available);
+        y += 56.0f;
+        DrawDropdown(L"DLSS quality", {L"Balanced", L"Max Quality"},
+                     std::clamp(profile_.dlss_quality, 0, 1), y, W_DlssQuality, available);
+        y += 56.0f;
+        DrawDropdown(L"Neural upscaling (RTX VSR)", VsrLabels(), VsrIndex(vsr_quality_), y,
+                     W_Vsr, VsrAvailable());
+        y += 56.0f;
+        DrawDropdown(L"Upscale target",
+                     {L"Window / display", L"1080p", L"1440p", L"2160p"}, render_target_, y,
+                     W_RenderTarget);
+        y += 56.0f;
+
+        if (profile_.neural_sr > 0 && dlss_ready_) {
+            wchar_t text[192];
+            swprintf_s(text, L"DLSS SR active  -  %dx%d  -  last %.1f ms",
+                       dlss_sr_.out_width(), dlss_sr_.out_height(), dlss_sr_.last_ms());
+            ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
+                     th::Rgba(th::kMuted));
+        } else if (!available) {
+            ui_.Text(L"DLSS runtime missing: nvngx_dlss.dll in third_party\\nvidia-ngx\\runtime",
+                     {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
+                     th::Rgba(th::kMuted));
+        } else {
+            ui_.Text(L"Depth: zero contract  -  motion zero, history reset each frame",
+                     {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
+                     th::Rgba(th::kMuted));
+        }
+        y += 30.0f;
+        DrawButton(L"Resume", {kContentX, y + 6.0f, kContentX + 200.0f, y + 50.0f},
+                   W_ResumeOverlay, true);
+        DrawHints(L"Tab / Esc   resume      Neural changes apply live", 1.0f);
+        DrawPopup();
+        return;
+    }
+
+    DrawButton(L"Neural rendering", {w - 300.0f, 92.0f, w - 64.0f, 130.0f}, W_NeuralOverlay,
+               false);
 
     float y = 150.0f;
     DrawDropdown(L"Upscaler",
