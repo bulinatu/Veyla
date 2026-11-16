@@ -16,9 +16,10 @@ Last updated: live streaming + full controller pipeline.
 | Presentation pipeline | **WORKS** — D3D11 flip model, FSR1/EASU, 0.18 ms at 1440p |
 | Fullscreen / HDR10 | **WORKS** — F11; HDR at startup (PQ swapchain) |
 | Audio (WASAPI, in-process) | **WORKS** — Opus → FFmpeg → WASAPI, 0 underruns |
-| Controller input | **WORKS** — buttons, sticks, triggers, touchpad, gyro/accel |
-| Controller output | **WORKS** — rumble, adaptive triggers, lightbar, player LEDs from the console |
-| Frame generation | **WORKS** — NVIDIA VFG 2× at 120 fps (optional runtime) |
+| Controller input | **WORKS** — buttons, sticks, triggers, touchpad, calibrated gyro/accel |
+| Controller output | **WORKS** — firmware-aware rumble, adaptive triggers, lightbar, player LEDs |
+| User interface | **WORKS** — 1440p/4K UI scaling, Tab stream-settings overlay |
+| Frame generation | **WORKS** — NVIDIA VFG 2× at 120 fps (synchronous; async blocked) |
 | Input rate | 60–1000 Hz, dedicated thread + high-resolution timer |
 | Frame gen / neural | Not started (user deferred neural; Smooth Motion is the documented path) |
 
@@ -149,6 +150,10 @@ Key chiaki APIs: `chiaki_session_init`, `chiaki_session_set_video_sample_cb`,
 - **NVIDIA VFG needs the CUDA primary context current for every map/run/export.**
   Without it `NvCVImage_MapResource` returns "invalid resource handle" even
   though `NvCVImage_InitFromD3D11Texture` succeeded.
+- **DualSense firmware 0x0630 ignores the old rumble emulation bit.** The report
+  now uses `enable3 |= 0x04` for firmware >= 0x0224 (full values), and the old
+  `enable1 |= 0x01` + half values below that. Verified with the Rumble test; see
+  `docs/10-input.md`.
 - **1440p is rejected by the console, not by us.** Asking for 2560x1440 in the
   launch spec kills the stream with `AvCap failed to initialize video:
   [InitResult:-6]`; the advertised profile list is only `1920x1080`. `Start()`
@@ -186,18 +191,16 @@ Opus sink -> FFmpeg decoder -> swresample 48k float stereo -> audio::Engine::Pus
 Verified: audio header 2ch/48kHz received during a live session; video 1080p60 at ~60 fps.
 
 ## Next (in order)
-1. Verify on hardware: rumble + adaptive triggers + touchpad + gyro while a game is
-   running (menus rarely send trigger effects). Watch `BRP_PAD_PROBE=1` logs for
-   `[pad] rumble`, `[pad] trigger effects`, and the measured `loops/s`.
-2. Frame generation: async worker for 3x/4x (180/240 Hz). The synchronous 2x path
-   is shipped; 3x currently measures ~53 fps and is not exposed.
-3. Vblank pacing (`DwmFlush`) instead of the timer, to remove the last
-   presentation beat on the 239 Hz display.
-4. Zero-copy decode: decoder on the presenter's `ID3D11Device`.
-5. DualSense haptic audio (USB only): decode the console haptics Opus stream and
-   route it to the controller's 4-channel audio endpoint.
-6. DLSSNR (`nvngx_dlssnr.dll`) as a neural-rendering stage; it is not frame
-   generation. See `docs/15-frame-generation.md`.
+1. User hardware test: rumble + adaptive triggers + touchpad + gyro in-game.
+   Watch `BRP_PAD_PROBE=1` for `[pad] rumble`, `[hid] rumble`, trigger effects and
+   the Rumble test; firmware 0x0630 now uses the new rumble path.
+2. Frame generation: worker-owned D3D11 device + shared textures (the same-device
+   worker failed with a CUDA interop device-ordinal crash; see docs/15).
+3. DLSSNR neural rendering: port Magpie's native NGX D3D12 host (docs/17).
+4. DualSense haptic audio (USB only): decode the console haptics Opus stream and
+   route it to the controller's 4-channel endpoint.
+5. Vblank pacing (`DwmFlush`) and zero-copy decode.
+6. Verify VFG + 1440p/2160p target and VFG + HDR combinations.
 
 ## Decoder backends (selectable)
 

@@ -57,6 +57,14 @@ While a session is live, 3 s without mouse movement hides the `Back` and
 them back immediately; the fade takes 0.35 s. The stats HUD is independent and
 stays on if enabled.
 
+### Display scaling
+
+The UI is drawn in a virtual 1600x900 space and scaled by
+`clamp(backbuffer_height / 900, 1.0, 2.5)` through the D2D transform. Mouse
+coordinates are divided by the same factor for hit testing. On a 1440p fullscreen
+backbuffer the scale is 1.6, so the HUD and settings keep their 900p physical size
+instead of becoming tiny. On a 4K display the scale is 2.4 (virtual 1600x900).
+
 ### Stream
 
 The measured post-process pipeline running full-window, with a live latency HUD and a controller chip.
@@ -70,7 +78,8 @@ The measured post-process pipeline running full-window, with a live latency HUD 
 | Mouse | Hover highlights, click selects/activates, wheel moves the rail |
 | Home | `Left`/`Right` select · `Enter` stream · `S` settings · `Esc` quit |
 | Settings | `Tab` / `Left` / `Right` switch category · `Esc` closes a dropdown, then leaves |
-| Stream | `Esc` back · `H` HUD · `1`/`2`/`3` upscaler |
+| Stream | `Esc` back - `H` HUD - `1`..`5` upscaler - `Tab` settings overlay |
+| Stream settings overlay | Mouse dropdowns apply live; `Tab`/`Esc` resume; decoder applies next session |
 | Any | `F12` capture the current frame to `app-<screen>.bmp` |
 
 Controller navigation still works on Home (d-pad/stick, Cross, Circle, Options).

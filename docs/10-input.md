@@ -89,6 +89,43 @@ Detection is by `HIDP_CAPS.InputReportByteLength`: 64 = USB, 78 = Bluetooth exte
 | Gyro calibration | ⚪ | feature report 0x05 not read; raw scale assumed |
 | Console-driven effects | ✅ | rumble, trigger effects, lightbar, player LEDs, intensities |
 
+### Rumble on newer DualSense firmware (fixed 2026-11-16)
+
+The DualSense on this machine reports firmware `0x0630`. That firmware ignores the
+old rumble-emulation path (`ucEnableBits1 bit 0x01` + half-scale values). The output
+report now reads firmware feature report `0x20` at open and selects:
+
+| Firmware | Enable bits | Rumble values |
+|---|---|---|
+| `< 0x0224` (older) | `enable1 |= 0x01` | `weak >> 1`, `strong >> 1` |
+| `>= 0x0224` and Edge | `enable3 |= 0x04` | full values |
+
+Verified live before shipping: `hid: DualSense (Bluetooth) ... firmware=0x0630` and
+`[hid] rumble weak=200 strong=240 fw=0x0630 edge=0 path=new` during the Rumble test.
+The controller physically rumbles with the test; in-game console rumble uses the same
+report. `BRP_PAD_PROBE=1` logs each console rumble event and each HID rumble report.
+
+### Gyro calibration
+
+Feature report `0x05` is parsed at open (same layout as SDL/DS5): per-axis bias and
+sensitivity for gyro and accelerometer. `PadState` now carries calibrated
+`gyro_dps`/`accel_g`; the Madgwick orientation tracker consumes those. If the report
+is unavailable or out of range, the standard 1024 counts/deg/s and 8192 counts/g
+scales are used. The Controller tab shows `gyro calibrated` or `gyro default`.
+
+### DualSense Edge
+
+Product `0x0DF2` is detected and exposed as "DualSense Edge". The extra HID bits
+(function buttons and paddles) are parsed into `PadFnLeft`/`PadFnRight`/`PadPaddle*`.
+The Remote Play controller state has no fields for them, so they are not forwarded;
+the firmware's normal button mapping is what the console sees.
+
+### Haptic audio (still missing)
+
+Voice-coil haptics are a separate Opus stream and a 4-channel USB audio endpoint. On
+Bluetooth there is no audio endpoint at all. Not implemented; requires the controller
+on USB and a haptics sink in `Streaming`.
+
 ### Adaptive trigger effects implemented
 
 | Effect | Encoding |

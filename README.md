@@ -92,6 +92,7 @@ Useful flags: `--width/--height` output size, `--src-width/--src-height` source 
 | [docs/12-steam-input.md](docs/12-steam-input.md) | Steam Input: Xbox emulation vs Steamworks API, trade-offs, setup |
 | [docs/13-connection.md](docs/13-connection.md) | What Connect does today: reachability probe, states, what pairing adds |
 | [docs/15-frame-generation.md](docs/15-frame-generation.md) | NVIDIA VFG frame generation: why not DLSS-G, runtime, measurements, limits |
+| [docs/17-neural-rendering.md](docs/17-neural-rendering.md) | DLSSNR (neural rendering): what the DLL is, why a naive NGX host fails, integration plan |
 
 ## Legal note
 
