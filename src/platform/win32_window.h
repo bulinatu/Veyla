@@ -4,6 +4,14 @@
 
 namespace brp {
 
+struct MouseState {
+    int x = 0;
+    int y = 0;
+    bool down = false;
+    bool clicked = false;     // edge, consumed by the frame
+    float wheel = 0.0f;       // accumulated notches since last consume
+};
+
 // Thin Win32 window wrapper. Deliberately dumb: it owns a window and a message
 // pump, nothing else. The renderer never knows Win32 exists beyond a HWND.
 class Win32Window {
@@ -29,6 +37,13 @@ public:
     // Last WM_KEYDOWN virtual-key code, or 0. Consumes the value.
     int ConsumeKey();
 
+    const MouseState& mouse() const { return mouse_; }
+    bool ConsumeClick();
+    float ConsumeWheel();
+
+    // Hand cursor while hovering something clickable.
+    void set_hand_cursor(bool enabled) { hand_cursor_ = enabled; }
+
 private:
     static LRESULT CALLBACK WndProcThunk(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
     LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
@@ -39,6 +54,9 @@ private:
     bool quit_ = false;
     bool resized_ = false;
     int last_key_ = 0;
+    MouseState mouse_{};
+    bool hand_cursor_ = false;
+    bool tracking_leave_ = false;
 };
 
 }  // namespace brp

@@ -1,5 +1,7 @@
 #include "platform/win32_window.h"
 
+#include <windowsx.h>
+
 namespace brp {
 namespace {
 constexpr wchar_t kClassName[] = L"BetterRemotePlayWindow";
@@ -75,6 +77,18 @@ int Win32Window::ConsumeKey() {
     return k;
 }
 
+bool Win32Window::ConsumeClick() {
+    const bool clicked = mouse_.clicked;
+    mouse_.clicked = false;
+    return clicked;
+}
+
+float Win32Window::ConsumeWheel() {
+    const float wheel = mouse_.wheel;
+    mouse_.wheel = 0.0f;
+    return wheel;
+}
+
 LRESULT CALLBACK Win32Window::WndProcThunk(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     if (msg == WM_NCCREATE) {
         auto* cs = reinterpret_cast<CREATESTRUCTW*>(lparam);
@@ -118,6 +132,50 @@ LRESULT Win32Window::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
         case WM_KEYDOWN:
             last_key_ = static_cast<int>(wparam);
             return 0;
+
+        case WM_MOUSEMOVE: {
+            mouse_.x = GET_X_LPARAM(lparam);
+            mouse_.y = GET_Y_LPARAM(lparam);
+            if (!tracking_leave_) {
+                TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd, 0};
+                ::TrackMouseEvent(&track);
+                tracking_leave_ = true;
+            }
+            return 0;
+        }
+
+        case WM_MOUSELEAVE:
+            tracking_leave_ = false;
+            mouse_.x = -1;
+            mouse_.y = -1;
+            mouse_.down = false;
+            return 0;
+
+        case WM_LBUTTONDOWN:
+            mouse_.x = GET_X_LPARAM(lparam);
+            mouse_.y = GET_Y_LPARAM(lparam);
+            mouse_.down = true;
+            mouse_.clicked = true;
+            ::SetCapture(hwnd);
+            return 0;
+
+        case WM_LBUTTONUP:
+            mouse_.down = false;
+            if (::GetCapture() == hwnd) {
+                ::ReleaseCapture();
+            }
+            return 0;
+
+        case WM_MOUSEWHEEL:
+            mouse_.wheel += static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / WHEEL_DELTA;
+            return 0;
+
+        case WM_SETCURSOR:
+            if (LOWORD(lparam) == HTCLIENT) {
+                ::SetCursor(::LoadCursorW(nullptr, hand_cursor_ ? IDC_HAND : IDC_ARROW));
+                return TRUE;
+            }
+            break;
 
         case WM_ERASEBKGND:
             return 1;  // we own the client area

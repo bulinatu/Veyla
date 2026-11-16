@@ -13,7 +13,7 @@ int main() {
     }
 
     brp::App app;
-    if (!app.Init(window.hwnd(), window.width(), window.height())) {
+    if (!app.Init(&window)) {
         return 2;
     }
 
@@ -21,7 +21,7 @@ int main() {
     auto next_frame = start;
     const auto frame_budget = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<double>(1.0 / 60.0));
-    unsigned long long frames = 0;
+
     while (window.Pump()) {
         if (window.width() <= 0 || window.height() <= 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(8));
@@ -33,7 +33,6 @@ int main() {
         }
 
         if (const int key = window.ConsumeKey(); key != 0) {
-            std::printf("[key] vk=0x%02X\n", key);
             app.HandleKey(key);
             if (key == VK_ESCAPE && app.quit_requested()) {
                 break;
@@ -44,17 +43,22 @@ int main() {
             break;
         }
 
+        brp::PointerState pointer;
+        pointer.x = window.mouse().x;
+        pointer.y = window.mouse().y;
+        pointer.down = window.mouse().down;
+        pointer.clicked = window.ConsumeClick();
+        pointer.wheel = window.ConsumeWheel();
+
         const double t =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-        app.Frame(t);
-        ++frames;
+        app.Frame(t, pointer);
 
         // Vsync is not a reliable frame limiter on virtual/remote displays, so
-        // pace the UI loop explicitly. The stream path has its own pacing.
+        // pace the UI loop explicitly.
         next_frame += frame_budget;
         std::this_thread::sleep_until(next_frame);
     }
 
-    std::printf("loop ended: frames=%llu quit=%d\n", frames, app.quit_requested() ? 1 : 0);
     return 0;
 }

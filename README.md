@@ -2,18 +2,18 @@
 
 A better PlayStation 5 → PC Remote Play client.
 
-**Status:** Phase 1 — the app runs. Home / Settings / Stream screens are live, the post-process pipeline is measured on real hardware, the chiaki-ng core is vendored. No console attached yet.
+**Status:** Phase 1 — the app runs with mouse + controller navigation and a working DualSense layer (input over Bluetooth/USB, lightbar, adaptive triggers, rumble, player LEDs). No console session yet.
 
 **What exists right now**
 
-- **`brp.exe` — the app.** PS5-inspired rail, settings, and a stream screen running the real post-process pipeline with a live latency HUD. Keyboard-driven, no browser in the video path. It also imports console identity + PSN account from a local PXPlay install (metadata only — PXPlay encrypts its registration keys; see [docs/09-session.md](docs/09-session.md)). See [docs/08-app.md](docs/08-app.md).
-- **`brp-bench`** — headless-ish benchmark of the same media path, with per-frame GPU timestamps. 0.19 ms p50 at 1080p→4K on the target machine. See [docs/07-bench-log.md](docs/07-bench-log.md).
-- **`d2d_probe`** — isolates Direct2D/D3D11 interop failures from app code (it earned its keep: see the gotchas in 08).
-- **`tools/imgstat.py`** — detail/clipping metrics for captured frames.
+- **`brp.exe` — the app.** PS5-inspired rail, settings, controller lab, and a stream screen running the real post-process pipeline with a live latency HUD. Mouse and controller navigation, no browser in the video path. See [docs/08-app.md](docs/08-app.md) and [docs/10-input.md](docs/10-input.md).
+- **DualSense support.** Raw HID (no DS4Windows) + XInput fallback. Parse: buttons, sticks, triggers, touch points, gyro/accel, battery. Output: lightbar RGB, 8 adaptive-trigger effects, rumble, player LEDs, mic LED. Bluetooth output uses the `0x31` report with CRC32.
+- **Session import.** Console identity + PSN account from a local PXPlay install (metadata only — PXPlay encrypts its keys; see [docs/09-session.md](docs/09-session.md)).
+- **`brp-bench`** — benchmark of the media path. 0.19 ms p50 at 1080p→4K on the target machine. See [docs/07-bench-log.md](docs/07-bench-log.md).
+- **`d2d_probe`**, **`tools/imgstat.py`** — diagnostics that earned their keep.
 - **`vendor/chiaki-ng`** — forked protocol core, pinned as a submodule (42 C sources ready to become `brp-session`).
-- Docs: protocol limits, feasibility matrix, architecture, roadmap, ADRs, bench log, app notes.
 
-**Not yet:** decode, RTP wiring, PSN OAuth, neural stages, HDR output.
+**Not yet:** PS5 session, decode, HDR output, frame generation, neural stages, PSN OAuth.
 
 ```powershell
 .\scripts\build.ps1
@@ -22,9 +22,11 @@ A better PlayStation 5 → PC Remote Play client.
 
 | Screen | Keys |
 |---|---|
-| Home | `Left`/`Right` select · `Enter` stream · `S` settings · `Esc` quit |
-| Settings | `Up`/`Down` · `Left`/`Right` change · `S`/`Esc` back |
+| Home | `Left`/`Right` select · `Enter` stream · `S` settings · `C` controller · `Esc` quit |
+| Settings | `Up`/`Down` · `Left`/`Right` change · `Enter` open · `S`/`Esc` back |
+| Controller | `Up`/`Down` · `Left`/`Right` change · `Enter` rumble · `C`/`Esc` back |
 | Stream | `Esc` back · `H` HUD · `1`/`2`/`3` upscaler · `F12` screenshot |
+| Mouse | Click tiles / rows / buttons; wheel moves selection |
 
 ---
 
@@ -84,6 +86,7 @@ Useful flags: `--width/--height` output size, `--src-width/--src-height` source 
 | [docs/07-bench-log.md](docs/07-bench-log.md) | Measured results on the target machine, with interpretation |
 | [docs/08-app.md](docs/08-app.md) | The app: screens, keys, code map, design rules, interop gotchas |
 | [docs/09-session.md](docs/09-session.md) | Session data: what PXPlay exposes, what is encrypted, our session file format |
+| [docs/10-input.md](docs/10-input.md) | Mouse, keyboard, controller navigation, DualSense input/output matrix |
 
 ## Legal note
 
