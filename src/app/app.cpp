@@ -421,7 +421,7 @@ void App::HandlePad() {
 void App::ApplyDropdown(int id, int index) {
     switch (id) {
         case W_Upscaler:
-            upscale_ = std::clamp(index, 0, 3);
+            upscale_ = std::clamp(index, 0, 4);
             presenter_.SetUpscaleMode(upscale_);
             break;
         case W_Hud:
@@ -1097,13 +1097,13 @@ void App::RenderSettings(double t) {
     switch (tab_) {
         case Tab::Display: {
             DrawDropdown(L"Upscaler",
-                         {L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen", L"Lanczos + RCAS"}, upscale_, y,
+                         {L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen", L"Lanczos + RCAS", L"FSR1 (EASU)"}, upscale_, y,
                          W_Upscaler);
             y += kRowH;
             DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
             y += kRowH;
-            DrawDropdown(L"Frame generation", {L"Off  ·  needs RIFE model"}, 0, y, W_FrameGen,
-                         false);
+            DrawDropdown(L"Frame generation", {L"Off  ·  enable Smooth Motion in NVIDIA App"}, 0, y,
+                         W_FrameGen, false);
             y += kRowH;
             DrawDropdown(L"HDR output", {L"Off", L"On (HDR10, restart)"}, hdr_ ? 1 : 0, y, W_Hdr, true);
             break;

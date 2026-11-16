@@ -189,3 +189,10 @@ Verified: audio header 2ch/48kHz received during a live session; video 1080p60 a
 - HDR is applied at STARTUP (profile.hdr); live swapchain recreation fails with E_ACCESSDENIED on the same HWND, so the dropdown writes the setting and says restart.
 - Verified SDR streaming still works after the changes.
 
+
+## Upscaling
+
+Mode 4 is FSR1 EASU (12-tap, ported from AMD's MIT reference). Measured 0.18 ms p50 at 1440p.
+Modes: 0 bilinear, 1 Catmull-Rom, 2 Catmull+unsharp, 3 Lanczos+RCAS, 4 FSR1 EASU.
+Frame generation: no in-app model yet; recommended path is NVIDIA Smooth Motion (driver, applies to our DX11 swapchain).
+

@@ -77,7 +77,12 @@ cbuffer PsParams : register(b0)
     float gMode;
     float2 gSrcSize;
     float gHdr;
-    float3 gPad;
+    float2 gOutSize;
+    float gPad0;
+    float4 gCon0;
+    float4 gCon1;
+    float4 gCon2;
+    float4 gCon3;
 };
 
 struct VSOut
@@ -149,6 +154,124 @@ float3 Lanczos3(float2 uv)
     return acc / max(wsum, 1e-4);
 }
 
+// --- FSR1 EASU (12-tap edge-adaptive upsampling) ---------------------------
+float EasuLuma(float3 c) { return c.b * 0.5 + (c.r * 0.5 + c.g); }
+
+void EasuSet(inout float2 dir, inout float len, float w,
+             float lA, float lB, float lC, float lD, float lE)
+{
+    if (w <= 0.0)
+        return;
+
+    float dc = lD - lC;
+    float cb = lC - lB;
+    float lenX = max(abs(dc), abs(cb));
+    lenX = 1.0 / max(lenX, 1e-6);
+    float dirX = lD - lB;
+    dir.x += dirX * w;
+    lenX = saturate(abs(dirX) * lenX);
+    lenX *= lenX;
+    len += lenX * w;
+
+    float ec = lE - lC;
+    float ca = lC - lA;
+    float lenY = max(abs(ec), abs(ca));
+    lenY = 1.0 / max(lenY, 1e-6);
+    float dirY = lE - lA;
+    dir.y += dirY * w;
+    lenY = saturate(abs(dirY) * lenY);
+    lenY *= lenY;
+    len += lenY * w;
+}
+
+void EasuTap(inout float3 aC, inout float aW, float2 off, float2 dir, float2 len,
+             float lob, float clp, float3 c)
+{
+    float2 v;
+    v.x = off.x * dir.x + off.y * dir.y;
+    v.y = off.x * (-dir.y) + off.y * dir.x;
+    v *= len;
+    float d2 = v.x * v.x + v.y * v.y;
+    d2 = min(d2, clp);
+    float wB = (2.0 / 5.0) * d2 - 1.0;
+    float wA = lob * d2 - 1.0;
+    wB *= wB;
+    wA *= wA;
+    wB = (25.0 / 16.0) * wB - (25.0 / 16.0 - 1.0);
+    float w = wB * wA;
+    aC += c * w;
+    aW += w;
+}
+
+float3 Easu(float2 uv)
+{
+    float2 inv = 1.0 / gSrcSize;
+    float2 ip = uv * gOutSize;
+    float2 pp = ip * gCon0.xy + gCon0.zw;
+    float2 fp = floor(pp);
+    pp -= fp;
+
+    float3 b = gSrc.SampleLevel(gSmp, (fp + float2(0, -1) + 0.5) * inv, 0).rgb;
+    float3 c = gSrc.SampleLevel(gSmp, (fp + float2(1, -1) + 0.5) * inv, 0).rgb;
+    float3 e = gSrc.SampleLevel(gSmp, (fp + float2(-1, 0) + 0.5) * inv, 0).rgb;
+    float3 f = gSrc.SampleLevel(gSmp, (fp + float2(0, 0) + 0.5) * inv, 0).rgb;
+    float3 g = gSrc.SampleLevel(gSmp, (fp + float2(1, 0) + 0.5) * inv, 0).rgb;
+    float3 h = gSrc.SampleLevel(gSmp, (fp + float2(2, 0) + 0.5) * inv, 0).rgb;
+    float3 i = gSrc.SampleLevel(gSmp, (fp + float2(-1, 1) + 0.5) * inv, 0).rgb;
+    float3 j = gSrc.SampleLevel(gSmp, (fp + float2(0, 1) + 0.5) * inv, 0).rgb;
+    float3 k = gSrc.SampleLevel(gSmp, (fp + float2(1, 1) + 0.5) * inv, 0).rgb;
+    float3 l = gSrc.SampleLevel(gSmp, (fp + float2(2, 1) + 0.5) * inv, 0).rgb;
+    float3 n = gSrc.SampleLevel(gSmp, (fp + float2(0, 2) + 0.5) * inv, 0).rgb;
+    float3 o = gSrc.SampleLevel(gSmp, (fp + float2(1, 2) + 0.5) * inv, 0).rgb;
+
+    float bL = EasuLuma(b), cL = EasuLuma(c), eL = EasuLuma(e), fL = EasuLuma(f);
+    float gL = EasuLuma(g), hL = EasuLuma(h), iL = EasuLuma(i), jL = EasuLuma(j);
+    float kL = EasuLuma(k), lL = EasuLuma(l), nL = EasuLuma(n), oL = EasuLuma(o);
+
+    float2 dir = 0.0;
+    float len = 0.0;
+    EasuSet(dir, len, (1.0 - pp.x) * (1.0 - pp.y), bL, eL, fL, gL, jL);
+    EasuSet(dir, len, pp.x * (1.0 - pp.y), cL, fL, gL, hL, kL);
+    EasuSet(dir, len, (1.0 - pp.x) * pp.y, fL, iL, jL, kL, nL);
+    EasuSet(dir, len, pp.x * pp.y, gL, jL, kL, lL, oL);
+
+    float2 dir2 = dir * dir;
+    float dirR = dir2.x + dir2.y;
+    bool zro = dirR < (1.0 / 32768.0);
+    dirR = rsqrt(max(dirR, 1e-12));
+    dirR = zro ? 1.0 : dirR;
+    dir.x = zro ? 1.0 : dir.x;
+    dir *= dirR;
+
+    len *= 0.5;
+    len *= len;
+
+    float stretch = (dir.x * dir.x + dir.y * dir.y) / max(abs(dir.x), abs(dir.y));
+    float2 len2 = float2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);
+    float lob = 0.5 + ((1.0 / 4.0 - 0.04) - 0.5) * len;
+    float clp = 1.0 / lob;
+
+    float3 mn4 = min(min(min(f, g), j), k);
+    float3 mx4 = max(max(max(f, g), j), k);
+
+    float3 aC = 0.0;
+    float aW = 0.0;
+    EasuTap(aC, aW, float2(0, -1) - pp, dir, len2, lob, clp, b);
+    EasuTap(aC, aW, float2(1, -1) - pp, dir, len2, lob, clp, c);
+    EasuTap(aC, aW, float2(-1, 1) - pp, dir, len2, lob, clp, i);
+    EasuTap(aC, aW, float2(0, 1) - pp, dir, len2, lob, clp, j);
+    EasuTap(aC, aW, float2(0, 0) - pp, dir, len2, lob, clp, f);
+    EasuTap(aC, aW, float2(-1, 0) - pp, dir, len2, lob, clp, e);
+    EasuTap(aC, aW, float2(1, 1) - pp, dir, len2, lob, clp, k);
+    EasuTap(aC, aW, float2(2, 1) - pp, dir, len2, lob, clp, l);
+    EasuTap(aC, aW, float2(2, 0) - pp, dir, len2, lob, clp, h);
+    EasuTap(aC, aW, float2(1, 0) - pp, dir, len2, lob, clp, g);
+    EasuTap(aC, aW, float2(1, 2) - pp, dir, len2, lob, clp, o);
+    EasuTap(aC, aW, float2(0, 2) - pp, dir, len2, lob, clp, n);
+
+    return clamp(aC / max(aW, 1e-6), mn4, mx4);
+}
+
 float4 PSMain(VSOut i) : SV_TARGET
 {
     float3 col;
@@ -173,7 +296,7 @@ float4 PSMain(VSOut i) : SV_TARGET
              gSrc.SampleLevel(gSmp, i.uv - float2(0, o.y), 0).rgb) * 0.25;
         col += (col - blur) * gSharp;
     }
-    else
+    else if (gMode < 3.5)
     {
         // Lanczos3 + contrast-adaptive sharpening, clamped to the local
         // neighbourhood so dark detail is not crushed into black.
@@ -190,6 +313,10 @@ float4 PSMain(VSOut i) : SV_TARGET
         float3 mx = max(max(max(n, s), max(e, w)), col);
         float3 sharpened = col + (col - blur) * gSharp;
         col = clamp(sharpened, mn, mx);
+    }
+    else
+    {
+        col = Easu(i.uv);
     }
 
     if (gHdr > 0.5)

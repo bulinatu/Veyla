@@ -20,7 +20,13 @@ struct PsParams {
     float src_w;
     float src_h;
     float hdr;
-    float pad[3];
+    float out_w;
+    float out_h;
+    float pad0;
+    float con0[4];
+    float con1[4];
+    float con2[4];
+    float con3[4];
 };
 
 struct CsParams {
@@ -238,7 +244,7 @@ bool Presenter::Resize(int width, int height) {
 }
 
 void Presenter::SetUpscaleMode(int mode) {
-    cfg_.upscale_mode = std::clamp(mode, 0, 3);
+    cfg_.upscale_mode = std::clamp(mode, 0, 4);
 }
 
 void Presenter::BeginTiming() {
@@ -394,6 +400,28 @@ void Presenter::Render(double time_seconds) {
     ps.mode = static_cast<float>(cfg_.upscale_mode);
     ps.src_w = static_cast<float>(cfg_.source_width);
     ps.src_h = static_cast<float>(cfg_.source_height);
+    ps.out_w = static_cast<float>(cfg_.output_width);
+    ps.out_h = static_cast<float>(cfg_.output_height);
+    const float in_w = ps.src_w;
+    const float in_h = ps.src_h;
+    const float out_w = ps.out_w;
+    const float out_h = ps.out_h;
+    ps.con0[0] = in_w / out_w;
+    ps.con0[1] = in_h / out_h;
+    ps.con0[2] = 0.5f * in_w / out_w - 0.5f;
+    ps.con0[3] = 0.5f * in_h / out_h - 0.5f;
+    ps.con1[0] = 1.0f / in_w;
+    ps.con1[1] = 1.0f / in_h;
+    ps.con1[2] = 1.0f / in_w;
+    ps.con1[3] = -1.0f / in_h;
+    ps.con2[0] = -1.0f / in_w;
+    ps.con2[1] = 2.0f / in_h;
+    ps.con2[2] = 1.0f / in_w;
+    ps.con2[3] = 2.0f / in_h;
+    ps.con3[0] = 0.0f;
+    ps.con3[1] = 4.0f / in_h;
+    ps.con3[2] = 0.0f;
+    ps.con3[3] = 0.0f;
     if (SUCCEEDED(context_->Map(ps_cb_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
         std::memcpy(mapped.pData, &ps, sizeof(ps));
         context_->Unmap(ps_cb_.Get(), 0);
