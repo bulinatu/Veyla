@@ -1,0 +1,42 @@
+# Build
+build/
+out/
+out-*/
+.cmake/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.sln
+*.vcxproj*
+*.user
+
+# Dependencies
+vcpkg_installed/
+third-party/build/
+.deps/
+
+# Python / tooling
+__pycache__/
+.venv/
+node_modules/
+dist/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+
+# Runtime
+logs/
+*.log
+captures/
+profiles/*.local.toml
+
+# Secrets — never commit
+secrets/
+*.token
+*.key
+*.pem
+.env
+.env.*
