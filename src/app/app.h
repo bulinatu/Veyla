@@ -105,6 +105,8 @@ private:
     void TriggerRumble();
     void StartProbe();
     void ConnectConsole();
+    void StartStream();
+    void TickPendingConnect();
     void SaveProfile();
     void StartPadThread();
     void StopPadThread();
@@ -176,6 +178,14 @@ private:
     session::Streaming streaming_;
     media::DecodedFrame stream_frame_;
     bool stream_active_ = false;
+
+    // Connect flow: check the control port, wake the console if it is asleep,
+    // then start the session.
+    enum class PendingConnect { None, Probing, Waking };
+    PendingConnect pending_connect_ = PendingConnect::None;
+    double next_connect_step_ = 0.0;
+    double wake_deadline_ = 0.0;
+    int wake_packets_ = 0;
 
     session::Pairing pairing_;
     std::string pin_;

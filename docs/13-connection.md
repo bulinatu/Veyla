@@ -1,59 +1,81 @@
 # 13 — Connection (what the button does today)
 
-The `Connect` button on the Home console card performs a **reachability probe**: a TCP connection attempt to the console's Remote Play control port (9295) with a 1.2 s timeout. That is real work, and it is deliberately not dressed up as pairing.
+`Connect` is an automatic two-step flow: check the control port, wake the console
+if it is in rest mode, then start the session. No manual step and no fake
+progress.
 
 ---
 
-## States
+## Flow
 
-| State | Meaning | Shown as |
+| Step | What happens | Shown as |
 |---|---|---|
-| Idle | Nothing has been tried | profile status, e.g. `PS5-580 · needs pairing` |
-| Checking | Probe running | amber dot, `Checking the control port...`, button reads `Checking` |
-| Reachable | Something accepted the TCP connection | green dot, `Reachable` |
-| Unreachable | Timeout or refused | amber dot, `No answer on the control port` |
-| No address | Session has no host | `No address configured` |
+| Probing | TCP connect to `host:9295` on a worker thread (1.2 s) | `Checking 192.168.1.21 ...` |
+| Reachable | Port answers → session starts immediately | stream |
+| Unreachable | Sends the Remote Play wake-up packet, retries the probe every 2.5 s for 30 s | `Waking console... (attempt N)` |
+| Woke up | Probe turns reachable → session starts | `Console woke up. Connecting...` |
+| Wake timeout | Nothing answered after 30 s | rest-mode hint (see below) |
 
-The result and a detail line are also visible under **Settings → Connection → Test reachability**, so the card and the settings page agree.
+Home and Settings show the same detail line.
+
+The wake timeout message names the setting that actually matters:
+`Settings → System → Power Saving → Features Available in Rest Mode → Stay
+Connected to the Internet`. Without it a rest-mode PS5 accepts discovery but
+not TCP 9295.
+
+---
+
+## Wake-up packet
+
+A console in rest mode still answers UDP discovery (9302 for PS5, 987 for PS4)
+but drops TCP 9295, which looks exactly like a hung machine. The same SRCH
+mechanism carries a wake command.
+
+- Sent with `chiaki_discovery_wakeup` (already vendored in `brp_session`).
+- Credential = the registration key's ASCII hex text parsed as a number. Our
+  stored `rp_regist_key` starts with `31 63 36 62 30 34 62 35` = `"1c6b04b5"`,
+  so the credential is `0x1c6b04b5`. Passing the binary bytes instead would send
+  a wrong credential.
+- Diagnostics: `wake_probe [host]` loads `session.json` and sends one packet:
+  `[wake] sent to 192.168.1.21 (credential 1c6b04b5, PS5)`.
+
+The probe/wake loop runs inside the normal 60 Hz frame, so the UI never blocks
+for the 30 s window.
 
 ---
 
 ## Why port 9295
 
-Chiaki's protocol uses a TLS control channel on 9295 for session and input traffic. A successful TCP handshake proves:
+Chiaki's protocol uses a TLS control channel on 9295 for session and input
+traffic. A successful TCP handshake proves the address is routable, the console
+is awake, and no firewall is silently dropping the port. It proves nothing about
+authentication; that is the session request's job.
 
-- the address is routable from this PC,
-- the console is awake (or at least something is listening),
-- firewall/NAT is not silently dropping the port.
-
-It proves nothing about authentication. A closed port is a genuine "cannot reach it"; an open port is a genuine "there is a console there". Both are useful before pairing exists.
-
-The address comes from the imported PXPlay profile (`cached_direct_ip_addresses`). If it is a WAN address, the probe will usually fail on a home network — that is information, not a bug. A local address or manual entry will make it pass, and manual entry arrives with the pairing flow.
+Discovery supplies the LAN address automatically at startup and overwrites a
+stale (often WAN) address imported from PXPlay.
 
 ---
 
-## What pairing will add
+## Error messages
 
-The full handshake needs three things this build does not have yet:
-
-1. **PSN account id** — already imported (base64 derived from the decimal id).
-2. **Console PIN** — 8 digits shown on the console under `Settings → System → Remote Play → Link Device`.
-3. **Session layer** — chiaki-ng's registration/client code compiled into `brp-session`, which stores `rp_key` / `rp_regist_key` in `session.json`.
-
-Once those exist, `Connect` becomes: discover → register (PIN) → session request → stream. The UI already has the states, the profile file and the card; only the transport is missing.
+Session failures are no longer reported as a number. `CHIAKI_EVENT_QUIT` is
+passed through `chiaki_quit_reason_string`, so the Home card shows e.g.
+`Session ended: Session request timed out`, `Remote Play on Console is already in
+use`, or `Connection Refused in Session Request`.
 
 ---
 
 ## Deliberate omissions
 
-- **No fake progress bar.** The button reports the probe result, not a pretend handshake.
-- **No silent retries.** Every attempt is user-initiated.
-- **No discovery broadcast yet.** A UDP discovery probe without the protocol's key exchange would produce misleading results, so it waits for `brp-session`.
+- **No fake progress bar.** The button reports real probe/wake results.
+- **No retry after a session failure.** Reconnect is explicit.
+- **WAN is not supported.** Discovery is LAN-only by design.
 
 ---
 
 ## Files
 
-- `src/net/reachability.{h,cpp}` — non-blocking connect with `select`, runs on a worker thread, polled each frame.
-- `src/session/profile.{h,cpp}` — console identity, account id, address, stream defaults.
-- `src/app/app.cpp` — console card, `Connect` action, Connection tab.
+- `src/net/reachability.{h,cpp}` — non-blocking connect on a worker thread.
+- `src/session/discovery.{h,cpp}` — SRCH discovery + `WakeConsole`.
+- `src/app/app.cpp` — `ConnectConsole` / `TickPendingConnect` / `StartStream`.
+- `tools/wake_probe` — sends a single wake packet for diagnostics.

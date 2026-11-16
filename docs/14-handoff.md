@@ -11,6 +11,7 @@ Last updated: live streaming + full controller pipeline.
 | Pairing with the real PS5 | **WORKS** — console paired, keys stored |
 | LAN discovery | **WORKS** — finds `192.168.1.21` automatically |
 | Live streaming session | **WORKS** — 1080p60 HEVC, ~56–60 fps |
+| Connect while asleep | Implemented — wake packet verified; needs one rest-mode test |
 | Video decode (live) | **WORKS** — D3D11VA, color matrix explicit |
 | Presentation pipeline | **WORKS** — D3D11 flip model, FSR1/EASU, 0.18 ms at 1440p |
 | Fullscreen / HDR10 | **WORKS** — F11; HDR at startup (PQ swapchain) |
@@ -47,6 +48,7 @@ Targets:
 - `brp-bench` — pipeline benchmark
 - `pair_probe <pin> [host]` — registration against a console
 - `discover_probe` — LAN discovery
+- `wake_probe [host]` — sends the rest-mode wake-up packet
 - `decode_probe <file>` — decode timing
 - `d2d_probe` — D2D/D3D11 interop diagnostic
 

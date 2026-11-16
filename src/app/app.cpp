@@ -717,11 +717,19 @@ void App::SaveProfile() {
 }
 
 void App::ConnectConsole() {
-    if (!profile_.has_console() || profile_.needs_pairing()) {
+    if (!profile_.has_console() || profile_.needs_pairing() || profile_.host.empty()) {
         StartProbe();
         return;
     }
-if (!audio_.is_open()) {
+
+    pending_connect_ = PendingConnect::Probing;
+    next_connect_step_ = clock_;
+    stream_note_ = "Checking " + profile_.host + " ...";
+    probe_.Start(profile_.host, 9295);
+}
+
+void App::StartStream() {
+    if (!audio_.is_open()) {
         OpenAudioDevice();
     }
     streaming_.SetAudio(&audio_);
@@ -735,13 +743,69 @@ if (!audio_.is_open()) {
         screen_ = Screen::Stream;
         std::fprintf(stderr, "[app] streaming started\n");
     } else {
+        stream_note_ = "Could not start the session: " + error;
         std::fprintf(stderr, "[app] start failed: %s\n", error.c_str());
+    }
+}
+
+void App::TickPendingConnect() {
+    if (pending_connect_ == PendingConnect::None) {
+        return;
+    }
+
+    probe_.Poll();
+    const net::ProbeState state = probe_.state();
+
+    if (pending_connect_ == PendingConnect::Probing) {
+        if (state == net::ProbeState::Checking) {
+            return;
+        }
+        if (state == net::ProbeState::Reachable) {
+            pending_connect_ = PendingConnect::None;
+            StartStream();
+            return;
+        }
+        // Nothing listening on 9295: the console is almost always in rest mode.
+        pending_connect_ = PendingConnect::Waking;
+        wake_deadline_ = clock_ + 30.0;
+        wake_packets_ = 0;
+        next_connect_step_ = clock_;
+        stream_note_ = "Console is not answering the control port. Sending wake-up...";
+        return;
+    }
+
+    if (state == net::ProbeState::Reachable) {
+        pending_connect_ = PendingConnect::None;
+        stream_note_ = "Console woke up. Connecting...";
+        StartStream();
+        return;
+    }
+
+    if (clock_ >= wake_deadline_) {
+        pending_connect_ = PendingConnect::None;
+        stream_note_ =
+            "Console did not wake up. Enable Settings > System > Power Saving > "
+            "Features Available in Rest Mode > Stay Connected to the Internet.";
+        return;
+    }
+
+    if (clock_ >= next_connect_step_) {
+        const bool ps5 = profile_.device_type != "PS4";
+        session::WakeConsole(profile_.host, profile_.credentials.rp_regist_key.data(),
+                             profile_.credentials.rp_regist_key.size(), ps5);
+        ++wake_packets_;
+        stream_note_ = "Waking console... (attempt " + std::to_string(wake_packets_) + ")";
+        next_connect_step_ = clock_ + 2.5;
+        if (probe_.state() != net::ProbeState::Checking) {
+            probe_.Start(profile_.host, 9295);
+        }
     }
 }
 void App::DisconnectStream() {
     StopPadThread();
     streaming_.Stop();
     stream_active_ = false;
+    pending_connect_ = PendingConnect::None;
     feedback_version_ = 0;
     pad_.SetConsoleFeedback(PadConsoleFeedback{});
     stream_note_ = "Disconnected. The console may take a few seconds to release the session.";
@@ -810,6 +874,7 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         pad_.Poll();
     }
     probe_.Poll();
+    TickPendingConnect();
     HandlePad();
 
     if (window_) {
@@ -880,10 +945,12 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                                        stream_frame_.height);
         }
         if (streaming_.state() == session::StreamState::Failed) {
+            const std::string reason = streaming_.message();
             StopPadThread();
             streaming_.Stop();
             stream_active_ = false;
             pad_.SetConsoleFeedback(PadConsoleFeedback{});
+            stream_note_ = reason.empty() ? "Session ended." : reason;
             screen_ = Screen::Home;
         }
     }

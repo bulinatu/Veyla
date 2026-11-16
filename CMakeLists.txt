@@ -142,12 +142,17 @@ target_compile_options(brp_session PRIVATE $<$<COMPILE_LANGUAGE:C>:/Zi>)
 
 add_executable(discover_probe tools/discover_probe/main.cpp src/session/discovery.cpp)
 target_include_directories(discover_probe PRIVATE src)
-target_link_libraries(discover_probe PRIVATE ws2_32)
+target_link_libraries(discover_probe PRIVATE brp_session)
 
 add_executable(pair_probe tools/pair_probe/main.cpp src/session/profile.cpp)
 target_link_libraries(pair_probe PRIVATE brp_session)
 target_compile_options(pair_probe PRIVATE /Zi)
 target_link_options(pair_probe PRIVATE /DEBUG)
+
+add_executable(wake_probe tools/wake_probe/main.cpp src/session/profile.cpp
+    src/session/discovery.cpp)
+target_include_directories(wake_probe PRIVATE src)
+target_link_libraries(wake_probe PRIVATE brp_session)
 
 # The real client will link the forked chiaki-ng session layer.
 # vendor/chiaki-ng/lib/src is the transport/protocol core (session, ctrl, takion,

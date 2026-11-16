@@ -281,7 +281,7 @@ void Streaming::OnEvent(ChiakiEvent* event) {
         case CHIAKI_EVENT_QUIT: {
             state_.store(StreamState::Failed);
             std::lock_guard<std::mutex> lock(mutex_);
-            message_ = "Session ended (reason " + std::to_string(event->quit.reason) + ")";
+            message_ = std::string("Session ended: ") + chiaki_quit_reason_string(event->quit.reason);
             break;
         }
         case CHIAKI_EVENT_RUMBLE: {
@@ -402,8 +402,6 @@ void Streaming::OnAudio(uint8_t* buf, size_t size) {
     std::memcpy(packet->data, buf, size);
 
     const int sent = avcodec_send_packet(static_cast<AVCodecContext*>(opus_ctx_), packet);
-    static int s_log = 0;
-    if (s_log++ < 3) { std::fprintf(stderr, "[stream] send rc=%d size=%zu\n", sent, size); }
     av_packet_free(&packet);
     if (sent < 0) {
         return;
@@ -426,8 +424,6 @@ void Streaming::OnAudio(uint8_t* buf, size_t size) {
                                               const_cast<const uint8_t**>(frame->extended_data),
                                               frame->nb_samples);
             if (converted > 0) {
-        static int c_log = 0;
-        if (c_log++ < 3) { std::fprintf(stderr, "[stream] converted=%d nb=%d rate=%d\n", converted, frame->nb_samples, frame->sample_rate); }
                 audio_->Push(pcm.data(), converted);
                 audio_frames_.fetch_add(converted);
             }

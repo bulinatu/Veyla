@@ -1,8 +1,15 @@
 #include "session/discovery.h"
 
+#include <chiaki/discovery.h>
+#include <chiaki/log.h>
+
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <string>
@@ -140,6 +147,50 @@ std::vector<DiscoveredConsole> DiscoverLocal(int timeout_ms) {
 
     ::WSACleanup();
     return results;
+}
+
+bool WakeConsole(const std::string& host, const uint8_t* regist_key, size_t regist_key_size,
+                 bool ps5) {
+    if (host.empty() || !regist_key || regist_key_size == 0) {
+        return false;
+    }
+
+    // The wake credential is the registration key's ASCII hex text interpreted
+    // as a number ("1c6b04b5" -> 0x1c6b04b5), not its binary bytes.
+    char text[17] = {};
+    const size_t count = std::min<size_t>(regist_key_size, 16);
+    std::memcpy(text, regist_key, count);
+    text[count] = '\0';
+    const size_t text_len = std::strlen(text);
+    if (text_len == 0 || text_len > 8) {
+        return false;
+    }
+    for (size_t i = 0; i < text_len; ++i) {
+        if (!std::isxdigit(static_cast<unsigned char>(text[i]))) {
+            return false;
+        }
+    }
+    const uint64_t credential = std::strtoull(text, nullptr, 16);
+
+    WSADATA wsa{};
+    if (::WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        return false;
+    }
+
+    ChiakiLog log{};
+    chiaki_log_init(&log, 0, nullptr, nullptr);
+    const ChiakiErrorCode error =
+        chiaki_discovery_wakeup(&log, nullptr, host.c_str(), credential, ps5);
+
+    ::WSACleanup();
+    if (error != CHIAKI_ERR_SUCCESS) {
+        std::fprintf(stderr, "[wake] failed for %s: %s\n", host.c_str(),
+                     chiaki_error_string(error));
+        return false;
+    }
+    std::fprintf(stderr, "[wake] sent to %s (credential %08llx, %s)\n", host.c_str(),
+                 static_cast<unsigned long long>(credential), ps5 ? "PS5" : "PS4");
+    return true;
 }
 
 }  // namespace brp::session
