@@ -1,12 +1,13 @@
-# 17 - Neural rendering: RTX VSR shipped, DLSSNR pending
+# 17 - Neural rendering: RTX VSR shipped, DLSSNR host proven
 
 Status:
 
 - **NVIDIA RTX Video Super Resolution (VSR): implemented and verified live** on the
   RTX 4090 at 1080p -> 1440p and 1080p -> 2160p. It is the shipped neural upscaler.
-- **DLSS Neural Rendering (`nvngx_dlssnr.dll`): not integrated.** It needs a native
-  NGX D3D12 signed-snippet host; the research notes below are kept so the next
-  attempt does not repeat the failed experiments.
+- **DLSS Neural Rendering (`nvngx_dlssnr.dll`): host proven, not integrated.** Init,
+  feature 18 creation and evaluation now run in a standalone probe on this machine
+  (`tools/dlssnr_probe`). The remaining work is the residual composite/temporal path
+  and app integration; the exact working recipe is below.
 
 ---
 
@@ -77,7 +78,79 @@ The setting is persisted as `"vsr"` in `session.json`.
 
 ---
 
-## DLSSNR (not integrated)
+## DLSSNR (host proven, not integrated)
+
+### Working recipe (verified 2026-11-16)
+
+`tools/dlssnr_probe` now completes Init, `CreateFeature(18)` and
+`EvaluateFeature(18)` on the RTX 4090. The non-obvious parts:
+
+1. **Load the core before creating any D3D device.** Read
+   `HKLM\SOFTWARE\NVIDIA Corporation\Global\NGXCore\FullPath`, then
+   `LoadLibraryExW(<dir>\_nvngx.dll, nullptr, 0)`. Loading it after
+   `D3D12CreateDevice` crashed inside the core.
+2. **Initialize the core by application id, not by project id.**
+   `NVSDK_NGX_D3D12_Init(0x0876232C, exeDir, device12, NVSDK_NGX_Version_API)` works.
+   `NVSDK_NGX_D3D12_Init_ProjectID(Magpie's GUID, ...)` consistently crashed in
+   `_nvngx.dll` on this driver (0xC0000005, `r11=0xCB00000015`). The app id is the
+   same value as the custom-engine CMS id (876232C).
+3. **Load `nvngx_dlssnr.dll` directly and patch its caller check.** The signed
+   snippet calls `GetModuleFileNameW` on its caller and only accepts `"nvngx.dll"`.
+   The probe finds the DLL's `GetModuleFileNameW` IAT slot and replaces it with a
+   hook that returns `L"nvngx.dll"` when `module == GetModuleHandleEx(FROM_ADDRESS,
+   our_hook)`, otherwise calls the original.
+4. Resolve `NVSDK_NGX_D3D12_Init_Ext`, `..._CreateFeature`, `..._EvaluateFeature`,
+   `..._ReleaseFeature` from the snippet and call
+   `Init_Ext(0x0876232C, exeDir, device12, version, nullptr)`.
+   Allocate parameters from the **core**
+   (`NVSDK_NGX_D3D12_AllocateParameters`).
+5. Creation parameters: `DLSSNR.Width/Height/Input*/Output*`,
+   `DLSSNR.Output.Width/Height`, `DLSSNR.Upscaling=0`, `DLSSNR.Scale=1`,
+   `DLSSNR.ScalingRatio=1`, `DLSSNR.Hint.Render.Preset`,
+   `NVSDK_NGX_Parameter_Width/Height`, `PerfQualityValue=Balanced`,
+   `CreationNodeMask=VisibilityNodeMask=1`.
+   **Also set `DLSSNRComputeScalingRatioCallback`** to a function that writes
+   `DLSSNR.ScalingRatio=1`; without it evaluation returns success but never writes
+   the output texture.
+6. Evaluation: bind `DLSSNR.Color`, `DLSSNR.Output`, `DLSSNR.MVec`, `DLSSNR.Depth`
+   plus the four `*Subrect*` groups, `MVecScaleX/Y=1`, `DepthInverted=1`,
+   `Enabled=1`, `Reset=1` on the first frame, style/intensity/tone/structure.
+   Transition Color/MVec/Depth `COMMON -> NON_PIXEL_SHADER_RESOURCE`, Output
+   `COMMON -> UNORDERED_ACCESS`, evaluate, then back to `COMMON`.
+7. **Wait on the D3D12 fence value on the CPU before the D3D11 readback.** A
+   D3D11 `ID3D11DeviceContext4::Wait` on the shared fence alone raced: the probe
+   sometimes read the pre-evaluation texture. Spinning until
+   `ID3D12Fence::GetCompletedValue() >= value`, then copying through D3D11, makes
+   the result deterministic.
+8. Shared textures: D3D11 `R8G8B8A8_UNORM` with
+   `D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE`,
+   `BIND_SHADER_RESOURCE | BIND_UNORDERED_ACCESS`, exported with
+   `IDXGIResource1::CreateSharedHandle` and opened with
+   `ID3D12Device::OpenSharedHandle`. Guides are `R16G16_FLOAT` (motion) and
+   `R32_FLOAT` (depth), as in Magpie's zero-guidance provider.
+
+### What still blocks app integration
+
+The raw feature output is 1920x1080 and is **not the final image** used by Magpie.
+With neutral settings and zero guides it is a pass-through copy; with synthetic
+non-zero guides the probe shows the model running (diffuse color/stripe artifacts on
+the synthetic pattern). Magpie post-processes the raw result with
+`DLSSNRColorShader` / `DLSSNRDetailShader`, temporal stabilization and its
+`residualMultiplier`/`residualSaturation`/... controls. Those shaders are not ported
+yet, and a real video stream has no motion vectors or depth buffer to feed the
+model.
+
+Realistic next steps:
+
+1. Port the residual composite (start with `residualTransfer = InPlace`) and
+   validate on real PS5 frames at 1080p.
+2. Decide the guide contract: zero motion + zero depth (Magpie's zero contract),
+   or optional optical flow (heavy).
+3. Only then add `media/dlssnr.*` to the app, applied before FSR1/Lanczos.
+   DLSSNR is same-resolution, so it composes with the existing upscaler and is
+   independent of RTX VSR.
+
+### Why a naive host fails
 
 ## What `nvngx_dlssnr.dll` is
 

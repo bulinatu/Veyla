@@ -22,6 +22,7 @@ Last updated: live streaming + full controller pipeline.
 | Frame generation | **WORKS** — NVIDIA VFG 2× at 120 fps (synchronous; async blocked) |
 | Input rate | 60–1000 Hz, dedicated thread + high-resolution timer |
 | Neural upscaling | **WORKS** — RTX VSR 1080p→1440p/2160p, 7–11 ms; exclusive with VFG |
+| DLSSNR (same-res neural) | Host **PROVEN in `dlssnr_probe`** (init + feature 18 + evaluate); residual composite not ported |
 | Colour pipeline | **WORKS** — chroma bilinear/bicubic/Lanczos + PQ detect/pass-through/tone-map |
 
 ---
@@ -197,8 +198,9 @@ Verified: audio header 2ch/48kHz received during a live session; video 1080p60 a
    the Rumble test; firmware 0x0630 now uses the new rumble path.
 2. RTX VSR: user visual test at 1440p/2160p (AI High vs FSR1); optional 10-bit
    RGB10A2 path once the decoder keeps 10-bit surfaces (docs/17).
-3. DLSSNR neural rendering (same-resolution): port Magpie's native NGX D3D12 host
-   (docs/17). This is separate from VSR and still not integrated.
+3. DLSSNR neural rendering (same-resolution): the host is proven
+   (`tools/dlssnr_probe`); port Magpie's residual/color composite and temporal
+   stabilization, then apply it at 1080p before the upscaler (docs/17).
 4. Frame generation: worker-owned D3D11 device + shared textures (the same-device
    worker failed with a CUDA interop device-ordinal crash; see docs/15).
 5. DualSense haptic audio (USB only): decode the console haptics Opus stream and

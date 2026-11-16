@@ -40,6 +40,17 @@ target_link_libraries(vsr_probe PRIVATE brp_media)
 target_compile_options(vsr_probe PRIVATE /Zi)
 target_link_options(vsr_probe PRIVATE /DEBUG)
 
+# Diagnostic only: DLSSNR signed-snippet host probe. Needs the NGX SDK headers;
+# disabled unless NGX_SDK_INC points at a folder containing nvsdk_ngx.h.
+set(NGX_SDK_INC "" CACHE PATH "NGX SDK include directory (nvsdk_ngx.h)")
+if(NGX_SDK_INC AND EXISTS "${NGX_SDK_INC}/nvsdk_ngx.h")
+    add_executable(dlssnr_probe tools/dlssnr_probe/main.cpp)
+    target_include_directories(dlssnr_probe PRIVATE "${NGX_SDK_INC}")
+    target_link_libraries(dlssnr_probe PRIVATE d3d11 d3d12 dxgi)
+    target_compile_options(dlssnr_probe PRIVATE /Zi)
+    target_link_options(dlssnr_probe PRIVATE /DEBUG)
+endif()
+
 # --- Application shell (Direct2D UI over the same D3D11 device) -------------
 
 add_library(brp_ui STATIC
