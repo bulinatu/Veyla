@@ -1,5 +1,6 @@
 #include "app/app.h"
 
+#include "session/discovery.h"
 #include "platform/win32_window.h"
 #include "ui/theme.h"
 
@@ -152,6 +153,16 @@ bool App::Init(Win32Window* window) {
             "encrypted in PXPlay; pairing needs the 8-digit console code.";
     } else {
         session_note_ = "No console configured yet.";
+    }
+
+    // Prefer a console found on the LAN over the cached (often WAN) address.
+    const auto discovered = session::DiscoverLocal(1400);
+    if (!discovered.empty()) {
+        profile_.host = discovered.front().address;
+        if (profile_.target_id.empty()) profile_.target_id = discovered.front().target_id;
+        if (profile_.name.empty()) profile_.name = discovered.front().name;
+        std::string save_detail;
+        session::Save(profile_, session::DefaultProfilePath(), save_detail);
     }
 
     audio_devices_ = audio::Engine::Enumerate();

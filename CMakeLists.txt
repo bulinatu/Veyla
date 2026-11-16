@@ -43,6 +43,7 @@ add_executable(brp
     src/platform/gamepad.cpp
     src/audio/audio_engine.cpp
     src/net/reachability.cpp
+    src/session/discovery.cpp
 )
 target_link_libraries(brp PRIVATE brp_ui brp_session hid setupapi xinput ole32 avrt uuid ws2_32)
 
@@ -112,6 +113,10 @@ target_link_libraries(brp_session PUBLIC mbedtls mbedx509 mbedcrypto ws2_32 bcry
 set_target_properties(brp_session PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 
 target_compile_options(brp_session PRIVATE $<$<COMPILE_LANGUAGE:C>:/Zi>)
+
+add_executable(discover_probe tools/discover_probe/main.cpp src/session/discovery.cpp)
+target_include_directories(discover_probe PRIVATE src)
+target_link_libraries(discover_probe PRIVATE ws2_32)
 
 add_executable(pair_probe tools/pair_probe/main.cpp src/session/profile.cpp)
 target_link_libraries(pair_probe PRIVATE brp_session)
