@@ -37,6 +37,26 @@ Every setting is a **dropdown** (or a button), not a key cycle. Dropdowns open a
 
 ![Settings — Connection after a probe](images/app-settings-connection.png)
 
+### Startup
+
+The window stays hidden until the first frame is presented, so there is no white
+flash. The first frames are a logo build-up on the app palette:
+
+1. `RemotePlay` fades in, centred.
+2. `but` appears centred underneath it (accent colour).
+3. `Better` completes the second line to the right ("but Better"); both lines
+   stay centred as the word grows.
+
+The window is skippable with a click or any key. Total run: ~3.6 s including the
+fade-out.
+
+### In-stream idle
+
+While a session is live, 3 s without mouse movement hides the `Back` and
+`Disconnect` buttons, the key hints, and the OS cursor. Moving the mouse brings
+them back immediately; the fade takes 0.35 s. The stats HUD is independent and
+stays on if enabled.
+
 ### Stream
 
 The measured post-process pipeline running full-window, with a live latency HUD and a controller chip.

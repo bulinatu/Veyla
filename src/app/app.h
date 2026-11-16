@@ -79,12 +79,13 @@ private:
     void RenderHome(double t);
     void RenderSettings(double t);
     void RenderStream(double t);
+    void RenderIntro(double t);
 
     void RenderTopBar();
     void DrawConsoleCard();
     void DrawTile(const D2D1_RECT_F& rect, const GameEntry& game, float alpha, bool selected,
                   bool hovered);
-    void DrawHints(const wchar_t* hints);
+    void DrawHints(const wchar_t* hints, float alpha = 1.0f);
 
     void DrawSettingLabel(const wchar_t* label, float y, bool enabled = true);
     void DrawInfoRow(const wchar_t* label, const std::wstring& value, float y);
@@ -174,6 +175,17 @@ private:
     int audio_buffer_ms_ = 20;
     bool audio_failed_ = false;
     bool audio_opened_ = false;
+
+    // intro
+    bool intro_ = true;
+    double intro_start_ = -1.0;
+    bool window_shown_ = false;
+
+    // stream chrome idle state
+    double mouse_active_at_ = -1.0;
+    int last_mouse_x_ = -100000;
+    int last_mouse_y_ = -100000;
+    bool cursor_hidden_ = false;
 
     // connection
     net::Reachability probe_;

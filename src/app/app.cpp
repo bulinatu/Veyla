@@ -339,6 +339,10 @@ void App::DispatchClick() {
 }
 
 void App::HandleKey(int vk) {
+    if (intro_) {
+        intro_ = false;
+        return;
+    }
     if (vk == VK_F12) {
         capture_requested_ = true;
         return;
@@ -755,6 +759,9 @@ void App::StartStream() {
     if (streaming_.Start(profile_, profile_.width, profile_.height, profile_.bitrate_kbps, error)) {
         stream_active_ = true;
         StartPadThread();
+        mouse_active_at_ = clock_;
+        cursor_hidden_ = false;
+        window_->SetCursorHidden(false);
         screen_ = Screen::Stream;
         std::fprintf(stderr, "[app] streaming started\n");
     } else {
@@ -823,6 +830,10 @@ void App::DisconnectStream() {
     pending_connect_ = PendingConnect::None;
     feedback_version_ = 0;
     pad_.SetConsoleFeedback(PadConsoleFeedback{});
+    cursor_hidden_ = false;
+    if (window_) {
+        window_->SetCursorHidden(false);
+    }
     stream_note_ = "Disconnected. The console may take a few seconds to release the session.";
     screen_ = Screen::Home;
 }
@@ -880,6 +891,37 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     hits_.clear();
     hover_ = Hit::None;
     hover_index_ = -1;
+
+    // Mouse activity drives the stream chrome and the OS cursor.
+    if (pointer.x != last_mouse_x_ || pointer.y != last_mouse_y_ || pointer.clicked ||
+        pointer.wheel != 0.0f) {
+        mouse_active_at_ = clock_;
+        last_mouse_x_ = pointer.x;
+        last_mouse_y_ = pointer.y;
+    }
+
+    // Startup logo animation. Runs before any other UI and is skippable with a
+    // click or a key; the window is shown only after its first frame.
+    if (intro_) {
+        if (intro_start_ < 0.0) {
+            intro_start_ = clock_;
+        }
+        const double elapsed = clock_ - intro_start_;
+        const bool skip = pointer_.clicked || elapsed > 3.6;
+        if (!skip) {
+            RenderIntro(elapsed);
+            window_->SetCursorHidden(false);
+            presenter_.PresentNow(true);
+            if (!window_shown_) {
+                window_->Show();
+                window_shown_ = true;
+            }
+            return;
+        }
+        intro_ = false;
+        pointer_.clicked = false;  // a skip click must not hit the Home UI
+        mouse_active_at_ = clock_;
+    }
 
     double dt = last_time_ < 0.0 ? 1.0 / 60.0 : time_seconds - last_time_;
     last_time_ = time_seconds;
@@ -965,6 +1007,8 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
             streaming_.Stop();
             stream_active_ = false;
             pad_.SetConsoleFeedback(PadConsoleFeedback{});
+            cursor_hidden_ = false;
+            window_->SetCursorHidden(false);
             stream_note_ = reason.empty() ? "Session ended." : reason;
             screen_ = Screen::Home;
         }
@@ -993,7 +1037,22 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         }
     }
 
+    // Hide the OS cursor together with the stream chrome.
+    const bool want_cursor_hidden =
+        screen_ == Screen::Stream && stream_active_ && clock_ - mouse_active_at_ > 3.0;
+    if (want_cursor_hidden != cursor_hidden_) {
+        cursor_hidden_ = want_cursor_hidden;
+        window_->SetCursorHidden(want_cursor_hidden);
+        if (want_cursor_hidden) {
+            hover_ = Hit::None;
+        }
+    }
+
     presenter_.PresentNow(true);
+    if (!window_shown_) {
+        window_->Show();
+        window_shown_ = true;
+    }
 }
 
 void App::RenderTopBar() {
@@ -1123,11 +1182,11 @@ void App::DrawTile(const D2D1_RECT_F& rect, const GameEntry& game, float alpha, 
     }
 }
 
-void App::DrawHints(const wchar_t* hints) {
+void App::DrawHints(const wchar_t* hints, float alpha) {
     ui_.Text(hints, {0.0f, static_cast<float>(window_->height()) - 40.0f,
                      static_cast<float>(window_->width()),
                      static_cast<float>(window_->height()) - 14.0f},
-             12.0f, th::Rgba(th::kMuted, 0.85f), DWRITE_FONT_WEIGHT_NORMAL,
+             12.0f, th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
 }
 
@@ -1259,6 +1318,64 @@ void App::DrawPopup() {
     }
 
     popup_.id = -1;
+}
+
+void App::RenderIntro(double t) {
+    const float w = static_cast<float>(window_->width());
+    const float h = static_cast<float>(window_->height());
+
+    ui_.BeginFrame();
+
+    ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(th::kBgTop), th::Rgba(th::kBgBottom));
+    ui_.FillRadial(w * 0.5f, h * 0.5f, w * 0.44f, th::Rgba(th::kAccent, 0.10f),
+                   th::Rgba(th::kAccent, 0.0f));
+
+    auto ease = [](float x) {
+        x = std::clamp(x, 0.0f, 1.0f);
+        return 1.0f - std::pow(1.0f - x, 3.0f);
+    };
+
+    // RemotePlay first, then "but" appears under it, then "Better" completes
+    // the line to the right; the pair re-centres as it appears.
+    const float remote = ease(static_cast<float>((t - 0.05) / 0.75));
+    const float but = ease(static_cast<float>((t - 1.00) / 0.60));
+    const float better = ease(static_cast<float>((t - 1.70) / 0.55));
+    const float outro = static_cast<float>(std::clamp((t - 3.05) / 0.50, 0.0, 1.0));
+    const float fade = 1.0f - outro;
+
+    const float size1 = std::clamp(h * 0.064f, 42.0f, 88.0f);
+    const float size2 = size1 * 0.62f;
+    const float gap = size2 * 0.30f;
+
+    const float w_remote = ui_.TextWidth(L"RemotePlay", size1, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const float w_better = ui_.TextWidth(L"Better", size2, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const float w_but = ui_.TextWidth(L"but", size2, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+
+    // Centre the two-line lockup as one block, both horizontally and vertically.
+    const float step = size1 * 0.95f;
+    const float y1 = h * 0.5f - step * 0.5f + (1.0f - remote) * 10.0f;
+    const float y2 = y1 + step + (1.0f - but) * 12.0f;
+
+    ui_.Text(L"RemotePlay",
+             {w * 0.5f - w_remote * 0.5f, y1 - size1, w * 0.5f + w_remote * 0.5f, y1 + size1},
+             size1, th::Rgba(th::kInk, remote * fade), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+
+    // Width-weighted centring: as each word appears the line stays centred.
+    const float wb = w_but * but;
+    const float wbe = w_better * better;
+    const float total2 = wb + wbe + gap * better;
+    float x2 = w * 0.5f - total2 * 0.5f;
+    if (but > 0.001f) {
+        ui_.Text(L"but", {x2, y2 - size2, x2 + wb, y2 + size2}, size2,
+                 th::Rgba(th::kAccent, but * fade), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        x2 += wb + gap * better;
+    }
+    if (better > 0.001f) {
+        ui_.Text(L"Better", {x2, y2 - size2, x2 + wbe, y2 + size2}, size2,
+                 th::Rgba(th::kInk, better * fade), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    }
+
+    ui_.EndFrame();
 }
 
 void App::RenderHome(double t) {
@@ -1667,22 +1784,36 @@ void App::RenderStream(double t) {
                  DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
 
-    const D2D1_RECT_F back{w - 132.0f, 78.0f, w - 40.0f, 114.0f};
-    ui_.FillRounded(back, 18.0f, th::Rgba(0xFFFFFF, hover_ == Hit::Back ? 0.16f : 0.08f));
-    ui_.Text(L"Back", {back.left, back.top, back.right, back.bottom}, 13.0f,
-             th::Rgba(th::kInk, 0.9f), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER);
-    AddHit(Hit::Back, -1, back);
+    // Chrome fades out after 3 s of mouse inactivity and returns on movement.
+    const float idle = static_cast<float>(clock_ - mouse_active_at_);
+    const float chrome_alpha =
+        stream_active_ ? std::clamp((3.0f - idle) / 0.35f, 0.0f, 1.0f) : 1.0f;
 
-    if (stream_active_) {
-        const D2D1_RECT_F quit{w - 300.0f, 78.0f, w - 148.0f, 114.0f};
-        const bool quit_hover = hover_ == Hit::Button && hover_index_ == W_Disconnect;
-        ui_.FillRounded(quit, 18.0f, th::Rgba(0xFF6B6B, quit_hover ? 0.30f : 0.18f));
-        ui_.StrokeRounded(quit, 18.0f, th::Rgba(0xFF6B6B, 0.85f), 1.0f);
-        ui_.Text(L"Disconnect", {quit.left, quit.top, quit.right, quit.bottom}, 12.5f,
-                 th::Rgba(th::kInk, 0.95f), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+    if (chrome_alpha > 0.01f) {
+        const D2D1_RECT_F back{w - 132.0f, 78.0f, w - 40.0f, 114.0f};
+        ui_.FillRounded(back, 18.0f,
+                        th::Rgba(0xFFFFFF, (hover_ == Hit::Back ? 0.16f : 0.08f) * chrome_alpha));
+        ui_.Text(L"Back", {back.left, back.top, back.right, back.bottom}, 13.0f,
+                 th::Rgba(th::kInk, 0.9f * chrome_alpha), DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_CENTER);
-        AddHit(Hit::Button, W_Disconnect, quit);
-    }
+        if (chrome_alpha > 0.5f) {
+            AddHit(Hit::Back, -1, back);
+        }
 
-    DrawHints(L"Esc   disconnect      H   toggle HUD      1 / 2 / 3   upscaler");
+        if (stream_active_) {
+            const D2D1_RECT_F quit{w - 300.0f, 78.0f, w - 148.0f, 114.0f};
+            const bool quit_hover = hover_ == Hit::Button && hover_index_ == W_Disconnect;
+            ui_.FillRounded(quit, 18.0f,
+                            th::Rgba(0xFF6B6B, (quit_hover ? 0.30f : 0.18f) * chrome_alpha));
+            ui_.StrokeRounded(quit, 18.0f, th::Rgba(0xFF6B6B, 0.85f * chrome_alpha), 1.0f);
+            ui_.Text(L"Disconnect", {quit.left, quit.top, quit.right, quit.bottom}, 12.5f,
+                     th::Rgba(th::kInk, 0.95f * chrome_alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                     DWRITE_TEXT_ALIGNMENT_CENTER);
+            if (chrome_alpha > 0.5f) {
+                AddHit(Hit::Button, W_Disconnect, quit);
+            }
+        }
+
+        DrawHints(L"Esc   disconnect      H   toggle HUD      1 / 2 / 3   upscaler", chrome_alpha);
+    }
 }

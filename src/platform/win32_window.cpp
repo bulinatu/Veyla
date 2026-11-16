@@ -48,9 +48,29 @@ bool Win32Window::Create(const wchar_t* title, int width, int height) {
     width_ = client.right - client.left;
     height_ = client.bottom - client.top;
 
+    // Deliberately hidden: App::Frame shows the window after the first frame
+    // (the intro) has been presented.
+    return true;
+}
+
+void Win32Window::Show() {
+    if (!hwnd_) {
+        return;
+    }
     ShowWindow(hwnd_, SW_SHOW);
     UpdateWindow(hwnd_);
-    return true;
+}
+
+void Win32Window::SetCursorHidden(bool hidden) {
+    if (cursor_hidden_ == hidden) {
+        return;
+    }
+    cursor_hidden_ = hidden;
+    if (hidden) {
+        ::SetCursor(nullptr);
+    } else {
+        ::SetCursor(::LoadCursorW(nullptr, hand_cursor_ ? IDC_HAND : IDC_ARROW));
+    }
 }
 
 bool Win32Window::Pump() {
@@ -182,7 +202,11 @@ LRESULT Win32Window::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
 
         case WM_SETCURSOR:
             if (LOWORD(lparam) == HTCLIENT) {
-                ::SetCursor(::LoadCursorW(nullptr, hand_cursor_ ? IDC_HAND : IDC_ARROW));
+                if (cursor_hidden_) {
+                    ::SetCursor(nullptr);
+                } else {
+                    ::SetCursor(::LoadCursorW(nullptr, hand_cursor_ ? IDC_HAND : IDC_ARROW));
+                }
                 return TRUE;
             }
             break;

@@ -47,6 +47,13 @@ public:
     // Hand cursor while hovering something clickable.
     void set_hand_cursor(bool enabled) { hand_cursor_ = enabled; }
 
+    // The window starts hidden; the app shows it after the first frame is
+    // presented so startup never flashes an uninitialised white surface.
+    void Show();
+
+    // Hides/shows the OS cursor over the client area (stream idle mode).
+    void SetCursorHidden(bool hidden);
+
 private:
     static LRESULT CALLBACK WndProcThunk(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
     LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
@@ -60,6 +67,7 @@ private:
     int last_char_ = 0;
     MouseState mouse_{};
     bool hand_cursor_ = false;
+    bool cursor_hidden_ = false;
     bool tracking_leave_ = false;
 };
 
