@@ -7,6 +7,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
+#include <cstdio>
 #include <cstring>
 
 namespace brp::media {
@@ -61,41 +62,136 @@ void Decoder::Close() {
 bool Decoder::InitCodec(const void* codec_ptr, const void* params_ptr, std::string& error) {
     const AVCodec* decoder = static_cast<const AVCodec*>(codec_ptr);
 
+    auto apply_params = [&](AVCodecContext* context) {
+        if (!params_ptr) {
+            return true;
+        }
+        return avcodec_parameters_to_context(
+                   context, static_cast<const AVCodecParameters*>(params_ptr)) >= 0;
+    };
+
     codec_ = avcodec_alloc_context3(decoder);
     if (!codec_) {
         error = "cannot create decoder context";
         return false;
     }
-
-    if (params_ptr) {
-        if (avcodec_parameters_to_context(Ctx(codec_), static_cast<const AVCodecParameters*>(params_ptr)) < 0) {
-            error = "cannot apply stream parameters";
-            return false;
-        }
+    if (!apply_params(Ctx(codec_))) {
+        error = "cannot apply stream parameters";
+        return false;
     }
 
-    // D3D11VA when the codec offers it; frames are copied back to system memory.
-    AVBufferRef* hw = nullptr;
-    if (av_hwdevice_ctx_create(&hw, AV_HWDEVICE_TYPE_D3D11VA, nullptr, nullptr, 0) >= 0) {
+    auto backend_name = [](AVHWDeviceType type) -> const char* {
+        switch (type) {
+            case AV_HWDEVICE_TYPE_D3D11VA: return "d3d11va";
+            case AV_HWDEVICE_TYPE_D3D12VA: return "d3d12va";
+            case AV_HWDEVICE_TYPE_VULKAN: return "vulkan";
+            case AV_HWDEVICE_TYPE_DXVA2: return "dxva2";
+            case AV_HWDEVICE_TYPE_CUDA: return "cuda";
+            default: return "software";
+        }
+    };
+    auto backend_kind = [](AVHWDeviceType type) -> DecodeBackend {
+        switch (type) {
+            case AV_HWDEVICE_TYPE_D3D11VA: return DecodeBackend::D3D11VA;
+            case AV_HWDEVICE_TYPE_D3D12VA: return DecodeBackend::D3D12VA;
+            case AV_HWDEVICE_TYPE_VULKAN: return DecodeBackend::Vulkan;
+            case AV_HWDEVICE_TYPE_DXVA2: return DecodeBackend::DXVA2;
+            case AV_HWDEVICE_TYPE_CUDA: return DecodeBackend::CUDA;
+            default: return DecodeBackend::Software;
+        }
+    };
+    auto codec_supports = [&](AVHWDeviceType type) {
         for (int i = 0;; ++i) {
             const AVCodecHWConfig* config = avcodec_get_hw_config(decoder, i);
             if (!config) {
-                break;
+                return false;
             }
             if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) &&
-                config->device_type == AV_HWDEVICE_TYPE_D3D11VA) {
-                Ctx(codec_)->hw_device_ctx = av_buffer_ref(hw);
-                hardware_ = true;
-                break;
+                config->device_type == type) {
+                return true;
             }
         }
-        hw_device_ = hw;
+    };
+
+    std::vector<AVHWDeviceType> order;
+    switch (requested_backend_) {
+        case DecodeBackend::Auto:
+            order = {AV_HWDEVICE_TYPE_D3D11VA, AV_HWDEVICE_TYPE_D3D12VA,
+                     AV_HWDEVICE_TYPE_CUDA, AV_HWDEVICE_TYPE_VULKAN,
+                     AV_HWDEVICE_TYPE_DXVA2};
+            break;
+        case DecodeBackend::D3D11VA:
+            order = {AV_HWDEVICE_TYPE_D3D11VA};
+            break;
+        case DecodeBackend::D3D12VA:
+            order = {AV_HWDEVICE_TYPE_D3D12VA};
+            break;
+        case DecodeBackend::Vulkan:
+            order = {AV_HWDEVICE_TYPE_VULKAN};
+            break;
+        case DecodeBackend::DXVA2:
+            order = {AV_HWDEVICE_TYPE_DXVA2};
+            break;
+        case DecodeBackend::CUDA:
+            order = {AV_HWDEVICE_TYPE_CUDA};
+            break;
+        case DecodeBackend::Software:
+            break;
     }
 
-    if (avcodec_open2(Ctx(codec_), decoder, nullptr) < 0) {
+    backend_note_.clear();
+    AVBufferRef* hw = nullptr;
+    AVHWDeviceType chosen = AV_HWDEVICE_TYPE_NONE;
+    for (AVHWDeviceType type : order) {
+        if (!codec_supports(type)) {
+            backend_note_ += std::string(backend_name(type)) + " not offered by codec; ";
+            continue;
+        }
+        if (av_hwdevice_ctx_create(&hw, type, nullptr, nullptr, 0) < 0) {
+            backend_note_ += std::string(backend_name(type)) + " device creation failed; ";
+            hw = nullptr;
+            continue;
+        }
+        Ctx(codec_)->hw_device_ctx = av_buffer_ref(hw);
+        chosen = type;
+        break;
+    }
+    if (chosen != AV_HWDEVICE_TYPE_NONE) {
+        hw_device_ = hw;
+    } else if (requested_backend_ != DecodeBackend::Software) {
+        backend_note_ += "falling back to software";
+    }
+
+    int open_result = avcodec_open2(Ctx(codec_), decoder, nullptr);
+    bool using_hw = chosen != AV_HWDEVICE_TYPE_NONE;
+    if (open_result < 0 && using_hw) {
+        // The device exists but this codec/FFmpeg build cannot drive it: retry
+        // with a clean software context instead of failing the whole session.
+        if (hw_device_) {
+            av_buffer_unref(reinterpret_cast<AVBufferRef**>(&hw_device_));
+        }
+        avcodec_free_context(reinterpret_cast<AVCodecContext**>(&codec_));
+        codec_ = avcodec_alloc_context3(decoder);
+        if (!codec_ || !apply_params(Ctx(codec_))) {
+            error = "cannot create software fallback context";
+            return false;
+        }
+        open_result = avcodec_open2(Ctx(codec_), decoder, nullptr);
+        using_hw = false;
+        chosen = AV_HWDEVICE_TYPE_NONE;
+        backend_note_ += "hardware open failed; software";
+    }
+    if (open_result < 0) {
         error = "cannot open decoder";
         return false;
     }
+
+    hardware_ = using_hw;
+    active_backend_ = using_hw ? backend_kind(chosen) : DecodeBackend::Software;
+    backend_name_ = backend_name(chosen);
+    std::fprintf(stderr, "[decode] backend=%s requested=%d%s%s\n", backend_name_.c_str(),
+                 static_cast<int>(requested_backend_),
+                 backend_note_.empty() ? "" : " note=", backend_note_.c_str());
 
     codec_name_ = decoder->name;
     width_ = Ctx(codec_)->width;

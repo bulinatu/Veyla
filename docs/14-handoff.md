@@ -12,7 +12,7 @@ Last updated: live streaming + full controller pipeline.
 | LAN discovery | **WORKS** — finds `192.168.1.21` automatically |
 | Live streaming session | **WORKS** — 1080p60 HEVC, ~56–60 fps |
 | Connect while asleep | Implemented — wake packet verified; needs one rest-mode test |
-| Video decode (live) | **WORKS** — D3D11VA, color matrix explicit |
+| Video decode (live) | **WORKS** — selectable D3D11VA / D3D12VA / Vulkan / DXVA2 / CUDA / software |
 | Presentation pipeline | **WORKS** — D3D11 flip model, FSR1/EASU, 0.18 ms at 1440p |
 | Fullscreen / HDR10 | **WORKS** — F11; HDR at startup (PQ swapchain) |
 | Audio (WASAPI, in-process) | **WORKS** — Opus → FFmpeg → WASAPI, 0 underruns |
@@ -199,7 +199,33 @@ Verified: audio header 2ch/48kHz received during a live session; video 1080p60 a
 6. DLSSNR (`nvngx_dlssnr.dll`) as a neural-rendering stage; it is not frame
    generation. See `docs/15-frame-generation.md`.
 
-## Controller pipeline (implemented this pass)
+## Decoder backends (selectable)
+
+`Settings → Display → Video decoder (next session)`:
+
+| Value | Backend | Live test |
+|---|---|---|
+| Auto | D3D11VA first, then D3D12VA/CUDA/Vulkan/DXVA2 | picks d3d11va here |
+| D3D11VA | proven default | 50–56 fps |
+| D3D12VA | newer D3D12 video decode | 53–56 fps |
+| Vulkan | Vulkan Video decode | 54–56 fps |
+| DXVA2 | legacy D3D9 video decode | 54–56 fps |
+| CUDA (NVDEC) | NVIDIA NVDEC | 54–56 fps |
+| Software | FFmpeg CPU | 50–54 fps |
+
+All six were verified live against the PS5 stream. The decoder always downloads
+the decoded surface to CPU RGBA because the presenter is D3D11-based; the
+backend choice is therefore about driver path and stability, not a large frame
+rate difference yet. The active backend is printed in stderr (`[decode]
+backend=...`) and shown in the streaming HUD. An explicit backend that cannot be
+created falls back to software with a note; Auto tries the next type.
+
+An actual zero-copy handoff (decoder texture straight into the presenter) is the
+next performance step, not a decoder selection issue.
+
+
+
+## Controller pipeline (implemented earlier)
 
 - `src/platform/gamepad.*`: added `SetOutput` / `SetConsoleFeedback` /
   `PumpOutput`. The app declares the *desired* output; the pad owns merging,

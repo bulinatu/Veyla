@@ -21,7 +21,7 @@ Five categories in a left sidebar, each with its own settings — nothing is lum
 
 | Category | Contents |
 |---|---|
-| Display | Upscaler, upscale target (window/1080p/1440p/2160p), latency HUD, frame generation (reserved), HDR (reserved) |
+| Display | Upscaler, upscale target (window/1080p/1440p/2160p), latency HUD, frame generation (NVIDIA VFG 2x), video decoder (Auto/D3D11VA/D3D12VA/Vulkan/DXVA2/CUDA/Software), HDR (startup) |
 | Audio | Output device, buffer size, test tone, live format/latency/underruns |
 | Controller | Input source, lightbar, adaptive trigger, strength, player LEDs, mic LED, rumble |
 | Connection | Console, address, pairing, PSN account, stream defaults, reachability test |

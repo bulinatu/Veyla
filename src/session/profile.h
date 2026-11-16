@@ -54,6 +54,7 @@ struct Profile {
     int frame_buffer = 1;
     int pad_rate_hz = 250;
     int frame_gen = 0;  // 0 off, 2/3/4 NVIDIA VFG multiplier
+    int decoder = 0;    // 0 auto, 1 d3d11va, 2 d3d12va, 3 vulkan, 4 dxva2, 5 cuda, 6 software
     int lightbar = 0;
     int trigger_effect = 0;
     int trigger_strength = 5;

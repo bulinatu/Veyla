@@ -14,6 +14,19 @@ struct DecodedFrame {
 
 enum class StreamCodec { H264, Hevc };
 
+// Selectable decode backend. Auto prefers D3D11VA, then D3D12VA/Vulkan; an
+// explicit backend falls back to software (with a note) if the driver or the
+// FFmpeg build cannot provide it.
+enum class DecodeBackend : int {
+    Auto = 0,
+    D3D11VA = 1,
+    D3D12VA = 2,
+    Vulkan = 3,
+    DXVA2 = 4,
+    CUDA = 5,
+    Software = 6,
+};
+
 // Minimal libavcodec decoder with two modes:
 //   * file/container mode (Open + Next) for validation and tooling,
 //   * live mode (OpenStream + Feed + Receive) for Remote Play access units.
@@ -37,6 +50,12 @@ public:
     bool Receive(DecodedFrame& frame);
 
     void Close();
+
+    void SetBackend(DecodeBackend backend) { requested_backend_ = backend; }
+    DecodeBackend requested_backend() const { return requested_backend_; }
+    DecodeBackend active_backend() const { return active_backend_; }
+    std::string backend_name() const { return backend_name_; }
+    std::string backend_note() const { return backend_note_; }
 
     std::string codec_name() const { return codec_name_; }
     int width() const { return width_; }
@@ -69,6 +88,10 @@ private:
     int width_ = 0;
     int height_ = 0;
     int frame_count_ = 0;
+    DecodeBackend requested_backend_ = DecodeBackend::Auto;
+    DecodeBackend active_backend_ = DecodeBackend::Software;
+    std::string backend_name_ = "software";
+    std::string backend_note_;
     std::string codec_name_;
 };
 

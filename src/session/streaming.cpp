@@ -9,6 +9,7 @@ extern "C" {
 #include <libswresample/swresample.h>
 }
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -158,6 +159,8 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
     std::memcpy(info_.psn_account_id, account.data(), 8);
 
     std::string decoder_error;
+    decoder_.SetBackend(static_cast<media::DecodeBackend>(
+        std::clamp(profile.decoder, 0, 6)));
     if (!decoder_.OpenStream(media::StreamCodec::Hevc, decoder_error)) {
         error = "decoder: " + decoder_error;
         return false;

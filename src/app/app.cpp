@@ -40,6 +40,7 @@ enum WidgetId {
     W_Upscaler = 1,
     W_Hud,
     W_FrameGen,
+    W_Decoder = 53,
     W_Hdr,
     W_AudioDevice = 10,
     W_AudioBuffer,
@@ -506,6 +507,11 @@ void App::ApplyDropdown(int id, int index) {
             SaveProfile();
             break;
         }
+        case W_Decoder:
+            profile_.decoder = std::clamp(index, 0, 6);
+            SaveProfile();
+            stream_note_ = "Decoder selected; it applies to the next session.";
+            break;
         case W_Hud:
             hud_ = index == 1;
             profile_.hud = hud_;
@@ -1171,6 +1177,14 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         }
     }
 
+    static const bool decode_probe = std::getenv("BRP_DECODE_PROBE") != nullptr;
+    static double decode_probe_at = 0.0;
+    if (decode_probe && stream_active_ && clock_ - decode_probe_at >= 1.0) {
+        decode_probe_at = clock_;
+        std::fprintf(stderr, "[app] fps %.1f decoder=%s audio=%d vfg=%d\n", streaming_.fps(),
+                     streaming_.decoder_name().c_str(), streaming_.audio_frames(), frame_gen_);
+    }
+
     if (pad_.is_sony() &&
         (output_dirty_ || clock_ < rumble_until_ + 0.1 || clock_ - last_output_ > 0.2)) {
         ApplyControllerOutput(false);
@@ -1714,6 +1728,11 @@ void App::RenderSettings(double t) {
             DrawDropdown(L"Frame buffer", {L"0 (lowest latency)", L"1", L"2", L"3 (smoothest)"},
                          stream_buffer_, y, W_FrameBuffer);
             y += kRowH;
+            DrawDropdown(L"Video decoder (next session)",
+                         {L"Auto", L"D3D11VA", L"D3D12VA", L"Vulkan", L"DXVA2",
+                          L"CUDA (NVDEC)", L"Software"},
+                         std::clamp(profile_.decoder, 0, 6), y, W_Decoder);
+            y += kRowH;
 
             if (frame_gen_ >= 2 && fg_ready_) {
                 wchar_t text[192];
@@ -1969,6 +1988,15 @@ void App::RenderStream(double t) {
             ui_.FillRounded(live, 10.0f, th::Rgba(0x000000, 0.55f));
             ui_.Text(stats, {live.left + 14.0f, live.top, live.right - 14.0f, live.bottom}, 12.0f,
                      th::Rgba(th::kInk, 0.92f));
+
+            const std::wstring decoder = Widen(streaming_.decoder_name());
+            if (!decoder.empty()) {
+                const std::wstring text = L"Decoder: " + decoder;
+                const D2D1_RECT_F dec{24.0f, 174.0f, 24.0f + 300.0f, 174.0f + 30.0f};
+                ui_.FillRounded(dec, 9.0f, th::Rgba(0x000000, 0.50f));
+                ui_.Text(text.c_str(), {dec.left + 12.0f, dec.top, dec.right - 12.0f, dec.bottom},
+                         11.5f, th::Rgba(th::kInk, 0.9f));
+            }
         }
 
         ui_.FillCircle(w - 40.0f, 44.0f, 5.0f, th::Rgba(th::kOnline));

@@ -47,6 +47,7 @@ public:
     int frame_count() const;
     int audio_frames() const { return audio_frames_.load(); }
     double fps() const;
+    std::string decoder_name() const { return decoder_.backend_name(); }
 
     void SendController(const PadState& pad);
     void SetMotionEnabled(bool enabled) { motion_enabled_ = enabled; }
