@@ -102,6 +102,7 @@ private:
     void TriggerRumble();
     void StartProbe();
     void ConnectConsole();
+    void SaveProfile();
     void DisconnectStream();
 
     Win32Window* window_ = nullptr;

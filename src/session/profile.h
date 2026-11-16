@@ -44,6 +44,13 @@ struct Profile {
     std::string codec = "hevc";
     bool hdr = false;
 
+    // UI settings
+    int upscaler = 1;
+    bool hud = true;
+    std::string audio_device_id;
+    int audio_buffer_ms = 20;
+    int input_source = 0;
+
     bool has_console() const { return !target_id.empty(); }
     bool needs_pairing() const { return !credentials.present(); }
     std::string display_name() const;

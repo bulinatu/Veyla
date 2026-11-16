@@ -116,6 +116,14 @@ bool ExtractFirstNestedString(const std::string& json, const std::string& anchor
     return ReadStringAt(json, quote, out);
 }
 
+bool ExtractBool(const std::string& json, const std::string& key, bool& out) {
+    size_t pos = 0;
+    if (!FindKey(json, key, pos)) {
+        return false;
+    }
+    out = json.compare(pos, 4, "true") == 0;
+    return true;
+}
 std::string EscapeJson(const std::string& value) {
     std::string out;
     out.reserve(value.size() + 8);
@@ -353,7 +361,12 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"fps\": " << profile.fps << ",\n";
     json << "  \"bitrate_kbps\": " << profile.bitrate_kbps << ",\n";
     json << "  \"codec\": \"" << EscapeJson(profile.codec) << "\",\n";
-    json << "  \"hdr\": " << (profile.hdr ? "true" : "false") << "\n";
+    json << "  \"hdr\": " << (profile.hdr ? "true" : "false") << ",\n";
+    json << "  \"upscaler\": " << profile.upscaler << ",\n";
+    json << "  \"hud\": " << (profile.hud ? "true" : "false") << ",\n";
+    json << "  \"audio_device_id\": \"" << EscapeJson(profile.audio_device_id) << "\",\n";
+    json << "  \"audio_buffer_ms\": " << profile.audio_buffer_ms << ",\n";
+    json << "  \"input_source\": " << profile.input_source << "\n";
     json << "}\n";
 
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
@@ -403,6 +416,11 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
 
     std::string text;
     if (ExtractString(json, "codec", text)) p.codec = text;
+    if (ExtractString(json, "audio_device_id", text)) p.audio_device_id = text;
+    if (ExtractNumber(json, "upscaler", number)) p.upscaler = static_cast<int>(number);
+    if (ExtractNumber(json, "audio_buffer_ms", number)) p.audio_buffer_ms = static_cast<int>(number);
+    if (ExtractNumber(json, "input_source", number)) p.input_source = static_cast<int>(number);
+    ExtractBool(json, "hud", p.hud);
 
     profile = std::move(p);
     detail = path;

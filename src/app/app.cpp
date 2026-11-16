@@ -159,6 +159,14 @@ bool App::Init(Win32Window* window) {
         session_note_ = "No console configured yet.";
     }
 
+    // Apply persisted UI settings.
+    hdr_ = profile_.hdr;
+    upscale_ = std::clamp(profile_.upscaler, 0, 4);
+    hud_ = profile_.hud;
+    audio_buffer_ms_ = std::clamp(profile_.audio_buffer_ms, 10, 100);
+    input_source_ = std::clamp(profile_.input_source, 0, 2);
+    th::SetHdr(hdr_);
+
     // Prefer a console found on the LAN over the cached (often WAN) address.
     const auto discovered = session::DiscoverLocal(1400);
     if (!discovered.empty()) {
@@ -170,6 +178,15 @@ bool App::Init(Win32Window* window) {
     }
 
     audio_devices_ = audio::Engine::Enumerate();
+    if (!profile_.audio_device_id.empty()) {
+        for (int i = 0; i < static_cast<int>(audio_devices_.size()); ++i) {
+            if (audio_devices_[i].id == profile_.audio_device_id) {
+                audio_device_ = i;
+                break;
+            }
+        }
+    }
+    pad_.SetBackend(kInputBackends[input_source_]);
 
     PresenterConfig cfg{};
     cfg.output_width = window->width();
@@ -423,18 +440,26 @@ void App::ApplyDropdown(int id, int index) {
         case W_Upscaler:
             upscale_ = std::clamp(index, 0, 4);
             presenter_.SetUpscaleMode(upscale_);
+            profile_.upscaler = upscale_;
+            SaveProfile();
             break;
         case W_Hud:
             hud_ = index == 1;
+            profile_.hud = hud_;
+            SaveProfile();
             break;
         case W_AudioDevice:
             if (!audio_devices_.empty()) {
                 audio_device_ = std::clamp(index, 0, static_cast<int>(audio_devices_.size()) - 1);
+                profile_.audio_device_id = audio_devices_[audio_device_].id;
+                SaveProfile();
                 OpenAudioDevice();
             }
             break;
         case W_AudioBuffer:
             audio_buffer_ms_ = kBufferSizes[std::clamp(index, 0, 3)];
+            profile_.audio_buffer_ms = audio_buffer_ms_;
+            SaveProfile();
             OpenAudioDevice();
             break;
         case W_Hdr: {
@@ -470,6 +495,8 @@ void App::ApplyDropdown(int id, int index) {
         case W_InputSource:
             input_source_ = std::clamp(index, 0, 2);
             pad_.SetBackend(kInputBackends[input_source_]);
+            profile_.input_source = input_source_;
+            SaveProfile();
             break;
         case W_Lightbar:
             lightbar_index_ = std::clamp(index, 0, kLightbarCount - 1);
@@ -507,6 +534,11 @@ void App::OpenAudioDevice() {
 void App::TriggerRumble() {
     rumble_until_ = clock_ + 0.45;
     output_dirty_ = true;
+}
+
+void App::SaveProfile() {
+    std::string detail;
+    session::Save(profile_, session::DefaultProfilePath(), detail);
 }
 
 void App::ConnectConsole() {
