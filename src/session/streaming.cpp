@@ -3,6 +3,11 @@
 #include <chiaki/base64.h>
 #include <chiaki/common.h>
 
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libswresample/swresample.h>
+}
+
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -15,12 +20,12 @@ void LogCallback(ChiakiLogLevel level, const char* msg, void* user) {
     if (!msg) {
         return;
     }
-    const char* tag = "?";
+    const char* tag = "debug";
     switch (level) {
         case CHIAKI_LOG_ERROR: tag = "error"; break;
         case CHIAKI_LOG_WARNING: tag = "warn"; break;
         case CHIAKI_LOG_INFO: tag = "info"; break;
-        default: tag = "debug"; break;
+        default: break;
     }
     std::fprintf(stderr, "[stream:%s] %s\n", tag, msg);
 }
@@ -52,6 +57,34 @@ Streaming::~Streaming() {
     Stop();
 }
 
+bool Streaming::OpenAudioDecoder(std::string& error) {
+    const AVCodec* codec = avcodec_find_decoder(AV_CODEC_ID_OPUS);
+    if (!codec) {
+        error = "no opus decoder";
+        return false;
+    }
+    auto* ctx = avcodec_alloc_context3(codec);
+    if (!ctx) {
+        error = "cannot allocate opus context";
+        return false;
+    }
+    ctx->sample_rate = 48000;
+    if (avcodec_open2(ctx, codec, nullptr) < 0) {
+        avcodec_free_context(&ctx);
+        error = "cannot open opus decoder";
+        return false;
+    }
+    opus_ctx_ = ctx;
+
+    auto* frame = av_frame_alloc();
+    if (!frame) {
+        error = "cannot allocate opus frame";
+        return false;
+    }
+    opus_frame_ = frame;
+    return true;
+}
+
 bool Streaming::Start(const Profile& profile, int width, int height, int bitrate,
                       std::string& error) {
     Stop();
@@ -72,6 +105,13 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
 
     chiaki_log_init(&log_, CHIAKI_LOG_ERROR | CHIAKI_LOG_WARNING | CHIAKI_LOG_INFO, &LogCallback,
                     this);
+
+    if (audio_) {
+        std::string audio_error;
+        if (!OpenAudioDecoder(audio_error)) {
+            std::fprintf(stderr, "[stream] audio disabled: %s\n", audio_error.c_str());
+        }
+    }
 
     host_storage_ = profile.host;
     std::memset(&info_, 0, sizeof(info_));
@@ -120,6 +160,14 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
     chiaki_session_set_video_sample_cb(&session_, &Streaming::VideoCallback, this);
     chiaki_session_set_event_cb(&session_, &Streaming::EventCallback, this);
 
+    if (opus_ctx_) {
+        ChiakiAudioSink sink{};
+        sink.user = this;
+        sink.header_cb = &Streaming::AudioHeaderCallback;
+        sink.frame_cb = &Streaming::AudioFrameCallback;
+        chiaki_session_set_audio_sink(&session_, &sink);
+    }
+
     if (chiaki_session_start(&session_) != CHIAKI_ERR_SUCCESS) {
         error = "session start failed";
         chiaki_session_fini(&session_);
@@ -130,6 +178,7 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
     initialised_ = true;
     started_ = std::chrono::steady_clock::now();
     frame_count_.store(0);
+    audio_frames_.store(0);
     {
         std::lock_guard<std::mutex> lock(mutex_);
         message_ = "Connecting to " + profile.host;
@@ -146,6 +195,17 @@ void Streaming::Stop() {
         initialised_ = false;
     }
     decoder_.Close();
+
+    if (swr_) {
+        swr_free(reinterpret_cast<SwrContext**>(&swr_));
+    }
+    if (opus_frame_) {
+        av_frame_free(reinterpret_cast<AVFrame**>(&opus_frame_));
+    }
+    if (opus_ctx_) {
+        avcodec_free_context(reinterpret_cast<AVCodecContext**>(&opus_ctx_));
+    }
+
     state_.store(StreamState::Idle);
     std::lock_guard<std::mutex> lock(mutex_);
     message_.clear();
@@ -153,16 +213,13 @@ void Streaming::Stop() {
 
 bool Streaming::VideoCallback(uint8_t* buf, size_t size, int32_t frames_lost, bool recovered,
                               void* user) {
-    auto* self = static_cast<Streaming*>(user);
-    self->OnVideo(buf, size, frames_lost);
     (void)recovered;
+    static_cast<Streaming*>(user)->OnVideo(buf, size, frames_lost);
     return true;
 }
 
 void Streaming::OnVideo(uint8_t* buf, size_t size, int32_t frames_lost) {
-    if (frames_lost > 0) {
-        decoder_.clear_keyframe_request();
-    }
+    (void)frames_lost;
     if (!decoder_.Feed(buf, size)) {
         chiaki_session_request_idr(&session_);
         return;
@@ -206,6 +263,66 @@ void Streaming::OnEvent(ChiakiEvent* event) {
         }
         default:
             break;
+    }
+}
+
+void Streaming::AudioHeaderCallback(ChiakiAudioHeader* header, void* user) {
+    (void)user;
+    if (header) {
+        std::fprintf(stderr, "[stream] audio header: %u ch, %u Hz\n",
+                     static_cast<unsigned>(header->channels),
+                     static_cast<unsigned>(header->rate));
+    }
+}
+
+void Streaming::AudioFrameCallback(uint8_t* buf, size_t size, void* user) {
+    static_cast<Streaming*>(user)->OnAudio(buf, size);
+}
+
+void Streaming::OnAudio(uint8_t* buf, size_t size) {
+    if (!opus_ctx_ || !audio_ || size == 0) {
+        return;
+    }
+
+    AVPacket* packet = av_packet_alloc();
+    if (!packet) {
+        return;
+    }
+    if (av_new_packet(packet, static_cast<int>(size)) < 0) {
+        av_packet_free(&packet);
+        return;
+    }
+    std::memcpy(packet->data, buf, size);
+
+    const int sent = avcodec_send_packet(static_cast<AVCodecContext*>(opus_ctx_), packet);
+    av_packet_free(&packet);
+    if (sent < 0) {
+        return;
+    }
+
+    auto* frame = static_cast<AVFrame*>(opus_frame_);
+    while (avcodec_receive_frame(static_cast<AVCodecContext*>(opus_ctx_), frame) == 0) {
+        AVChannelLayout out_layout{};
+        av_channel_layout_default(&out_layout, 2);
+
+        auto** swr = reinterpret_cast<SwrContext**>(&swr_);
+        if (swr_alloc_set_opts2(swr, &out_layout, AV_SAMPLE_FMT_FLT, 48000, &frame->ch_layout,
+                                static_cast<AVSampleFormat>(frame->format), frame->sample_rate, 0,
+                                nullptr) >= 0 &&
+            swr_init(*swr) >= 0) {
+            const int max_out = swr_get_out_samples(*swr, frame->nb_samples);
+            std::vector<float> pcm(static_cast<size_t>(max_out) * 2);
+            uint8_t* dst[1] = {reinterpret_cast<uint8_t*>(pcm.data())};
+            const int converted = swr_convert(*swr, dst, max_out,
+                                              const_cast<const uint8_t**>(frame->extended_data),
+                                              frame->nb_samples);
+            if (converted > 0) {
+                audio_->Push(pcm.data(), converted);
+                audio_frames_.fetch_add(converted);
+            }
+        }
+        av_channel_layout_uninit(&out_layout);
+        av_frame_unref(frame);
     }
 }
 
