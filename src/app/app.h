@@ -102,6 +102,7 @@ private:
     void TriggerRumble();
     void StartProbe();
     void ConnectConsole();
+    void DisconnectStream();
 
     Win32Window* window_ = nullptr;
     Presenter presenter_;
@@ -122,6 +123,7 @@ private:
 
     session::Profile profile_;
     std::string session_note_;
+    std::string stream_note_;
 
     Gamepad pad_;
     PointerState pointer_{};

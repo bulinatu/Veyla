@@ -52,6 +52,7 @@ enum WidgetId {
     W_Bitrate = 43,
     W_Resolution = 44,
     W_Fps = 45,
+    W_Disconnect = 46,
     W_PairHome = 42,
 };
 
@@ -276,6 +277,8 @@ void App::DispatchClick() {
                 } else if (it->index == W_PairHome) {
                     screen_ = Screen::Settings;
                     tab_ = Tab::Connection;
+                } else if (it->index == W_Disconnect) {
+                    DisconnectStream();
                 } else if (it->index == W_Pair) {
                     if (pin_.size() == 8) {
                         pairing_.Start(profile_, static_cast<uint32_t>(std::stoul(pin_)));
@@ -344,11 +347,7 @@ void App::HandleKey(int vk) {
 
         case Screen::Stream:
             if (vk == VK_ESCAPE) {
-                if (stream_active_) {
-                    streaming_.Stop();
-                    stream_active_ = false;
-                }
-                screen_ = Screen::Home;
+                DisconnectStream();
             } else if (vk == 'H') {
                 hud_ = !hud_;
             } else if (vk >= '1' && vk <= '3') {
@@ -360,6 +359,12 @@ void App::HandleKey(int vk) {
 }
 
 void App::HandlePad() {
+    // While the session is live the pad belongs to the console, not the UI.
+    if (stream_active_) {
+        pad_.ConsumePressed();
+        return;
+    }
+
     const PadState& pad = pad_.state();
     if (!pad.connected) {
         return;
@@ -518,6 +523,13 @@ void App::ConnectConsole() {
         std::fprintf(stderr, "[app] start failed: %s\n", error.c_str());
     }
 }
+void App::DisconnectStream() {
+    streaming_.Stop();
+    stream_active_ = false;
+    stream_note_ = "Disconnected. The console may take a few seconds to release the session.";
+    screen_ = Screen::Home;
+}
+
 void App::StartProbe() {
     probe_.Start(profile_.host, 9295);
 }
@@ -737,7 +749,8 @@ void App::DrawConsoleCard() {
             break;
         case net::ProbeState::Idle:
         default:
-            status = Widen(profile_.status_line());
+            status = stream_note_.empty() ? Widen(profile_.status_line())
+                                          : Widen(stream_note_);
             break;
     }
 
@@ -985,7 +998,8 @@ void App::RenderHome(double t) {
             break;
         case net::ProbeState::Idle:
         default:
-            status = Widen(profile_.status_line());
+            status = stream_note_.empty() ? Widen(profile_.status_line())
+                                          : Widen(stream_note_);
             break;
     }
 
@@ -1314,5 +1328,16 @@ void App::RenderStream(double t) {
              th::Rgba(th::kInk, 0.9f), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER);
     AddHit(Hit::Back, -1, back);
 
-    DrawHints(L"Esc   back      H   toggle HUD      1 / 2 / 3   upscaler");
+    if (stream_active_) {
+        const D2D1_RECT_F quit{w - 300.0f, 78.0f, w - 148.0f, 114.0f};
+        const bool quit_hover = hover_ == Hit::Button && hover_index_ == W_Disconnect;
+        ui_.FillRounded(quit, 18.0f, th::Rgba(0xFF6B6B, quit_hover ? 0.30f : 0.18f));
+        ui_.StrokeRounded(quit, 18.0f, th::Rgba(0xFF6B6B, 0.85f), 1.0f);
+        ui_.Text(L"Disconnect", {quit.left, quit.top, quit.right, quit.bottom}, 12.5f,
+                 th::Rgba(th::kInk, 0.95f), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                 DWRITE_TEXT_ALIGNMENT_CENTER);
+        AddHit(Hit::Button, W_Disconnect, quit);
+    }
+
+    DrawHints(L"Esc   disconnect      H   toggle HUD      1 / 2 / 3   upscaler");
 }
