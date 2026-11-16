@@ -449,8 +449,13 @@ void App::ApplyDropdown(int id, int index) {
             SaveProfile();
             break;
         case W_AudioDevice:
-            if (!audio_devices_.empty()) {
-                audio_device_ = std::clamp(index, 0, static_cast<int>(audio_devices_.size()) - 1);
+            if (index <= 0) {
+                profile_.audio_device_id.clear();
+                audio_device_ = 0;
+                SaveProfile();
+                OpenAudioDevice();
+            } else if (!audio_devices_.empty()) {
+                audio_device_ = std::clamp(index - 1, 0, static_cast<int>(audio_devices_.size()) - 1);
                 profile_.audio_device_id = audio_devices_[audio_device_].id;
                 SaveProfile();
                 OpenAudioDevice();
@@ -546,6 +551,13 @@ void App::ConnectConsole() {
         StartProbe();
         return;
     }
+if (!audio_.is_open()) {
+        OpenAudioDevice();
+    }
+    std::fprintf(stderr, "[app] audio open=%d failed=%d device=%s\n", audio_.is_open() ? 1 : 0,
+                 audio_failed_ ? 1 : 0, audio_.device_name().c_str());
+    streaming_.SetAudio(&audio_);
+
     std::string error;
     if (streaming_.Start(profile_, profile_.width, profile_.height, profile_.bitrate_kbps, error)) {
         stream_active_ = true;
@@ -1155,8 +1167,10 @@ void App::RenderSettings(double t) {
                 }
                 devices.push_back(name);
             }
-            const int selected_device =
-                std::clamp(audio_device_, 0, static_cast<int>(devices.size()) - 1);
+            const int selected_device = profile_.audio_device_id.empty()
+                                           ? 0
+                                           : std::clamp(audio_device_ + 1, 0,
+                                                        static_cast<int>(devices.size()) - 1);
             DrawDropdown(L"Output device", devices, selected_device, y, W_AudioDevice);
             y += kRowH;
             DrawDropdown(L"Buffer", {L"10 ms", L"20 ms", L"30 ms", L"40 ms"},
@@ -1339,8 +1353,8 @@ void App::RenderStream(double t) {
 
         if (stream_active_) {
             wchar_t stats[256];
-            swprintf_s(stats, L"PS5  ·  %.1f fps  ·  %d frames  ·  %s",
-                       streaming_.fps(), streaming_.frame_count(),
+            swprintf_s(stats, L"PS5  ·  %.1f fps  ·  audio %d  ·  peak %.2f  ·  %s",
+                       streaming_.fps(), streaming_.audio_frames(), audio_.peak(),
                        Widen(streaming_.message()).c_str());
             const D2D1_RECT_F live{24.0f, 132.0f, 24.0f + 620.0f, 132.0f + 34.0f};
             ui_.FillRounded(live, 10.0f, th::Rgba(0x000000, 0.55f));

@@ -41,6 +41,7 @@ public:
 
     bool TakeFrame(media::DecodedFrame& out);
     int frame_count() const;
+    int audio_frames() const { return audio_frames_.load(); }
     double fps() const;
 
     void SendController(const PadState& pad);
