@@ -24,9 +24,14 @@ std::wstring Widen(const std::string& text) {
     return wide;
 }
 
-constexpr int kSettingCount = 6;
+constexpr int kSettingCount = 7;
 
 const wchar_t* kUpscalerNames[3] = {L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen"};
+
+std::string EnvString(const char* name) {
+    const char* value = std::getenv(name);
+    return value ? std::string(value) : std::string();
+}
 
 }  // namespace
 
@@ -46,9 +51,25 @@ bool App::Init(HWND hwnd, int width, int height) {
         {L"Paper Moons", L"Puzzle  ·  30m played", 0x8AC926},
     };
 
+    // Session: load our own file first, otherwise import what PXPlay keeps in
+    // plaintext. Registration keys are machine-bound ciphertext in PXPlay, so
+    // the import covers identity + account only; pairing still needs the PIN.
+    const std::string session_path = session::DefaultProfilePath();
+    std::string session_detail;
+    if (session::Load(session_path, profile_, session_detail)) {
+        session_note_ = "Loaded session file: " + profile_.display_name();
+    } else if (session::ImportPXPlay(EnvString("APPDATA"), profile_, session_detail)) {
+        std::string save_detail;
+        session::Save(profile_, session_path, save_detail);
+        session_note_ =
+            "Imported console identity and PSN account from PXPlay (its registration keys are "
+            "encrypted). Pairing needs the 8-digit code from the console.";
+    } else {
+        session_note_ = "No console configured yet.";
+    }
+
     PresenterConfig cfg{};
-    cfg.output_width = width;
-    cfg.output_height = height;
+    cfg.output_width = width;    cfg.output_height = height;
     cfg.source_width = 1920;
     cfg.source_height = 1080;
     cfg.vsync = true;
@@ -192,10 +213,11 @@ void App::RenderTopBar() {
              DWRITE_FONT_WEIGHT_SEMI_BOLD);
     ui_.Text(L"DEMO LIBRARY", {48.0f, 52.0f, 480.0f, 74.0f}, 11.0f, th::Rgba(th::kMuted, 0.9f));
 
-    ui_.FillCircle(w - 238.0f, 44.0f, 4.0f, th::Rgba(th::kOffline));
-    ui_.Text(L"Console offline", {w - 226.0f, 30.0f, w - 120.0f, 58.0f}, 12.0f,
+    const bool ready = profile_.has_console() && !profile_.needs_pairing();
+    const std::wstring status = Widen(profile_.status_line());
+    ui_.FillCircle(w - 434.0f, 44.0f, 4.0f, th::Rgba(ready ? th::kOnline : th::kOffline));
+    ui_.Text(status.c_str(), {w - 422.0f, 30.0f, w - 165.0f, 58.0f}, 12.0f,
              th::Rgba(th::kMuted));
-
     SYSTEMTIME st{};
     ::GetLocalTime(&st);
     wchar_t clock[16];
@@ -335,8 +357,10 @@ void App::RenderSettings(double t) {
 
     ui_.Text(L"Settings", {x0, 84.0f, x0 + panel_w, 146.0f}, 40.0f, th::Rgba(th::kInk),
              DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    ui_.Text(L"Changes apply live. Console features unlock after pairing.",
-             {x0, 148.0f, x0 + panel_w, 174.0f}, 13.0f, th::Rgba(th::kMuted));
+    const std::wstring subtitle =
+        session_note_.empty() ? L"Changes apply live. Console features unlock after pairing."
+                              : Widen(session_note_);
+    ui_.Text(subtitle.c_str(), {x0, 148.0f, x0 + panel_w, 174.0f}, 13.0f, th::Rgba(th::kMuted));
 
     struct Row {
         const wchar_t* label;
@@ -344,13 +368,21 @@ void App::RenderSettings(double t) {
         bool enabled;
     };
 
+    const std::wstring console_value = Widen(
+        profile_.has_console() ? profile_.status_line() : std::string("Offline · no console"));
+    const std::wstring account_value = Widen(
+        profile_.psn_account_id.empty() ? std::string("not set") : std::string("imported"));
+    const std::wstring bitrate_value = Widen(std::to_string(profile_.bitrate_kbps / 1000) +
+                                             " Mbps · waits for PS5");
+
     const Row rows[kSettingCount] = {
         {L"Upscaler", kUpscalerNames[upscale_], true},
         {L"Latency HUD", hud_ ? L"On" : L"Off", true},
         {L"Frame generation", L"Off  ·  needs RIFE model", false},
         {L"HDR output", L"Off  ·  waits for PS5", false},
-        {L"Bitrate", L"Auto  ·  waits for PS5", false},
-        {L"Console", L"Offline  ·  pair in Phase 3", false},
+        {L"Bitrate", bitrate_value, false},
+        {L"Console", console_value, false},
+        {L"PSN account", account_value, false},
     };
 
     const float row_h = 62.0f;

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "media/pipeline.h"
+#include "session/profile.h"
 #include "ui/ui_renderer.h"
 
 namespace brp {
@@ -55,6 +56,9 @@ private:
     bool capture_requested_ = false;
     double last_time_ = -1.0;
     std::vector<GameEntry> games_;
+
+    session::Profile profile_;
+    std::string session_note_;
 };
 
 }  // namespace brp

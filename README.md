@@ -6,7 +6,7 @@ A better PlayStation 5 → PC Remote Play client.
 
 **What exists right now**
 
-- **`brp.exe` — the app.** PS5-inspired rail, settings, and a stream screen running the real post-process pipeline with a live latency HUD. Keyboard-driven, no browser in the video path. See [docs/08-app.md](docs/08-app.md).
+- **`brp.exe` — the app.** PS5-inspired rail, settings, and a stream screen running the real post-process pipeline with a live latency HUD. Keyboard-driven, no browser in the video path. It also imports console identity + PSN account from a local PXPlay install (metadata only — PXPlay encrypts its registration keys; see [docs/09-session.md](docs/09-session.md)). See [docs/08-app.md](docs/08-app.md).
 - **`brp-bench`** — headless-ish benchmark of the same media path, with per-frame GPU timestamps. 0.19 ms p50 at 1080p→4K on the target machine. See [docs/07-bench-log.md](docs/07-bench-log.md).
 - **`d2d_probe`** — isolates Direct2D/D3D11 interop failures from app code (it earned its keep: see the gotchas in 08).
 - **`tools/imgstat.py`** — detail/clipping metrics for captured frames.
@@ -83,6 +83,7 @@ Useful flags: `--width/--height` output size, `--src-width/--src-height` source 
 | [docs/06-decisions.md](docs/06-decisions.md) | ADR log: fork, neural stages, network defaults, UI, measurement policy |
 | [docs/07-bench-log.md](docs/07-bench-log.md) | Measured results on the target machine, with interpretation |
 | [docs/08-app.md](docs/08-app.md) | The app: screens, keys, code map, design rules, interop gotchas |
+| [docs/09-session.md](docs/09-session.md) | Session data: what PXPlay exposes, what is encrypted, our session file format |
 
 ## Legal note
 
