@@ -326,6 +326,11 @@ void Streaming::OnAudio(uint8_t* buf, size_t size) {
     }
 }
 
+std::string Streaming::message() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return message_;
+}
+
 bool Streaming::TakeFrame(media::DecodedFrame& out) {
     std::lock_guard<std::mutex> lock(frame_mutex_);
     if (!has_new_frame_) {

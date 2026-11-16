@@ -342,6 +342,10 @@ void App::HandleKey(int vk) {
 
         case Screen::Stream:
             if (vk == VK_ESCAPE) {
+                if (stream_active_) {
+                    streaming_.Stop();
+                    stream_active_ = false;
+                }
                 screen_ = Screen::Home;
             } else if (vk == 'H') {
                 hud_ = !hud_;
@@ -622,7 +626,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                                        stream_frame_.height);
         }
         if (streaming_.state() == session::StreamState::Failed) {
+            streaming_.Stop();
             stream_active_ = false;
+            screen_ = Screen::Home;
         }
     }
 
@@ -1261,6 +1267,17 @@ void App::RenderStream(double t) {
                      {pad_chip.left + 14.0f, pad_chip.top, pad_chip.right - 14.0f,
                       pad_chip.bottom},
                      12.0f, th::Rgba(th::kInk, 0.9f));
+        }
+
+        if (stream_active_) {
+            wchar_t stats[256];
+            swprintf_s(stats, L"PS5  ·  %.1f fps  ·  %d frames  ·  %s",
+                       streaming_.fps(), streaming_.frame_count(),
+                       Widen(streaming_.message()).c_str());
+            const D2D1_RECT_F live{24.0f, 132.0f, 24.0f + 620.0f, 132.0f + 34.0f};
+            ui_.FillRounded(live, 10.0f, th::Rgba(0x000000, 0.55f));
+            ui_.Text(stats, {live.left + 14.0f, live.top, live.right - 14.0f, live.bottom}, 12.0f,
+                     th::Rgba(th::kInk, 0.92f));
         }
 
         ui_.FillCircle(w - 40.0f, 44.0f, 5.0f, th::Rgba(th::kOnline));
