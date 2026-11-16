@@ -50,6 +50,8 @@ enum WidgetId {
     W_Probe = 40,
     W_Pair = 41,
     W_Bitrate = 43,
+    W_Resolution = 44,
+    W_Fps = 45,
     W_PairHome = 42,
 };
 
@@ -440,6 +442,19 @@ void App::ApplyDropdown(int id, int index) {
             break;
             break;
         }
+        case W_Resolution: {
+            profile_.width = index == 0 ? 1280 : 1920;
+            profile_.height = index == 0 ? 720 : 1080;
+            std::string save_detail;
+            session::Save(profile_, session::DefaultProfilePath(), save_detail);
+            break;
+        }
+        case W_Fps: {
+            profile_.fps = index == 0 ? 30 : 60;
+            std::string save_detail;
+            session::Save(profile_, session::DefaultProfilePath(), save_detail);
+            break;
+        }
         case W_Bitrate: {
             static const int kBitrates[] = {20000, 35000, 50000, 75000, 100000};
             profile_.bitrate_kbps = kBitrates[std::clamp(index, 0, 4)];
@@ -495,7 +510,7 @@ void App::ConnectConsole() {
         return;
     }
     std::string error;
-    if (streaming_.Start(profile_, 1920, 1080, profile_.bitrate_kbps, error)) {
+    if (streaming_.Start(profile_, profile_.width, profile_.height, profile_.bitrate_kbps, error)) {
         stream_active_ = true;
         screen_ = Screen::Stream;
         std::fprintf(stderr, "[app] streaming started\n");
@@ -1195,6 +1210,13 @@ void App::RenderSettings(double t) {
                              {L"20 Mbps", L"35 Mbps", L"50 Mbps", L"75 Mbps", L"100 Mbps"},
                              bitrate_index, y, W_Bitrate);
             }
+            y += kRowH;
+
+            DrawDropdown(L"Stream resolution", {L"720p", L"1080p"},
+                         profile_.width <= 1280 ? 0 : 1, y, W_Resolution);
+            y += kRowH;
+
+            DrawDropdown(L"Stream FPS", {L"30", L"60"}, profile_.fps == 30 ? 0 : 1, y, W_Fps);
             y += kRowH;
 
             DrawPinRow(y);
