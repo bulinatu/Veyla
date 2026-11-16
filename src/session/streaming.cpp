@@ -226,13 +226,17 @@ void Streaming::OnVideo(uint8_t* buf, size_t size, int32_t frames_lost) {
     }
 
     media::DecodedFrame frame;
-    if (decoder_.Receive(frame)) {
+    int decoded = 0;
+    while (decoder_.Receive(frame)) {
         {
             std::lock_guard<std::mutex> lock(frame_mutex_);
             latest_ = std::move(frame);
             has_new_frame_ = true;
         }
-        frame_count_.fetch_add(1);
+        ++decoded;
+    }
+    if (decoded > 0) {
+        frame_count_.fetch_add(decoded);
         if (state_.load() != StreamState::Streaming) {
             state_.store(StreamState::Streaming);
             std::lock_guard<std::mutex> lock(mutex_);
