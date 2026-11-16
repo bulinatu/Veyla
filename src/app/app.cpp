@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -227,6 +228,12 @@ bool App::Init(Win32Window* window) {
     }
     render_target_ = std::clamp(profile_.render_target, 0, 3);
     ApplyRenderTarget();
+
+    frame_gen_ = profile_.frame_gen >= 2 ? 2 : 0;
+    nv_vfx_present_ = !FindFrameGenRuntime().empty();
+    if (frame_gen_ >= 2 && (!nv_vfx_present_ || !EnsureFrameGen())) {
+        frame_gen_ = 0;
+    }
     if (!ui_.Init(presenter_.device())) {
         return false;
     }
@@ -477,6 +484,28 @@ void App::ApplyDropdown(int id, int index) {
             ApplyRenderTarget();
             SaveProfile();
             break;
+        case W_FrameGen: {
+            static const int kMultipliers[] = {0, 2};
+            const int value = kMultipliers[std::clamp(index, 0, 1)];
+            if (value > 0 && !EnsureFrameGen()) {
+                frame_gen_ = 0;
+                profile_.frame_gen = 0;
+                stream_note_ = "Frame generation unavailable: NVIDIA VFX runtime (Settings > Display)";
+                SaveProfile();
+                break;
+            }
+            frame_gen_ = value;
+            profile_.frame_gen = value;
+            fg_queue_.clear();
+            fg_last_ = {};
+            fg_generated_ = 0;
+            if (value == 0 && stream_active_ && !stream_frame_.rgba.empty()) {
+                presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
+                                          stream_frame_.height);
+            }
+            SaveProfile();
+            break;
+        }
         case W_Hud:
             hud_ = index == 1;
             profile_.hud = hud_;
@@ -627,6 +656,69 @@ void App::ApplyRenderTarget() {
     presenter_.SetUpscaleTarget(kTargets[index][0], kTargets[index][1]);
 }
 
+int App::present_hz() const {
+    return (stream_active_ && frame_gen_ >= 2 && fg_ready_) ? 60 * frame_gen_ : 60;
+}
+
+std::wstring App::FindFrameGenRuntime() const {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    std::vector<fs::path> candidates;
+
+    wchar_t exe_path[MAX_PATH] = {};
+    if (::GetModuleFileNameW(nullptr, exe_path, MAX_PATH) > 0) {
+        const fs::path exe_dir = fs::path(exe_path).parent_path();
+        candidates.push_back(exe_dir / "nvidia-vfx" / "runtime");
+        candidates.push_back(exe_dir / "nvidia-vfx");
+        candidates.push_back(exe_dir / ".." / ".." / "third_party" / "nvidia-vfx" / "runtime");
+    }
+    const fs::path cwd = fs::current_path(ec);
+    if (!ec) {
+        candidates.push_back(cwd / "third_party" / "nvidia-vfx" / "runtime");
+        candidates.push_back(cwd / "nvidia-vfx" / "runtime");
+    }
+
+    for (const fs::path& dir : candidates) {
+        const fs::path dll = dir / "nvVFXVideoFrameGeneration.dll";
+        if (fs::exists(dll, ec) && !ec) {
+            return fs::absolute(dir, ec).wstring();
+        }
+        ec.clear();
+    }
+    return {};
+}
+
+bool App::FrameGenAvailable() const {
+    return nv_vfx_present_ || nv_vfx_.runtime_loaded();
+}
+
+bool App::EnsureFrameGen() {
+    std::string detail;
+    if (!nv_vfx_.runtime_loaded()) {
+        const std::wstring dir = FindFrameGenRuntime();
+        if (dir.empty()) {
+            fg_note_ =
+                L"NVIDIA VFX runtime missing: put nvVFXVideoFrameGeneration.dll and its "
+                L"dependencies in third_party\\nvidia-vfx\\runtime";
+            return false;
+        }
+        if (!nv_vfx_.LoadRuntime(dir, detail)) {
+            fg_note_ = L"NVIDIA VFX runtime: " + Widen(detail);
+            return false;
+        }
+    }
+    const int width = profile_.width > 0 ? profile_.width : 1920;
+    const int height = profile_.height > 0 ? profile_.height : 1080;
+    if (!nv_vfx_.Initialize(presenter_.device(), presenter_.context(), width, height, 1,
+                            detail)) {
+        fg_note_ = L"NVIDIA VFG init: " + Widen(detail);
+        return false;
+    }
+    fg_ready_ = true;
+    fg_note_ = L"NVIDIA VFG ready";
+    return true;
+}
+
 App::~App() {
     StopPadThread();
 }
@@ -755,6 +847,15 @@ void App::StartStream() {
     pad_.SetConsoleFeedback(PadConsoleFeedback{});
     feedback_version_ = 0;
 
+    if (frame_gen_ >= 2 && !EnsureFrameGen()) {
+        frame_gen_ = 0;
+        stream_note_ = "Frame generation unavailable: NVIDIA VFX runtime (Settings > Display)";
+        std::fprintf(stderr, "[app] frame generation disabled: %ls\n", fg_note_.c_str());
+    }
+    fg_queue_.clear();
+    fg_last_ = {};
+    fg_generated_ = 0;
+
     std::string error;
     if (streaming_.Start(profile_, profile_.width, profile_.height, profile_.bitrate_kbps, error)) {
         stream_active_ = true;
@@ -830,6 +931,8 @@ void App::DisconnectStream() {
     pending_connect_ = PendingConnect::None;
     feedback_version_ = 0;
     pad_.SetConsoleFeedback(PadConsoleFeedback{});
+    fg_queue_.clear();
+    fg_last_ = {};
     cursor_hidden_ = false;
     if (window_) {
         window_->SetCursorHidden(false);
@@ -996,11 +1099,48 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
 
     if (stream_active_) {
         // Controller input is sent by the dedicated pad thread, independent of
-        // the 60 Hz render loop.
+        // the presentation loop.
         if (streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
-            presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
-                                       stream_frame_.height);
+            if (frame_gen_ >= 2 && fg_ready_) {
+                std::vector<media::NvVfx::Frame> sequence;
+                std::string detail;
+                if (nv_vfx_.PushFrame(stream_frame_.rgba.data(), stream_frame_.width,
+                                      stream_frame_.height, frame_gen_, sequence, detail)) {
+                    for (auto& frame : sequence) {
+                        fg_queue_.push_back(std::move(frame));
+                    }
+                    const size_t cap = static_cast<size_t>(frame_gen_) * 3;
+                    while (fg_queue_.size() > cap) {
+                        fg_queue_.pop_front();
+                    }
+                    fg_generated_ += static_cast<int>(sequence.size()) - 1;
+                } else {
+                    fg_note_ = L"VFG: " + Widen(detail);
+                    std::fprintf(stderr, "[app] frame generation failed: %s\n", detail.c_str());
+                    frame_gen_ = 0;
+                    fg_ready_ = false;
+                    fg_queue_.clear();
+                    fg_last_ = {};
+                    presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
+                                              stream_frame_.height);
+                }
+            } else {
+                presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
+                                          stream_frame_.height);
+            }
         }
+
+        if (frame_gen_ >= 2 && fg_ready_) {
+            if (!fg_queue_.empty()) {
+                fg_last_ = std::move(fg_queue_.front());
+                fg_queue_.pop_front();
+            }
+            if (fg_last_.srv) {
+                presenter_.SetSourceView(fg_last_.srv.Get(), stream_frame_.width,
+                                         stream_frame_.height);
+            }
+        }
+
         if (streaming_.state() == session::StreamState::Failed) {
             const std::string reason = streaming_.message();
             StopPadThread();
@@ -1011,6 +1151,23 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
             window_->SetCursorHidden(false);
             stream_note_ = reason.empty() ? "Session ended." : reason;
             screen_ = Screen::Home;
+        }
+    }
+
+    static const bool fg_probe = std::getenv("BRP_FG_PROBE") != nullptr;
+    static double fg_probe_at = 0.0;
+    static int fg_probe_frames = 0;
+    if (fg_probe && frame_gen_ >= 2) {
+        ++fg_probe_frames;
+        if (clock_ - fg_probe_at >= 1.0) {
+            const double elapsed = clock_ - fg_probe_at;
+            std::fprintf(stderr,
+                         "[fg] %dx target %d Hz, actual %.0f fps, generated %d, last %.2f ms\n",
+                         frame_gen_, present_hz(),
+                         elapsed > 0.0 ? fg_probe_frames / elapsed : 0.0, fg_generated_,
+                         nv_vfx_.last_generate_ms());
+            fg_probe_at = clock_;
+            fg_probe_frames = 0;
         }
     }
 
@@ -1537,13 +1694,45 @@ void App::RenderSettings(double t) {
             y += kRowH;
             DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
             y += kRowH;
-            DrawDropdown(L"Frame generation", {L"Off  ·  enable Smooth Motion in NVIDIA App"}, 0, y,
-                         W_FrameGen, false);
+            {
+                const bool available = FrameGenAvailable();
+                std::vector<std::wstring> options;
+                if (available) {
+                    options = {L"Off", L"NVIDIA VFG 2x (120 fps)"};
+                } else {
+                    options = {L"Off  -  NVIDIA VFX runtime missing"};
+                }
+                int selected = 0;
+                if (frame_gen_ == 2) {
+                    selected = 1;
+                }
+                DrawDropdown(L"Frame generation", options, selected, y, W_FrameGen, available);
+            }
             y += kRowH;
             DrawDropdown(L"HDR output", {L"Off", L"On (HDR10, restart)"}, hdr_ ? 1 : 0, y, W_Hdr, true);
             y += kRowH;
             DrawDropdown(L"Frame buffer", {L"0 (lowest latency)", L"1", L"2", L"3 (smoothest)"},
                          stream_buffer_, y, W_FrameBuffer);
+            y += kRowH;
+
+            if (frame_gen_ >= 2 && fg_ready_) {
+                wchar_t text[192];
+                swprintf_s(text, L"NVIDIA VFG active  -  60 -> %d fps  -  last %.1f ms",
+                           60 * frame_gen_, nv_vfx_.last_generate_ms());
+                ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
+            } else if (!FrameGenAvailable()) {
+                ui_.Text(L"NVIDIA VFX runtime not found: third_party\\nvidia-vfx\\runtime",
+                         {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
+            } else if (!fg_note_.empty()) {
+                ui_.Text(fg_note_.c_str(), {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
+            } else {
+                ui_.Text(L"NVIDIA VFG ready - select a multiplier to enable",
+                         {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
+            }
             break;
         }
 
@@ -1769,8 +1958,12 @@ void App::RenderStream(double t) {
 
         if (stream_active_) {
             wchar_t stats[256];
-            swprintf_s(stats, L"PS5  ·  %.1f fps  ·  audio %d  ·  peak %.2f  ·  %s",
-                       streaming_.fps(), streaming_.audio_frames(), audio_.peak(),
+            wchar_t fg_text[64] = L"";
+            if (frame_gen_ >= 2 && fg_ready_) {
+                swprintf_s(fg_text, L"  -  VFG %dx gen %d", frame_gen_, fg_generated_);
+            }
+            swprintf_s(stats, L"PS5  -  %.1f fps%s  -  audio %d  -  peak %.2f  -  %s",
+                       streaming_.fps(), fg_text, streaming_.audio_frames(), audio_.peak(),
                        Widen(streaming_.message()).c_str());
             const D2D1_RECT_F live{24.0f, 132.0f, 24.0f + 620.0f, 132.0f + 34.0f};
             ui_.FillRounded(live, 10.0f, th::Rgba(0x000000, 0.55f));

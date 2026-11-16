@@ -352,6 +352,7 @@ bool Presenter::SetSourceFrame(const uint8_t* rgba, int width, int height) {
     if (!rgba || width <= 0 || height <= 0) {
         return false;
     }
+    source_override_.Reset();
     if (!source_ || cfg_.source_width != width || cfg_.source_height != height) {
         cfg_.source_width = width;
         cfg_.source_height = height;
@@ -365,6 +366,18 @@ bool Presenter::SetSourceFrame(const uint8_t* rgba, int width, int height) {
     context_->UpdateSubresource(source_.Get(), 0, nullptr, rgba, static_cast<UINT>(width) * 4, 0);
     external_source_ = true;
     return true;
+}
+
+void Presenter::SetSourceView(ID3D11ShaderResourceView* view, int width, int height) {
+    if (!view) {
+        return;
+    }
+    source_override_ = view;
+    if (width > 0 && height > 0) {
+        cfg_.source_width = width;
+        cfg_.source_height = height;
+    }
+    external_source_ = true;
 }
 bool Presenter::CreateSwapchainForFormat() {
     const DXGI_FORMAT format =
@@ -453,6 +466,18 @@ void Presenter::Render(double time_seconds) {
     const int stage_w = use_target ? cfg_.render_width : cfg_.output_width;
     const int stage_h = use_target ? cfg_.render_height : cfg_.output_height;
 
+    ID3D11ShaderResourceView* source_view =
+        source_override_ ? source_override_.Get() : source_srv_.Get();
+    if (!source_view) {
+        ID3D11RenderTargetView* clear_rtv = use_target ? target_rtv_.Get() : rtv_.Get();
+        if (clear_rtv) {
+            const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            context_->ClearRenderTargetView(clear_rtv, black);
+        }
+        EndTiming();
+        return;
+    }
+
     auto set_params = [&](int src_w, int src_h, int dst_w, int dst_h, int mode, float sharpen,
                           float hdr) {
         PsParams ps{};
@@ -518,7 +543,7 @@ void Presenter::Render(double time_seconds) {
     ID3D11RenderTargetView* stage_rtv = use_target ? target_rtv_.Get() : rtv_.Get();
     context_->OMSetRenderTargets(1, &stage_rtv, nullptr);
     set_viewport(0, 0, stage_w, stage_h);
-    draw_fullscreen(source_srv_.Get());
+    draw_fullscreen(source_view);
 
     if (use_target) {
         const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};

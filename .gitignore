@@ -47,3 +47,7 @@ third_party/sample_hevc.mp4
 
 # test artifacts
 app-*.bmp
+
+# NVIDIA VFX runtime (proprietary, user supplied)
+third_party/nvidia-vfx/
+/nvngx_*.dll

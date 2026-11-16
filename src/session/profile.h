@@ -53,6 +53,7 @@ struct Profile {
     int input_source = 0;
     int frame_buffer = 1;
     int pad_rate_hz = 250;
+    int frame_gen = 0;  // 0 off, 2/3/4 NVIDIA VFG multiplier
     int lightbar = 0;
     int trigger_effect = 0;
     int trigger_strength = 5;

@@ -5,11 +5,13 @@
 #include <d2d1_1.h>
 
 #include <atomic>
+#include <deque>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "audio/audio_engine.h"
+#include "media/nv_vfx.h"
 #include "media/pipeline.h"
 #include "net/reachability.h"
 #include "platform/gamepad.h"
@@ -44,6 +46,9 @@ public:
     void Frame(double time_seconds, const PointerState& pointer);
     void HandleKey(int vk);
     bool quit_requested() const { return quit_; }
+
+    // Presentation cadence; 120/180/240 while NVIDIA VFG is active.
+    int present_hz() const;
 
 private:
     enum class Screen { Home, Settings, Stream };
@@ -114,6 +119,10 @@ private:
     void StopPadThread();
     void PadThreadMain();
     void DisconnectStream();
+
+    bool FrameGenAvailable() const;
+    bool EnsureFrameGen();
+    std::wstring FindFrameGenRuntime() const;
 
     Win32Window* window_ = nullptr;
     Presenter presenter_;
@@ -192,6 +201,16 @@ private:
     session::Streaming streaming_;
     media::DecodedFrame stream_frame_;
     bool stream_active_ = false;
+
+    // frame generation (NVIDIA VFG)
+    media::NvVfx nv_vfx_;
+    bool nv_vfx_present_ = false;
+    bool fg_ready_ = false;
+    int frame_gen_ = 0;  // 0 off, 2/3/4 multiplier
+    int fg_generated_ = 0;
+    std::wstring fg_note_;
+    std::deque<media::NvVfx::Frame> fg_queue_;
+    media::NvVfx::Frame fg_last_;
 
     // Connect flow: check the control port, wake the console if it is asleep,
     // then start the session.

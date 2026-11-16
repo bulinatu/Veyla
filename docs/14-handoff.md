@@ -18,6 +18,7 @@ Last updated: live streaming + full controller pipeline.
 | Audio (WASAPI, in-process) | **WORKS** — Opus → FFmpeg → WASAPI, 0 underruns |
 | Controller input | **WORKS** — buttons, sticks, triggers, touchpad, gyro/accel |
 | Controller output | **WORKS** — rumble, adaptive triggers, lightbar, player LEDs from the console |
+| Frame generation | **WORKS** — NVIDIA VFG 2× at 120 fps (optional runtime) |
 | Input rate | 60–1000 Hz, dedicated thread + high-resolution timer |
 | Frame gen / neural | Not started (user deferred neural; Smooth Motion is the documented path) |
 
@@ -49,6 +50,7 @@ Targets:
 - `pair_probe <pin> [host]` — registration against a console
 - `discover_probe` — LAN discovery
 - `wake_probe [host]` — sends the rest-mode wake-up packet
+- `vfx_probe` — NVIDIA VFG synthetic frame test (writes BMPs)
 - `decode_probe <file>` — decode timing
 - `d2d_probe` — D2D/D3D11 interop diagnostic
 
@@ -65,6 +67,7 @@ path is fixed and working).
 src/app/app.{h,cpp}            screens (Home/Settings/Stream), dropdown UI, hit regions
 src/media/pipeline.*           D3D11 device, flip-model swapchain, stream surface, fullscreen
 src/media/decoder.*            libavcodec decoder (sw scale to RGBA)
+src/media/nv_vfx.*             NVIDIA Video Effects frame generation (VFG)
 src/audio/audio_engine.*       WASAPI shared render engine, 48 kHz float stereo ring
 src/session/profile.*          session.json load/save, PXPlay import, AccountIdBase64
 src/session/pairing.*          chiaki registration wrapper (thread, callbacks, creds)
@@ -143,6 +146,9 @@ Key chiaki APIs: `chiaki_session_init`, `chiaki_session_set_video_sample_cb`,
 - Vsync does not throttle on virtual/remote displays; the loop paces itself.
 - XInput never sees a DualSense; Sony pads need raw HID.
 - Account id is little-endian (see above) — this cost a full debugging session.
+- **NVIDIA VFG needs the CUDA primary context current for every map/run/export.**
+  Without it `NvCVImage_MapResource` returns "invalid resource handle" even
+  though `NvCVImage_InitFromD3D11Texture` succeeded.
 - **1440p is rejected by the console, not by us.** Asking for 2560x1440 in the
   launch spec kills the stream with `AvCap failed to initialize video:
   [InitResult:-6]`; the advertised profile list is only `1920x1080`. `Start()`
@@ -183,12 +189,15 @@ Verified: audio header 2ch/48kHz received during a live session; video 1080p60 a
 1. Verify on hardware: rumble + adaptive triggers + touchpad + gyro while a game is
    running (menus rarely send trigger effects). Watch `BRP_PAD_PROBE=1` logs for
    `[pad] rumble`, `[pad] trigger effects`, and the measured `loops/s`.
-2. Vblank pacing (`DwmFlush`) instead of the 60 Hz UI sleep, to remove the last
-   presentation beat.
-3. Zero-copy decode: decoder on the presenter's `ID3D11Device`.
-4. DualSense haptic audio (USB only): decode the console haptics Opus stream and
+2. Frame generation: async worker for 3x/4x (180/240 Hz). The synchronous 2x path
+   is shipped; 3x currently measures ~53 fps and is not exposed.
+3. Vblank pacing (`DwmFlush`) instead of the timer, to remove the last
+   presentation beat on the 239 Hz display.
+4. Zero-copy decode: decoder on the presenter's `ID3D11Device`.
+5. DualSense haptic audio (USB only): decode the console haptics Opus stream and
    route it to the controller's 4-channel audio endpoint.
-5. Frame generation: pick Smooth Motion (driver) or bundle RIFE/TensorRT.
+6. DLSSNR (`nvngx_dlssnr.dll`) as a neural-rendering stage; it is not frame
+   generation. See `docs/15-frame-generation.md`.
 
 ## Controller pipeline (implemented this pass)
 

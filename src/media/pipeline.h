@@ -78,6 +78,10 @@ public:
     // Uploads a decoded RGBA frame as the source instead of the synthetic one.
     bool SetSourceFrame(const uint8_t* rgba, int width, int height);
 
+    // Uses an existing GPU texture view (frame generation output) as the source.
+    // The caller keeps the view alive until the next SetSourceView/Render.
+    void SetSourceView(ID3D11ShaderResourceView* view, int width, int height);
+
     void Clear(const float rgba[4]);
     void PresentNow(bool vsync);
 
@@ -137,6 +141,7 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> source_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> source_srv_;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> source_override_;
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> source_uav_;
 
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> gen_cs_;
