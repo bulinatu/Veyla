@@ -40,3 +40,7 @@ secrets/
 *.pem
 .env
 .env.*
+
+# Third-party binaries (fetched via winget Gyan.FFmpeg.Shared)
+third_party/ffmpeg/
+third_party/sample_hevc.mp4

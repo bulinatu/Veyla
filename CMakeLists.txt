@@ -136,3 +136,20 @@ if (CHIAKI_CORE)
 else()
     message(STATUS "chiaki-ng submodule not populated (git submodule update --init --depth 1)")
 endif()
+
+# --- Decode path (libavcodec) ---------------------------------------------
+set(FFMPEG_ROOT "${CMAKE_SOURCE_DIR}/third_party/ffmpeg")
+if(EXISTS "${FFMPEG_ROOT}/lib/avcodec.lib")
+    add_library(brp_decode STATIC src/media/decoder.cpp)
+    target_include_directories(brp_decode PUBLIC src "${FFMPEG_ROOT}/include")
+    target_link_libraries(brp_decode PUBLIC
+        "${FFMPEG_ROOT}/lib/avcodec.lib"
+        "${FFMPEG_ROOT}/lib/avformat.lib"
+        "${FFMPEG_ROOT}/lib/avutil.lib"
+        "${FFMPEG_ROOT}/lib/swscale.lib"
+        "${FFMPEG_ROOT}/lib/swresample.lib")
+    add_executable(decode_probe tools/decode_probe/main.cpp)
+    target_link_libraries(decode_probe PRIVATE brp_decode)
+    add_custom_command(TARGET decode_probe POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${FFMPEG_ROOT}/bin" "$<TARGET_FILE_DIR:decode_probe>")
+endif()
