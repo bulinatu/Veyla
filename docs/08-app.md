@@ -1,6 +1,6 @@
 # 08 — The application shell
 
-Status: **v0.3 — mouse-first UI, console card, categorized settings with dropdowns.** Everything on screen is real except the game library and the stream source, which are demo data standing in for PSN metadata and the PS5 decoder.
+Status: **v0.5 — live.** Pairing, streaming (video + audio), categorized settings, FSR1/Lanczos upscaling, HDR-capable presenter.
 
 ---
 

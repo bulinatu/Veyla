@@ -2,7 +2,7 @@
 
 A better PlayStation 5 → PC Remote Play client.
 
-**Status:** Phase 1 — mouse-first app: console card on Home, categorized settings with dropdowns, real reachability probe, DualSense layer, in-process audio. No PS5 session yet.
+**Status:** **Live** — pairs with a real PS5, streams 1080p60 video (HEVC/D3D11VA) and Opus audio through the post-process pipeline.
 
 **What exists right now**
 
@@ -15,7 +15,7 @@ A better PlayStation 5 → PC Remote Play client.
 - **`d2d_probe`**, **`tools/imgstat.py`** — diagnostics that earned their keep.
 - **`vendor/chiaki-ng`** — forked protocol core, pinned as a submodule (42 C sources ready to become `brp-session`).
 
-**Not yet:** PS5 session, decode, HDR output, frame generation, neural stages, PSN OAuth.
+**Not yet:** frame generation model, neural video stages, DualSense haptic audio, PSN OAuth.
 
 ```powershell
 .\scripts\build.ps1
