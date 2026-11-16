@@ -97,7 +97,25 @@ add_library(brp_session STATIC
     ${CHIAKI_ROOT}/lib/src/stoppipe.c
     ${CHIAKI_ROOT}/lib/src/remote/rudp.c
     ${CHIAKI_ROOT}/lib/src/remote/rudpsendbuffer.c
-    src/session/rp_strings.c
+    ${CHIAKI_ROOT}/lib/src/session.c
+    ${CHIAKI_ROOT}/lib/src/takion.c
+    ${CHIAKI_ROOT}/lib/src/ctrl.c
+    ${CHIAKI_ROOT}/lib/src/streamconnection.c
+    ${CHIAKI_ROOT}/lib/src/videoreceiver.c
+    ${CHIAKI_ROOT}/lib/src/audioreceiver.c
+    ${CHIAKI_ROOT}/lib/src/frameprocessor.c
+    ${CHIAKI_ROOT}/lib/src/reorderqueue.c
+    ${CHIAKI_ROOT}/lib/src/congestioncontrol.c
+    ${CHIAKI_ROOT}/lib/src/takionsendbuffer.c
+    ${CHIAKI_ROOT}/lib/src/packetstats.c
+    ${CHIAKI_ROOT}/lib/src/audio.c
+    ${CHIAKI_ROOT}/lib/src/bitstream.c
+    ${CHIAKI_ROOT}/lib/src/gkcrypt.c
+    ${CHIAKI_ROOT}/lib/src/senkusha.c
+    ${CHIAKI_ROOT}/lib/src/launchspec.c
+    ${CHIAKI_ROOT}/lib/src/discovery.c
+    ${CHIAKI_ROOT}/lib/src/discoveryservice.c
+    ${CMAKE_SOURCE_DIR}/build/gen/takion.pb.c    src/session/rp_strings.c
     src/session/aia_stub.c
     src/session/pairing.cpp
 )
@@ -106,6 +124,7 @@ target_include_directories(brp_session PUBLIC
     "${CHIAKI_ROOT}/lib/include"
     "${CHIAKI_ROOT}/lib/src"
     "${CMAKE_BINARY_DIR}/chiaki-gen"
+    "${CMAKE_SOURCE_DIR}/build/gen"
     src
 )
 target_compile_definitions(brp_session PUBLIC CHIAKI_LIB_ENABLE_MBEDTLS)
@@ -153,3 +172,14 @@ if(EXISTS "${FFMPEG_ROOT}/lib/avcodec.lib")
     add_custom_command(TARGET decode_probe POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${FFMPEG_ROOT}/bin" "$<TARGET_FILE_DIR:decode_probe>")
 endif()
+
+# --- chiaki streaming dependencies (nanopb runtime, jerasure, gf-complete) ---
+target_include_directories(brp_session PUBLIC
+    "${CHIAKI_ROOT}/third-party/nanopb"
+    "${CHIAKI_ROOT}/third-party/jerasure/include"
+    "${CHIAKI_ROOT}/third-party/jerasure/src"
+    "${CHIAKI_ROOT}/third-party/gf-complete/include"
+    "${CHIAKI_ROOT}/third-party/gf-complete/src")
+file(GLOB BRP_GF_SRC "${CHIAKI_ROOT}/third-party/gf-complete/src/*.c")
+file(GLOB BRP_JER_SRC "${CHIAKI_ROOT}/third-party/jerasure/src/*.c")
+target_sources(brp_session PRIVATE ${BRP_GF_SRC} ${BRP_JER_SRC})
