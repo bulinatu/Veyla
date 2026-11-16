@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 namespace brp {
@@ -146,6 +147,12 @@ void Gamepad::CloseDevice() {
     state_.connected = false;
     state_.buttons = 0;
     state_.name.clear();
+    is_edge_ = false;
+    firmware_version_ = 0;
+    calibration_valid_ = false;
+    for (AxisCalibration& axis : calibration_) {
+        axis = {};
+    }
     {
         std::lock_guard<std::mutex> lock(mutex_);
         console_ = PadConsoleFeedback{};
@@ -201,7 +208,9 @@ bool Gamepad::TryOpenSony() {
             continue;
         }
 
-        const bool is_dualsense = attributes.VendorID == 0x054C && attributes.ProductID == 0x0CE6;
+        const bool is_dualsense =
+            attributes.VendorID == 0x054C &&
+            (attributes.ProductID == 0x0CE6 || attributes.ProductID == 0x0DF2);
         const bool is_ds4 = attributes.VendorID == 0x054C &&
                             (attributes.ProductID == 0x05C4 || attributes.ProductID == 0x09CC);
         if (!is_dualsense && !is_ds4) {
@@ -228,21 +237,30 @@ bool Gamepad::TryOpenSony() {
 
         handle_ = handle;
         product_id_ = attributes.ProductID;
+        is_edge_ = is_dualsense && attributes.ProductID == 0x0DF2;
         bluetooth_ = caps.InputReportByteLength != 64;
-        std::fprintf(stderr, "hid: %s input=%u output=%u (%s)\n",
-                     is_dualsense ? "DualSense" : "DualShock 4", caps.InputReportByteLength,
-                     caps.OutputReportByteLength, bluetooth_ ? "bluetooth" : "usb");
         output_report_len_ = 0;
         buffer_.assign(std::max<uint32_t>(caps.InputReportByteLength, 78), 0);
         event_ = ::CreateEventW(nullptr, true, false, nullptr);
         write_event_ = ::CreateEventW(nullptr, true, false, nullptr);
         sony_active_ = true;
-        name_ = is_dualsense ? "DualSense" : "DualShock 4";
+        firmware_version_ = 0;
+        calibration_valid_ = false;
+        name_ = is_dualsense ? (is_edge_ ? "DualSense Edge" : "DualSense") : "DualShock 4";
         if (bluetooth_) {
             name_ += " (Bluetooth)";
         } else {
             name_ += " (USB)";
         }
+        if (is_dualsense) {
+            ReadFirmware();
+            ReadCalibration();
+        }
+        std::fprintf(stderr,
+                     "hid: %s input=%u output=%u (%s) firmware=0x%04X calibration=%s%s\n",
+                     name_.c_str(), caps.InputReportByteLength, caps.OutputReportByteLength,
+                     bluetooth_ ? "bluetooth" : "usb", firmware_version_,
+                     calibration_valid_ ? "ok" : "default", is_edge_ ? " edge" : "");
         state_.connected = true;
         state_.name = name_;
         state_.buttons = 0;
@@ -252,6 +270,106 @@ bool Gamepad::TryOpenSony() {
 
     ::SetupDiDestroyDeviceInfoList(set);
     return opened;
+}
+
+void Gamepad::ReadFirmware() {
+    firmware_version_ = 0;
+    if (handle_ == INVALID_HANDLE_VALUE) {
+        return;
+    }
+    uint8_t data[64]{};
+    data[0] = 0x20;  // feature report: firmware info
+    if (!::HidD_GetFeature(handle_, data, sizeof(data))) {
+        std::fprintf(stderr, "hid: firmware feature report failed (%lu)\n",
+                     static_cast<unsigned long>(::GetLastError()));
+        return;
+    }
+    firmware_version_ = static_cast<uint16_t>(data[44] | (data[45] << 8));
+}
+
+void Gamepad::ReadCalibration() {
+    calibration_valid_ = false;
+    for (AxisCalibration& axis : calibration_) {
+        axis = {};
+    }
+    if (handle_ == INVALID_HANDLE_VALUE) {
+        return;
+    }
+
+    uint8_t data[64]{};
+    data[0] = 0x05;  // feature report: IMU calibration
+    if (!::HidD_GetFeature(handle_, data, sizeof(data))) {
+        std::fprintf(stderr, "hid: calibration feature report failed (%lu)\n",
+                     static_cast<unsigned long>(::GetLastError()));
+        return;
+    }
+
+    auto load16 = [&](int offset) {
+        return static_cast<int16_t>(data[offset] | (data[offset + 1] << 8));
+    };
+    const int16_t pitch_bias = load16(1);
+    const int16_t yaw_bias = load16(3);
+    const int16_t roll_bias = load16(5);
+    const int16_t pitch_plus = load16(7);
+    const int16_t pitch_minus = load16(9);
+    const int16_t yaw_plus = load16(11);
+    const int16_t yaw_minus = load16(13);
+    const int16_t roll_plus = load16(15);
+    const int16_t roll_minus = load16(17);
+    const int16_t gyro_speed_plus = load16(19);
+    const int16_t gyro_speed_minus = load16(21);
+    const int16_t acc_x_plus = load16(23);
+    const int16_t acc_x_minus = load16(25);
+    const int16_t acc_y_plus = load16(27);
+    const int16_t acc_y_minus = load16(29);
+    const int16_t acc_z_plus = load16(31);
+    const int16_t acc_z_minus = load16(33);
+
+    const int divisions[3] = {pitch_plus - pitch_minus, yaw_plus - yaw_minus,
+                              roll_plus - roll_minus};
+    if (divisions[0] == 0 || divisions[1] == 0 || divisions[2] == 0) {
+        return;
+    }
+    const float numerator = static_cast<float>(gyro_speed_plus + gyro_speed_minus) * 1024.0f;
+    calibration_[0] = {pitch_bias, numerator / divisions[0]};
+    calibration_[1] = {yaw_bias, numerator / divisions[1]};
+    calibration_[2] = {roll_bias, numerator / divisions[2]};
+
+    auto set_accel = [&](int index, int plus, int minus) {
+        const int range = plus - minus;
+        if (range == 0) {
+            return false;
+        }
+        calibration_[index].bias = static_cast<int16_t>(plus - range / 2);
+        calibration_[index].sensitivity = 2.0f * 8192.0f / static_cast<float>(range);
+        return true;
+    };
+    if (!set_accel(3, acc_x_plus, acc_x_minus) || !set_accel(4, acc_y_plus, acc_y_minus) ||
+        !set_accel(5, acc_z_plus, acc_z_minus)) {
+        return;
+    }
+
+    bool valid = true;
+    for (int i = 0; i < 6; ++i) {
+        const float divisor = (i < 3) ? 64.0f : 1.0f;
+        if (std::abs(calibration_[i].bias) > 1024 ||
+            std::fabs(1.0f - calibration_[i].sensitivity / divisor) > 0.5f) {
+            valid = false;
+            break;
+        }
+    }
+    if (!valid) {
+        std::fprintf(stderr, "hid: calibration data rejected (out of range)\n");
+        for (AxisCalibration& axis : calibration_) {
+            axis = {};
+        }
+        return;
+    }
+    calibration_valid_ = true;
+    std::fprintf(stderr, "hid: IMU calibrated (gyro %.2f/%.2f/%.2f, accel %.2f/%.2f/%.2f)\n",
+                 calibration_[0].sensitivity, calibration_[1].sensitivity,
+                 calibration_[2].sensitivity, calibration_[3].sensitivity,
+                 calibration_[4].sensitivity, calibration_[5].sensitivity);
 }
 
 void Gamepad::StartRead() {
@@ -398,12 +516,30 @@ void Gamepad::ParseSony(const uint8_t* data, DWORD length) {
     if (b2 & 0x01) next.buttons |= PadPS;
     if (b2 & 0x02) next.buttons |= PadTouchpad;
     if (b2 & 0x04) next.buttons |= PadMute;
+    if (is_edge_) {
+        if (b2 & 0x10) next.buttons |= PadFnLeft;
+        if (b2 & 0x20) next.buttons |= PadFnRight;
+        if (b2 & 0x40) next.buttons |= PadPaddleLeft;
+        if (b2 & 0x80) next.buttons |= PadPaddleRight;
+    }
 
     // Motion and touch. Offsets are payload-relative: USB raw 16..27,
-    // BT extended raw 17..28.
+    // BT extended raw 17..28. The firmware calibration is applied here; the
+    // raw values stay available for diagnostics.
     for (int i = 0; i < 3; ++i) {
-        next.gyro[i] = ReadI16(p, 15 + i * 2, length - base);
-        next.accel[i] = ReadI16(p, 21 + i * 2, length - base);
+        const int16_t gyro = ReadI16(p, 15 + i * 2, length - base);
+        const int16_t accel = ReadI16(p, 21 + i * 2, length - base);
+        next.gyro[i] = gyro;
+        next.accel[i] = accel;
+        if (calibration_valid_) {
+            next.gyro_dps[i] =
+                (gyro - calibration_[i].bias) * calibration_[i].sensitivity / 1024.0f;
+            next.accel_g[i] = (accel - calibration_[3 + i].bias) *
+                              calibration_[3 + i].sensitivity / 8192.0f;
+        } else {
+            next.gyro_dps[i] = static_cast<float>(gyro) / 1024.0f;
+            next.accel_g[i] = static_cast<float>(accel) / 8192.0f;
+        }
     }
 
     for (int i = 0; i < 2; ++i) {
@@ -634,31 +770,64 @@ bool Gamepad::SendOutput(const PadOutput& output) {
     const size_t length = 48;  // report 0x02: 47 payload bytes + id
     std::vector<uint8_t> report(length, 0);
     report[0] = 0x02;
-    report[1] = 0xFF;
-    report[2] = 0xF7;
+    report[2] |= 0x40;  // effect intensity byte is valid
     report[37] = output.intensity;
 
     if (output.rumble) {
-        report[3] = output.weak;
-        report[4] = output.strong;
+        report[1] |= 0x02;  // disable audio haptics while emulating rumble
+        if (!is_edge_ && firmware_version_ != 0 && firmware_version_ < 0x0224) {
+            // Older DualSense firmware: emulated rumble, half-scale values.
+            report[1] |= 0x01;
+            report[3] = static_cast<uint8_t>(output.weak >> 1);
+            report[4] = static_cast<uint8_t>(output.strong >> 1);
+        } else {
+            // 2.24+ firmware (and the Edge): improved rumble path.
+            report[39] |= 0x04;
+            report[3] = output.weak;
+            report[4] = output.strong;
+        }
     }
     if (output.mic_led) {
+        report[2] |= 0x01;
         report[9] = output.mic_state;
     }
     if (output.right_trigger) {
+        report[1] |= 0x08;
         std::memcpy(&report[11], output.right.bytes.data(), 11);
     }
     if (output.left_trigger) {
+        report[1] |= 0x04;
         std::memcpy(&report[22], output.left.bytes.data(), 11);
     }
     if (output.player_leds) {
+        report[2] |= 0x10;
         report[43] = 0x02;  // brightness
-        report[44] = output.player_mask;
+        report[44] = static_cast<uint8_t>(output.player_mask | 0x20);  // instant update
     }
     if (output.lightbar) {
+        report[2] |= 0x04;
         report[45] = output.r;
         report[46] = output.g;
         report[47] = output.b;
+    }
+
+    static const bool probe = std::getenv("BRP_PAD_PROBE") != nullptr;
+    if (probe && output.rumble) {
+        static int last_weak = -1;
+        static int last_strong = -1;
+        static ULONGLONG last_log = 0;
+        const ULONGLONG now = ::GetTickCount64();
+        if (output.weak != last_weak || output.strong != last_strong || now - last_log > 500) {
+            std::fprintf(stderr,
+                         "[hid] rumble weak=%u strong=%u fw=0x%04X edge=%d path=%s\n",
+                         output.weak, output.strong, firmware_version_, is_edge_ ? 1 : 0,
+                         (!is_edge_ && firmware_version_ != 0 && firmware_version_ < 0x0224)
+                             ? "old"
+                             : "new");
+            last_weak = output.weak;
+            last_strong = output.strong;
+            last_log = now;
+        }
     }
 
     if (!bluetooth_) {

@@ -652,8 +652,10 @@ void App::OpenAudioDevice() {
 }
 
 void App::TriggerRumble() {
-    rumble_until_ = clock_ + 0.45;
+    rumble_until_ = clock_ + 0.80;
     output_dirty_ = true;
+    std::fprintf(stderr, "[pad] rumble test 800 ms (fw 0x%04X, %s)\n",
+                 pad_.firmware_version(), pad_.calibrated() ? "calibrated" : "default");
 }
 
 void App::ApplyRenderTarget() {
@@ -1855,7 +1857,12 @@ void App::RenderSettings(double t) {
 
             std::wstring status = PadStatus(pad_.state());
             if (pad_.is_sony()) {
-                status += last_send_ok_ ? L"   ·   output reports OK" : L"   ·   output reports failed";
+                wchar_t extra[160];
+                swprintf_s(extra, L"   -   fw 0x%04X   -   gyro %s%s", pad_.firmware_version(),
+                           pad_.calibrated() ? L"calibrated" : L"default",
+                           pad_.is_edge() ? L"   -   Edge" : L"");
+                status += extra;
+                status += last_send_ok_ ? L"   -   output OK" : L"   -   output FAILED";
             }
             ui_.Text(status.c_str(), {kContentX, y, w - 64.0f, y + 40.0f}, 12.0f,
                      th::Rgba(th::kMuted));

@@ -30,6 +30,10 @@ enum PadButton : uint32_t {
     PadPS = 1u << 16,
     PadTouchpad = 1u << 17,
     PadMute = 1u << 18,
+    PadFnLeft = 1u << 19,      // DualSense Edge function buttons (local only)
+    PadFnRight = 1u << 20,
+    PadPaddleLeft = 1u << 21,
+    PadPaddleRight = 1u << 22,
 };
 
 struct TouchPoint {
@@ -52,6 +56,8 @@ struct PadState {
     TouchPoint touch[2];
     int16_t gyro[3]{};
     int16_t accel[3]{};
+    float gyro_dps[3]{};  // calibrated degrees/second
+    float accel_g[3]{};   // calibrated g
     int battery_percent = -1;
     bool charging = false;
     bool headset = false;
@@ -153,6 +159,9 @@ public:
 
     bool is_sony() const { return sony_active_; }
     bool is_bluetooth() const { return bluetooth_; }
+    bool is_edge() const { return is_edge_; }
+    uint16_t firmware_version() const { return firmware_version_; }
+    bool calibrated() const { return calibration_valid_; }
 
     // Desired output from the app (settings + local tests). Stored, merged with
     // console feedback and written by PumpOutput().
@@ -176,6 +185,8 @@ private:
     void ParseSony(const uint8_t* data, DWORD length);
     void ApplyState(const PadState& state);
     void PollXInput();
+    void ReadFirmware();
+    void ReadCalibration();
 
     HANDLE handle_ = INVALID_HANDLE_VALUE;
     HANDLE event_ = nullptr;
@@ -190,6 +201,15 @@ private:
     uint32_t output_report_len_ = 0;
     std::string name_;
     double retry_at_ = 0.0;
+    bool is_edge_ = false;
+    uint16_t firmware_version_ = 0;
+    bool calibration_valid_ = false;
+
+    struct AxisCalibration {
+        int16_t bias = 0;
+        float sensitivity = 1.0f;
+    };
+    AxisCalibration calibration_[6];  // gyro xyz, accel xyz
 
     mutable std::mutex mutex_;
     PadState state_;

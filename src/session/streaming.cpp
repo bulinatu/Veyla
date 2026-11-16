@@ -513,13 +513,11 @@ void Streaming::SendController(const PadState& pad) {
     // Motion: DualSense reports 1/1024 deg/s gyro and 1/8192 g accelerometer;
     // chiaki expects rad/s and g, plus a Madgwick quaternion the console uses.
     if (motion_enabled_) {
-        constexpr float kGyroScale = 3.14159265358979f / (180.0f * 1024.0f);
-        constexpr float kAccelScale = 1.0f / 8192.0f;
+        constexpr float kDegToRad = 0.017453292519943295f;
         chiaki_orientation_tracker_update(
-            &tracker_, pad.gyro[0] * kGyroScale, pad.gyro[1] * kGyroScale,
-            pad.gyro[2] * kGyroScale, pad.accel[0] * kAccelScale,
-            pad.accel[1] * kAccelScale, pad.accel[2] * kAccelScale, &accel_zero_, false,
-            static_cast<uint32_t>(chiaki_time_now_monotonic_us()));
+            &tracker_, pad.gyro_dps[0] * kDegToRad, pad.gyro_dps[1] * kDegToRad,
+            pad.gyro_dps[2] * kDegToRad, pad.accel_g[0], pad.accel_g[1], pad.accel_g[2],
+            &accel_zero_, false, static_cast<uint32_t>(chiaki_time_now_monotonic_us()));
         chiaki_orientation_tracker_apply_to_controller_state(&tracker_, &next);
     }
 
