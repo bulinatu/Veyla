@@ -65,6 +65,30 @@ Verification screenshot ([full size](images/bench-mode2-1440p.png)): checker det
 
 ---
 
+## Controller loop pacing (2026-11-16)
+
+`Sleep`/`sleep_for` on Windows quantises to the 15.6 ms system tick, so a
+"250 Hz" loop would really run at ~64 Hz. The pad thread now uses
+`CreateWaitableTimerExW(CREATE_WAITABLE_TIMER_HIGH_RESOLUTION)` and MMCSS
+("Games" task), with a drift-corrected absolute deadline.
+
+Measured with `BRP_PAD_PROBE=1` at a 1000 Hz target over 5 seconds:
+
+| Second | Loop iterations |
+|---|---|
+| 1 | 1001 |
+| 2 | 936 |
+| 3 | 1000 |
+| 4 | 936 |
+| 5 | 1000 |
+
+The 936 values are the probe window straddling a timer boundary, not missed
+deadlines. Effective ceiling is the controller's report rate: USB DualSense
+reports at 1000 Hz, Bluetooth at ~250 Hz, so on Bluetooth values above 250 Hz
+only affect polling/output timing, not new input samples.
+
+---
+
 ## Reproduction
 
 ```powershell

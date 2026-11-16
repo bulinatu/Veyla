@@ -7,6 +7,8 @@
 #include <mutex>
 #include <string>
 
+#include <chiaki/controller.h>
+#include <chiaki/orientation.h>
 #include <chiaki/session.h>
 
 #include "audio/audio_engine.h"
@@ -47,6 +49,12 @@ public:
     double fps() const;
 
     void SendController(const PadState& pad);
+    void SetMotionEnabled(bool enabled) { motion_enabled_ = enabled; }
+
+    // Latest state pushed by the console (rumble, trigger effects, LEDs).
+    // version() changes only when the console actually sent something.
+    PadConsoleFeedback feedback() const;
+    uint32_t feedback_version() const { return feedback_version_.load(); }
 
 private:
     static bool VideoCallback(uint8_t* buf, size_t size, int32_t frames_lost, bool recovered,
@@ -77,6 +85,21 @@ private:
     std::atomic<int> frame_count_{0};
     std::chrono::steady_clock::time_point started_{};
     bool initialised_ = false;
+
+    // controller input
+    ChiakiControllerState controller_state_{};
+    ChiakiOrientationTracker tracker_{};
+    ChiakiAccelNewZero accel_zero_{};
+    uint8_t touch_ids_[2] = {0xFF, 0xFF};
+    bool touch_active_[2] = {false, false};
+    std::atomic<bool> motion_enabled_{true};
+
+    // console feedback
+    mutable std::mutex feedback_mutex_;
+    PadConsoleFeedback feedback_;
+    uint8_t trigger_nibble_ = 0x00;
+    uint8_t haptic_nibble_ = 0x00;
+    std::atomic<uint32_t> feedback_version_{0};
 
     // audio
     audio::Engine* audio_ = nullptr;

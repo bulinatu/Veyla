@@ -92,6 +92,35 @@ struct PadOutput {
     bool right_trigger = false;
     TriggerEffect left;
     TriggerEffect right;
+
+    // Combined DualSense effect-intensity byte (high nibble triggers, low
+    // nibble haptics). 0x00 = strong/strong.
+    uint8_t intensity = 0x00;
+};
+
+// Everything the console pushes back to the pad while streaming: lightbar,
+// player LEDs, rumble and adaptive-trigger effects. Values are the raw
+// protocol payloads; the pad firmware does the rest.
+struct PadConsoleFeedback {
+    bool led = false;
+    uint8_t r = 0, g = 0, b = 0;
+
+    bool player_leds = false;
+    uint8_t player_mask = 0;
+
+    bool rumble = false;
+    uint8_t weak = 0;    // right / high frequency
+    uint8_t strong = 0;  // left / low frequency
+
+    bool triggers = false;
+    TriggerEffect left;
+    TriggerEffect right;
+
+    // Nibbles used by newer DualSense firmware: high = trigger intensity,
+    // low = haptic intensity. 0x00 = both strong, 0xF = off.
+    uint8_t intensity = 0x00;
+
+    uint32_t version = 0;
 };
 
 // Controller input plus DualSense output. Two input backends, one state:
@@ -125,6 +154,15 @@ public:
     bool is_sony() const { return sony_active_; }
     bool is_bluetooth() const { return bluetooth_; }
 
+    // Desired output from the app (settings + local tests). Stored, merged with
+    // console feedback and written by PumpOutput().
+    void SetOutput(const PadOutput& output);
+    void SetConsoleFeedback(const PadConsoleFeedback& feedback);
+
+    // Merges user settings with console feedback and writes a report when
+    // something changed or while rumble is active. Cheap when idle.
+    bool PumpOutput();
+
     // Sends lightbar / player LEDs / mic LED / rumble / adaptive trigger state.
     // Returns false when no Sony pad is open.
     bool SendOutput(const PadOutput& output);
@@ -157,6 +195,11 @@ private:
     PadState state_;
     uint32_t pressed_ = 0;
     Backend backend_ = Backend::Auto;
+
+    PadOutput user_output_;
+    PadConsoleFeedback console_;
+    bool output_dirty_ = true;
+    double last_output_ = 0.0;
 };
 
 }  // namespace brp

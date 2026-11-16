@@ -69,24 +69,25 @@ Detection is by `HIDP_CAPS.InputReportByteLength`: 64 = USB, 78 = Bluetooth exte
 
 | Feature | State | Notes |
 |---|---|---|
-| Buttons, sticks, triggers | ✅ | USB + Bluetooth |
+| Buttons, sticks, triggers | ✅ | USB + Bluetooth, forwarded live |
 | D-pad as hat | ✅ | decoded from the 4-bit hat |
-| Touchpad touch points | ✅ parsed | 2 points, x/y + active + id |
-| Touchpad click | ✅ | `PadTouchpad` |
-| Gyro / accelerometer | ✅ raw | 3× int16 each, uncalibrated |
+| Touchpad touch points | ✅ forwarded | 2 points, native 1920×1080 coordinates |
+| Touchpad click | ✅ | `PadTouchpad` → protocol button |
+| Gyro / accelerometer | ✅ forwarded | scaled to rad/s + g, Madgwick quaternion |
 | Battery % + charging | ✅ | from the status byte |
 | Mute button | ✅ | |
-| Lightbar RGB | ✅ output | bytes 44–46 of the `0x02` report |
-| Player LEDs | ✅ output | mask + brightness, best-effort offsets |
+| Lightbar RGB | ✅ output | bytes 45–47 of the `0x02` report (fixed in this pass) |
+| Player LEDs | ✅ output | byte 43/44, or console-driven |
 | Mic LED | ✅ output | off / on / pulse |
-| Adaptive triggers | ✅ output | 8 effect types, see below |
-| Rumble (2 actuators) | ✅ output | weak (right) / strong (left) |
+| Adaptive triggers | ✅ both ways | 8 manual effects + console effects passed through |
+| Rumble (2 actuators) | ✅ both ways | local test + console rumble with intensity scaling |
 | CRC32 for Bluetooth | ✅ | polynomial `0xEDB88320`, seed `0xA2` |
+| Input/report rate | ✅ | 60 / 125 / 250 / 500 / 1000 Hz, high-resolution timer |
 | Trigger effect calibration | ⚪ | firmware-provided ranges not applied |
-| Haptic voice-coil stream | ⚪ | needs the 0x02 audio-haptic path (USB) |
+| Haptic voice-coil stream | ⚪ | needs the audio-haptic path over USB (see below) |
 | Speaker / headset audio | ⚪ | separate USB audio interface |
-| Gyro calibration | ⚪ | feature report 0x05 not read |
-| Console-driven effects | ⚪ | needs the session layer to forward PS5 haptics/triggers |
+| Gyro calibration | ⚪ | feature report 0x05 not read; raw scale assumed |
+| Console-driven effects | ✅ | rumble, trigger effects, lightbar, player LEDs, intensities |
 
 ### Adaptive trigger effects implemented
 
@@ -133,7 +134,9 @@ Verified on this machine: DualSense over **Bluetooth**, input 78 bytes, output w
 
 ## Next
 
-- Forward `PadState` into the chiaki session as a PS5 controller report (this is the "control the PlayStation" half).
-- Consume PS5 haptics/trigger effects from the session and feed `PadOutput` — the output path already exists, it just needs a driver.
-- Read the calibration feature report `0x05` so gyro values become degrees/second.
-- Consider the USB audio-haptic path for real voice-coil haptics.
+- Read the calibration feature report `0x05` so gyro becomes calibrated rad/s
+  (currently the standard 1024 LSB per deg/s scale is assumed).
+- USB audio-haptic path: decode the console's separate haptics Opus stream and
+  route it to the DualSense 4-channel USB audio endpoint. Over Bluetooth there
+  is no audio endpoint, so this cannot work wirelessly.
+- Trigger effect calibration from firmware ranges (currently pass-through).

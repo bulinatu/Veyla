@@ -52,6 +52,14 @@ struct Profile {
     int input_source = 0;
     int frame_buffer = 1;
     int pad_rate_hz = 250;
+    int lightbar = 0;
+    int trigger_effect = 0;
+    int trigger_strength = 5;
+    int player_leds = 0;
+    int mic_led = 0;
+    int console_rumble = 1;
+    int console_triggers = 1;
+    int motion = 1;
 
     bool has_console() const { return !target_id.empty(); }
     bool needs_pairing() const { return !credentials.present(); }

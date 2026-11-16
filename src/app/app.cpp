@@ -5,11 +5,14 @@
 #include "ui/theme.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <vector>
+
+#include <avrt.h>
 
 using namespace brp;
 namespace th = brp::theme;
@@ -55,6 +58,9 @@ enum WidgetId {
     W_Disconnect = 46,
     W_FrameBuffer = 47,
     W_PadRate = 48,
+    W_ConsoleRumble = 49,
+    W_ConsoleTriggers = 50,
+    W_Motion = 51,
     W_PairHome = 42,
 };
 
@@ -66,7 +72,8 @@ const wchar_t* kTriggerNames[] = {L"Off",    L"Rigid",     L"Pulse", L"Feedback"
 constexpr int kTriggerCount = static_cast<int>(std::size(kTriggerNames));
 
 const wchar_t* kLightbarNames[] = {L"Blue", L"Red", L"Green", L"Amber",
-                                   L"Violet", L"Teal", L"White", L"Off"};
+                                   L"Violet", L"Teal", L"White", L"Off",
+                                   L"Console (PS5)"};
 constexpr int kLightbarCount = static_cast<int>(std::size(kLightbarNames));
 
 struct Rgb {
@@ -76,10 +83,13 @@ struct Rgb {
 const Rgb kLightbarColors[] = {
     {0x5A, 0xA9, 0xFF}, {0xFF, 0x4D, 0x4D}, {0x57, 0xD6, 0x8A}, {0xFF, 0xC1, 0x45},
     {0xB1, 0x4B, 0xFF}, {0x14, 0xB8, 0xA6}, {0xF4, 0xF7, 0xFC}, {0x00, 0x00, 0x00},
+    {0x00, 0x00, 0x00},
 };
 
-const wchar_t* kPlayerLedNames[] = {L"Off", L"Center", L"Inner", L"Outer", L"All", L"Mid"};
-const uint8_t kPlayerLedMasks[] = {0x00, 0x04, 0x0A, 0x0F, 0x1F, 0x15};
+const wchar_t* kPlayerLedNames[] = {L"Off",   L"Center", L"Inner",
+                                    L"Outer", L"All",    L"Mid",
+                                    L"Console (PS5)"};
+const uint8_t kPlayerLedMasks[] = {0x00, 0x04, 0x0A, 0x0F, 0x1F, 0x15, 0x00};
 constexpr int kPlayerLedCount = static_cast<int>(std::size(kPlayerLedMasks));
 
 const wchar_t* kMicLedNames[] = {L"Off", L"On", L"Pulse"};
@@ -168,7 +178,16 @@ bool App::Init(Win32Window* window) {
     audio_buffer_ms_ = std::clamp(profile_.audio_buffer_ms, 10, 100);
     input_source_ = std::clamp(profile_.input_source, 0, 2);
     stream_buffer_ = std::clamp(profile_.frame_buffer, 0, 3);
-    pad_rate_hz_ = std::clamp(profile_.pad_rate_hz, 60, 500);
+    pad_rate_hz_ = std::clamp(profile_.pad_rate_hz, 60, 1000);
+    lightbar_index_ = std::clamp(profile_.lightbar, 0, kLightbarCount - 1);
+    trigger_effect_ = std::clamp(profile_.trigger_effect, 0, kTriggerCount - 1);
+    trigger_strength_ = std::clamp(profile_.trigger_strength, 1, 8);
+    player_leds_ = std::clamp(profile_.player_leds, 0, kPlayerLedCount - 1);
+    mic_led_ = std::clamp(profile_.mic_led, 0, 2);
+    console_rumble_ = profile_.console_rumble != 0;
+    console_triggers_ = profile_.console_triggers != 0;
+    motion_ = profile_.motion != 0;
+    streaming_.SetMotionEnabled(motion_);
     th::SetHdr(hdr_);
 
     // Prefer a console found on the LAN over the cached (often WAN) address.
@@ -500,12 +519,34 @@ void App::ApplyDropdown(int id, int index) {
             break;
         }
         case W_PadRate: {
-            static const int kRates[] = {60, 125, 250, 500};
-            pad_rate_hz_ = kRates[std::clamp(index, 0, 3)];
+            static const int kRates[] = {60, 125, 250, 500, 1000};
+            pad_rate_hz_ = kRates[std::clamp(index, 0, 4)];
             profile_.pad_rate_hz = pad_rate_hz_;
             SaveProfile();
             break;
         }
+        case W_ConsoleRumble:
+            console_rumble_ = index == 0;
+            profile_.console_rumble = console_rumble_ ? 1 : 0;
+            if (!console_rumble_) {
+                pad_.SetConsoleFeedback(PadConsoleFeedback{});
+            }
+            SaveProfile();
+            break;
+        case W_ConsoleTriggers:
+            console_triggers_ = index == 0;
+            profile_.console_triggers = console_triggers_ ? 1 : 0;
+            if (!console_triggers_) {
+                pad_.SetConsoleFeedback(PadConsoleFeedback{});
+            }
+            SaveProfile();
+            break;
+        case W_Motion:
+            motion_ = index == 0;
+            profile_.motion = motion_ ? 1 : 0;
+            streaming_.SetMotionEnabled(motion_);
+            SaveProfile();
+            break;
         case W_Bitrate: {
             static const int kBitrates[] = {20000, 35000, 50000, 75000, 100000};
             profile_.bitrate_kbps = kBitrates[std::clamp(index, 0, 4)];
@@ -521,23 +562,33 @@ void App::ApplyDropdown(int id, int index) {
             break;
         case W_Lightbar:
             lightbar_index_ = std::clamp(index, 0, kLightbarCount - 1);
+            profile_.lightbar = lightbar_index_;
             output_dirty_ = true;
+            SaveProfile();
             break;
         case W_Trigger:
             trigger_effect_ = std::clamp(index, 0, kTriggerCount - 1);
+            profile_.trigger_effect = trigger_effect_;
             output_dirty_ = true;
+            SaveProfile();
             break;
         case W_Strength:
             trigger_strength_ = std::clamp(index + 1, 1, 8);
+            profile_.trigger_strength = trigger_strength_;
             output_dirty_ = true;
+            SaveProfile();
             break;
         case W_PlayerLeds:
             player_leds_ = std::clamp(index, 0, kPlayerLedCount - 1);
+            profile_.player_leds = player_leds_;
             output_dirty_ = true;
+            SaveProfile();
             break;
         case W_MicLed:
             mic_led_ = std::clamp(index, 0, 2);
+            profile_.mic_led = mic_led_;
             output_dirty_ = true;
+            SaveProfile();
             break;
         default:
             break;
@@ -580,13 +631,83 @@ void App::StopPadThread() {
 }
 
 void App::PadThreadMain() {
+    DWORD task_index = 0;
+    HANDLE mmcss = ::AvSetMmThreadCharacteristicsW(L"Games", &task_index);
+
+    // High-resolution waitable timer: Sleep()/sleep_for() quantise to the
+    // 15.6 ms tick unless the timer resolution is raised, which would turn a
+    // "250 Hz" loop into a ~64 Hz one.
+    HANDLE timer = ::CreateWaitableTimerExW(nullptr, nullptr,
+                                            CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                            TIMER_ALL_ACCESS);
+
+    auto next = std::chrono::steady_clock::now();
+    const bool probe = std::getenv("BRP_PAD_PROBE") != nullptr;
+    auto probe_at = std::chrono::steady_clock::now();
+    int probe_loops = 0;
     while (pad_run_.load()) {
+        const int hz = std::clamp(pad_rate_hz_, 60, 1000);
+        const auto period = std::chrono::microseconds(1000000 / hz);
+        next += period;
+        const auto now = std::chrono::steady_clock::now();
+        if (next < now - period) {
+            next = now + period;
+        }
+
         pad_.Poll();
         if (stream_active_) {
             streaming_.SendController(pad_.snapshot());
+
+            const uint32_t version = streaming_.feedback_version();
+            if (version != feedback_version_) {
+                feedback_version_ = version;
+                PadConsoleFeedback feedback = streaming_.feedback();
+                if (!console_rumble_) {
+                    feedback.rumble = false;
+                }
+                if (!console_triggers_) {
+                    feedback.triggers = false;
+                }
+                pad_.SetConsoleFeedback(feedback);
+            }
         }
-        const int hz = pad_rate_hz_ < 60 ? 60 : (pad_rate_hz_ > 500 ? 500 : pad_rate_hz_);
-        std::this_thread::sleep_for(std::chrono::microseconds(1000000 / hz));
+        last_send_ok_ = pad_.PumpOutput();
+
+        if (probe) {
+            ++probe_loops;
+            const auto probe_now = std::chrono::steady_clock::now();
+            if (probe_now - probe_at >= std::chrono::seconds(1)) {
+                const double seconds =
+                    std::chrono::duration<double>(probe_now - probe_at).count();
+                std::fprintf(stderr, "[pad] %.0f loops/s (target %d Hz, %s)\n",
+                             probe_loops / seconds, hz,
+                             pad_.is_bluetooth() ? "bluetooth" : "usb");
+                probe_loops = 0;
+                probe_at = probe_now;
+            }
+        }
+
+        if (timer) {
+            const auto remaining = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                next - std::chrono::steady_clock::now());
+            LARGE_INTEGER due;
+            due.QuadPart = -static_cast<LONGLONG>(
+                std::max<long long>(remaining.count() / 100, 1));
+            if (::SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) {
+                ::WaitForSingleObject(timer, INFINITE);
+            } else {
+                std::this_thread::sleep_until(next);
+            }
+        } else {
+            std::this_thread::sleep_until(next);
+        }
+    }
+
+    if (timer) {
+        ::CloseHandle(timer);
+    }
+    if (mmcss) {
+        ::AvRevertMmThreadCharacteristics(mmcss);
     }
 }
 
@@ -604,6 +725,8 @@ if (!audio_.is_open()) {
         OpenAudioDevice();
     }
     streaming_.SetAudio(&audio_);
+    pad_.SetConsoleFeedback(PadConsoleFeedback{});
+    feedback_version_ = 0;
 
     std::string error;
     if (streaming_.Start(profile_, profile_.width, profile_.height, profile_.bitrate_kbps, error)) {
@@ -619,6 +742,8 @@ void App::DisconnectStream() {
     StopPadThread();
     streaming_.Stop();
     stream_active_ = false;
+    feedback_version_ = 0;
+    pad_.SetConsoleFeedback(PadConsoleFeedback{});
     stream_note_ = "Disconnected. The console may take a few seconds to release the session.";
     screen_ = Screen::Home;
 }
@@ -629,29 +754,35 @@ void App::StartProbe() {
 
 void App::ApplyControllerOutput(bool force) {
     (void)force;
-    if (!pad_.is_sony()) {
-        return;
-    }
 
     PadOutput out;
-    const Rgb& color = kLightbarColors[lightbar_index_];
-    out.lightbar = true;
-    out.r = color.r;
-    out.g = color.g;
-    out.b = color.b;
 
-    out.player_leds = true;
-    out.player_mask = kPlayerLedMasks[player_leds_];
+    // Index 8 is "Console (PS5)": leave the lightbar to the console.
+    if (lightbar_index_ < 8) {
+        const Rgb& color = kLightbarColors[lightbar_index_];
+        out.lightbar = true;
+        out.r = color.r;
+        out.g = color.g;
+        out.b = color.b;
+    }
+
+    // Index 6 is "Console (PS5)": leave the player LEDs to the console.
+    if (player_leds_ < 6) {
+        out.player_leds = true;
+        out.player_mask = kPlayerLedMasks[player_leds_];
+    }
 
     out.mic_led = true;
     out.mic_state = static_cast<uint8_t>(mic_led_);
 
-    out.rumble = true;
+    // Local test tone only; otherwise the console drives the motors.
     if (clock_ < rumble_until_) {
+        out.rumble = true;
         out.weak = 200;
         out.strong = 240;
     }
 
+    // A manual effect overrides the console; "Off" means pass-through.
     if (trigger_effect_ > 0) {
         out.left_trigger = true;
         out.right_trigger = true;
@@ -659,7 +790,7 @@ void App::ApplyControllerOutput(bool force) {
         out.right = out.left;
     }
 
-    last_send_ok_ = pad_.SendOutput(out);
+    pad_.SetOutput(out);
     last_output_ = clock_;
     output_dirty_ = false;
 }
@@ -742,14 +873,17 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     }
 
     if (stream_active_) {
-        streaming_.SendController(pad_.state());
+        // Controller input is sent by the dedicated pad thread, independent of
+        // the 60 Hz render loop.
         if (streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
             presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
                                        stream_frame_.height);
         }
         if (streaming_.state() == session::StreamState::Failed) {
+            StopPadThread();
             streaming_.Stop();
             stream_active_ = false;
+            pad_.SetConsoleFeedback(PadConsoleFeedback{});
             screen_ = Screen::Home;
         }
     }
@@ -757,6 +891,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     if (pad_.is_sony() &&
         (output_dirty_ || clock_ < rumble_until_ + 0.1 || clock_ - last_output_ > 0.2)) {
         ApplyControllerOutput(false);
+    }
+    if (!pad_run_.load()) {
+        last_send_ok_ = pad_.PumpOutput();
     }
 
     if (capture_requested_) {
@@ -1252,46 +1389,58 @@ void App::RenderSettings(double t) {
         }
 
         case Tab::Controller: {
+            const float row = 56.0f;
             DrawDropdown(L"Input source", {kInputSourceNames[0], kInputSourceNames[1],
                                            kInputSourceNames[2]},
                          input_source_, y, W_InputSource);
-            y += kRowH;
+            y += row;
             {
                 int rate_index = 2;
-                const int rates[] = {60, 125, 250, 500};
-                for (int i = 0; i < 4; ++i) {
+                const int rates[] = {60, 125, 250, 500, 1000};
+                for (int i = 0; i < 5; ++i) {
                     if (rates[i] == pad_rate_hz_) rate_index = i;
                 }
-                DrawDropdown(L"Report rate", {L"60 Hz", L"125 Hz", L"250 Hz", L"500 Hz"},
+                DrawDropdown(L"Report rate (USB up to 1000 Hz)",
+                             {L"60 Hz", L"125 Hz", L"250 Hz", L"500 Hz", L"1000 Hz"},
                              rate_index, y, W_PadRate);
             }
-            y += kRowH;
-            DrawDropdown(L"Lightbar", {kLightbarNames[0], kLightbarNames[1], kLightbarNames[2],
-                                       kLightbarNames[3], kLightbarNames[4], kLightbarNames[5],
-                                       kLightbarNames[6], kLightbarNames[7]},
+            y += row;
+            DrawDropdown(L"Console rumble", {L"On", L"Off"}, console_rumble_ ? 0 : 1, y,
+                         W_ConsoleRumble);
+            y += row;
+            DrawDropdown(L"Console adaptive triggers", {L"On", L"Off"},
+                         console_triggers_ ? 0 : 1, y, W_ConsoleTriggers);
+            y += row;
+            DrawDropdown(L"Motion (gyro/accel)", {L"On", L"Off"}, motion_ ? 0 : 1, y, W_Motion);
+            y += row;
+            DrawDropdown(L"Lightbar",
+                         {kLightbarNames[0], kLightbarNames[1], kLightbarNames[2],
+                          kLightbarNames[3], kLightbarNames[4], kLightbarNames[5],
+                          kLightbarNames[6], kLightbarNames[7], kLightbarNames[8]},
                          lightbar_index_, y, W_Lightbar);
-            y += kRowH;
+            y += row;
             DrawDropdown(L"Adaptive trigger",
                          {kTriggerNames[0], kTriggerNames[1], kTriggerNames[2], kTriggerNames[3],
                           kTriggerNames[4], kTriggerNames[5], kTriggerNames[6], kTriggerNames[7]},
                          trigger_effect_, y, W_Trigger);
-            y += kRowH;
+            y += row;
             DrawDropdown(L"Trigger strength",
                          {L"1", L"2", L"3", L"4", L"5", L"6", L"7", L"8"}, trigger_strength_ - 1,
                          y, W_Strength);
-            y += kRowH;
+            y += row;
             DrawDropdown(L"Player LEDs",
                          {kPlayerLedNames[0], kPlayerLedNames[1], kPlayerLedNames[2],
-                          kPlayerLedNames[3], kPlayerLedNames[4], kPlayerLedNames[5]},
+                          kPlayerLedNames[3], kPlayerLedNames[4], kPlayerLedNames[5],
+                          kPlayerLedNames[6]},
                          player_leds_, y, W_PlayerLeds);
-            y += kRowH;
+            y += row;
             DrawDropdown(L"Mic LED", {kMicLedNames[0], kMicLedNames[1], kMicLedNames[2]}, mic_led_,
                          y, W_MicLed);
-            y += kRowH;
+            y += row;
 
             DrawButton(L"Rumble test", {kContentX, y + 6.0f, kContentX + 220.0f, y + 50.0f},
                        W_Rumble, false);
-            y += kRowH;
+            y += row;
 
             std::wstring status = PadStatus(pad_.state());
             if (pad_.is_sony()) {

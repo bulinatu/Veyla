@@ -35,6 +35,17 @@ int16_t ReadI16(const uint8_t* data, int offset, DWORD length) {
     return static_cast<int16_t>(data[offset] | (data[offset + 1] << 8));
 }
 
+// Console haptic intensity nibble: 0 strong, 2 medium, 3 weak, 0xF off.
+uint8_t ScaleHaptic(uint8_t value, uint8_t level) {
+    switch (level) {
+        case 0x0: return value;
+        case 0x2: return static_cast<uint8_t>(value / 2);
+        case 0x3: return static_cast<uint8_t>(value / 3);
+        case 0xF: return 0;
+        default: return value;
+    }
+}
+
 uint32_t Crc32Table[256];
 bool crc_ready = false;
 
@@ -135,6 +146,11 @@ void Gamepad::CloseDevice() {
     state_.connected = false;
     state_.buttons = 0;
     state_.name.clear();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        console_ = PadConsoleFeedback{};
+        output_dirty_ = true;
+    }
 }
 
 bool Gamepad::TryOpenSony() {
@@ -408,6 +424,7 @@ void Gamepad::ParseSony(const uint8_t* data, DWORD length) {
 }
 
 void Gamepad::ApplyState(const PadState& next) {
+    std::lock_guard<std::mutex> lock(mutex_);
     pressed_ |= (next.buttons & ~state_.buttons);
     state_ = next;
 }
@@ -496,6 +513,7 @@ PadState Gamepad::snapshot() const {
 }
 
 uint32_t Gamepad::ConsumePressed() {
+    std::lock_guard<std::mutex> lock(mutex_);
     const uint32_t pressed = pressed_;
     pressed_ = 0;
     return pressed;
@@ -532,19 +550,93 @@ bool Gamepad::WriteReport(const uint8_t* data, size_t size) {
     return ok != FALSE && written > 0;
 }
 
+void Gamepad::SetOutput(const PadOutput& output) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    user_output_ = output;
+    output_dirty_ = true;
+}
+
+void Gamepad::SetConsoleFeedback(const PadConsoleFeedback& feedback) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    console_ = feedback;
+    output_dirty_ = true;
+}
+
+bool Gamepad::PumpOutput() {
+    if (!sony_active_ || handle_ == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    const double now = NowSeconds();
+    PadOutput out;
+    bool rumble_active = false;
+    bool due = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        out = user_output_;
+
+        // A fixed colour chosen in Settings wins; otherwise follow the console.
+        if (!out.lightbar && console_.led) {
+            out.lightbar = true;
+            out.r = console_.r;
+            out.g = console_.g;
+            out.b = console_.b;
+        }
+        if (!out.player_leds && console_.player_leds) {
+            out.player_leds = true;
+            out.player_mask = console_.player_mask;
+        }
+
+        const uint8_t haptic_level = console_.intensity & 0x0F;
+        if (!out.rumble && console_.rumble && haptic_level != 0x0F) {
+            out.rumble = true;
+            out.weak = ScaleHaptic(console_.weak, haptic_level);
+            out.strong = ScaleHaptic(console_.strong, haptic_level);
+        }
+
+        const uint8_t trigger_level = console_.intensity >> 4;
+        if (!out.left_trigger && !out.right_trigger && console_.triggers &&
+            trigger_level != 0x0F) {
+            out.left_trigger = true;
+            out.right_trigger = true;
+            out.left = console_.left;
+            out.right = console_.right;
+        }
+        out.intensity = console_.intensity;
+
+        rumble_active = out.rumble && (out.weak != 0 || out.strong != 0);
+        // Rumble motors need periodic refresh, but never at input rate.
+        if (!output_dirty_) {
+            if (rumble_active) {
+                due = now - last_output_ >= 0.02;
+            } else {
+                due = now - last_output_ >= 0.2;
+            }
+            if (!due) {
+                return true;
+            }
+        }
+        output_dirty_ = false;
+        last_output_ = now;
+    }
+
+    return SendOutput(out);
+}
+
 bool Gamepad::SendOutput(const PadOutput& output) {
     if (!sony_active_ || handle_ == INVALID_HANDLE_VALUE) {
         return false;
     }
 
     // USB output report 0x02, 47 payload bytes. Offsets verified against a
-    // captured report: flags 1/2, rumble 3/4, triggers 11..21 and 22..32,
-    // player LEDs ~41..43, lightbar 44..46.
+    // captured report and SDL's DS5EffectsState_t: flags 1/2, rumble 3/4,
+    // triggers 11..32, intensity 37, player LEDs 43/44, lightbar 45..47.
     const size_t length = 48;  // report 0x02: 47 payload bytes + id
     std::vector<uint8_t> report(length, 0);
     report[0] = 0x02;
     report[1] = 0xFF;
     report[2] = 0xF7;
+    report[37] = output.intensity;
 
     if (output.rumble) {
         report[3] = output.weak;
@@ -560,13 +652,13 @@ bool Gamepad::SendOutput(const PadOutput& output) {
         std::memcpy(&report[22], output.left.bytes.data(), 11);
     }
     if (output.player_leds) {
-        report[41] = 0x02;  // brightness
-        report[43] = output.player_mask;
+        report[43] = 0x02;  // brightness
+        report[44] = output.player_mask;
     }
     if (output.lightbar) {
-        report[44] = output.r;
-        report[45] = output.g;
-        report[46] = output.b;
+        report[45] = output.r;
+        report[46] = output.g;
+        report[47] = output.b;
     }
 
     if (!bluetooth_) {

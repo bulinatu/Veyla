@@ -1,6 +1,6 @@
 # 14 — Handoff / current state (read this first after a context reset)
 
-Last updated: pairing + decode milestone.
+Last updated: live streaming + full controller pipeline.
 
 ---
 
@@ -10,15 +10,15 @@ Last updated: pairing + decode milestone.
 |---|---|
 | Pairing with the real PS5 | **WORKS** — console paired, keys stored |
 | LAN discovery | **WORKS** — finds `192.168.1.21` automatically |
-| Video decode (file/stream) | **WORKS** — libavcodec, HEVC 10-bit, 5.8 ms/frame software 1080p |
-| Presentation pipeline | **WORKS** — D3D11 flip model, Catmull-Rom upscale, 0.04–0.19 ms at 4K |
-| Fullscreen | **WORKS** — F11, exact output resolution |
-| Audio engine (WASAPI) | **WORKS** — test tone, device selection, 0 underruns |
-| DualSense | HID input + lightbar/triggers/rumble/LEDs over BT |
-| Live streaming session | **NOT STARTED** — the next big block |
-| HDR / FP16 color | Not started |
-| FSR1/NIS | Not started |
-| Frame gen / neural | Not started (user deferred neural) |
+| Live streaming session | **WORKS** — 1080p60 HEVC, ~56–60 fps |
+| Video decode (live) | **WORKS** — D3D11VA, color matrix explicit |
+| Presentation pipeline | **WORKS** — D3D11 flip model, FSR1/EASU, 0.18 ms at 1440p |
+| Fullscreen / HDR10 | **WORKS** — F11; HDR at startup (PQ swapchain) |
+| Audio (WASAPI, in-process) | **WORKS** — Opus → FFmpeg → WASAPI, 0 underruns |
+| Controller input | **WORKS** — buttons, sticks, triggers, touchpad, gyro/accel |
+| Controller output | **WORKS** — rumble, adaptive triggers, lightbar, player LEDs from the console |
+| Input rate | 60–1000 Hz, dedicated thread + high-resolution timer |
+| Frame gen / neural | Not started (user deferred neural; Smooth Motion is the documented path) |
 
 ---
 
@@ -97,7 +97,7 @@ rudpsendbuffer + mbedTLS (FetchContent v2.28.0) + stubs.
 
 ---
 
-## Next block: live streaming session (the big one)
+## How live streaming was built (reference)
 
 Goal: connect to the paired console and feed `media::Decoder` with live packets.
 
@@ -174,10 +174,34 @@ Opus sink -> FFmpeg decoder -> swresample 48k float stereo -> audio::Engine::Pus
 Verified: audio header 2ch/48kHz received during a live session; video 1080p60 at ~60 fps.
 
 ## Next (in order)
-1. YUV->RGB in GPU (FP16) + BT.709/BT.2020 + PQ for #3/#11; swapchain R10G10B10A2 + HDR metadata.
-2. FSR1 (EASU+RCAS) or NIS as upscale modes 4/5.
-3. Frame generation (RIFE/TensorRT) opt-in, latency shown.
-4. DualSense haptic audio (USB audio-haptic path).
+1. Verify on hardware: rumble + adaptive triggers + touchpad + gyro while a game is
+   running (menus rarely send trigger effects). Watch `BRP_PAD_PROBE=1` logs for
+   `[pad] rumble`, `[pad] trigger effects`, and the measured `loops/s`.
+2. Vblank pacing (`DwmFlush`) instead of the 60 Hz UI sleep, to remove the last
+   presentation beat.
+3. Zero-copy decode: decoder on the presenter's `ID3D11Device`.
+4. DualSense haptic audio (USB only): decode the console haptics Opus stream and
+   route it to the controller's 4-channel audio endpoint.
+5. Frame generation: pick Smooth Motion (driver) or bundle RIFE/TensorRT.
+
+## Controller pipeline (implemented this pass)
+
+- `src/platform/gamepad.*`: added `SetOutput` / `SetConsoleFeedback` /
+  `PumpOutput`. The app declares the *desired* output; the pad owns merging,
+  priority (local test > console) and report pacing (never above 50 Hz while
+  rumbling, 200 ms refresh otherwise).
+- Fixed the DualSense output report offsets: intensity at 37, brightness 43,
+  player LEDs 44, lightbar 45–47 (previously one byte early).
+- `src/session/streaming.*`: persistent `ChiakiControllerState`, touch-id
+  tracking, gyro/accel scaled to rad/s + g, Madgwick orientation quaternion,
+  state-change-only forwarding. Console events (`RUMBLE`, `TRIGGER_EFFECTS`,
+  `LED_COLOR`, `PLAYER_INDEX`, `*_INTENSITY`) are captured as `PadConsoleFeedback`.
+- Settings now persist: lightbar, manual trigger effect/strength, player LEDs,
+  mic LED, console rumble/trigger toggles, motion toggle, report rate (up to
+  1000 Hz).
+- Measured pacing: 936–1001 loop iterations/s at a 1000 Hz target on this
+  machine (Windows 10+ high-resolution waitable timer; `sleep_for` would have
+  capped at ~64 Hz because of the 15.6 ms timer tick).
 
 
 ---

@@ -154,6 +154,10 @@ private:
     int trigger_strength_ = 5;
     int player_leds_ = 0;
     int mic_led_ = 0;
+    bool console_rumble_ = true;
+    bool console_triggers_ = true;
+    bool motion_ = true;
+    uint32_t feedback_version_ = 0;
     double rumble_until_ = 0.0;
     double last_output_ = 0.0;
     bool output_dirty_ = true;

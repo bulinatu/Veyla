@@ -368,7 +368,15 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"audio_buffer_ms\": " << profile.audio_buffer_ms << ",\n";
     json << "  \"input_source\": " << profile.input_source << ",\n";
     json << "  \"frame_buffer\": " << profile.frame_buffer << ",\n";
-    json << "  \"pad_rate_hz\": " << profile.pad_rate_hz << "\n";
+    json << "  \"pad_rate_hz\": " << profile.pad_rate_hz << ",\n";
+    json << "  \"lightbar\": " << profile.lightbar << ",\n";
+    json << "  \"trigger_effect\": " << profile.trigger_effect << ",\n";
+    json << "  \"trigger_strength\": " << profile.trigger_strength << ",\n";
+    json << "  \"player_leds\": " << profile.player_leds << ",\n";
+    json << "  \"mic_led\": " << profile.mic_led << ",\n";
+    json << "  \"console_rumble\": " << profile.console_rumble << ",\n";
+    json << "  \"console_triggers\": " << profile.console_triggers << ",\n";
+    json << "  \"motion\": " << profile.motion << "\n";
     json << "}\n";
 
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
@@ -424,6 +432,14 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     if (ExtractNumber(json, "input_source", number)) p.input_source = static_cast<int>(number);
     if (ExtractNumber(json, "frame_buffer", number)) p.frame_buffer = static_cast<int>(number);
     if (ExtractNumber(json, "pad_rate_hz", number)) p.pad_rate_hz = static_cast<int>(number);
+    if (ExtractNumber(json, "lightbar", number)) p.lightbar = static_cast<int>(number);
+    if (ExtractNumber(json, "trigger_effect", number)) p.trigger_effect = static_cast<int>(number);
+    if (ExtractNumber(json, "trigger_strength", number)) p.trigger_strength = static_cast<int>(number);
+    if (ExtractNumber(json, "player_leds", number)) p.player_leds = static_cast<int>(number);
+    if (ExtractNumber(json, "mic_led", number)) p.mic_led = static_cast<int>(number);
+    if (ExtractNumber(json, "console_rumble", number)) p.console_rumble = static_cast<int>(number);
+    if (ExtractNumber(json, "console_triggers", number)) p.console_triggers = static_cast<int>(number);
+    if (ExtractNumber(json, "motion", number)) p.motion = static_cast<int>(number);
     ExtractBool(json, "hud", p.hud);
 
     profile = std::move(p);

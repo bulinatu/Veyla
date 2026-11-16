@@ -2,6 +2,7 @@
 
 #include <chiaki/base64.h>
 #include <chiaki/common.h>
+#include <chiaki/time.h>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -9,6 +10,7 @@ extern "C" {
 }
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -207,6 +209,20 @@ void Streaming::Stop() {
     }
 
     state_.store(StreamState::Idle);
+
+    {
+        std::lock_guard<std::mutex> lock(feedback_mutex_);
+        feedback_ = PadConsoleFeedback{};
+        trigger_nibble_ = 0;
+        haptic_nibble_ = 0;
+        feedback_version_.store(0);
+    }
+    chiaki_controller_state_set_idle(&controller_state_);
+    chiaki_orientation_tracker_init(&tracker_);
+    chiaki_accel_new_zero_set_inactive(&accel_zero_, false);
+    touch_ids_[0] = touch_ids_[1] = 0xFF;
+    touch_active_[0] = touch_active_[1] = false;
+
     std::lock_guard<std::mutex> lock(mutex_);
     message_.clear();
 }
@@ -255,6 +271,7 @@ void Streaming::OnEvent(ChiakiEvent* event) {
     if (!event) {
         return;
     }
+    static const bool probe = std::getenv("BRP_PAD_PROBE") != nullptr;
     switch (event->type) {
         case CHIAKI_EVENT_CONNECTED: {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -267,9 +284,93 @@ void Streaming::OnEvent(ChiakiEvent* event) {
             message_ = "Session ended (reason " + std::to_string(event->quit.reason) + ")";
             break;
         }
+        case CHIAKI_EVENT_RUMBLE: {
+            std::lock_guard<std::mutex> lock(feedback_mutex_);
+            feedback_.rumble = true;
+            feedback_.strong = event->rumble.left;
+            feedback_.weak = event->rumble.right;
+            feedback_.version = feedback_version_.fetch_add(1) + 1;
+            if (probe) {
+                std::fprintf(stderr, "[pad] rumble left=%u right=%u\n", feedback_.strong,
+                             feedback_.weak);
+            }
+            break;
+        }
+        case CHIAKI_EVENT_TRIGGER_EFFECTS: {
+            std::lock_guard<std::mutex> lock(feedback_mutex_);
+            feedback_.triggers = true;
+            feedback_.left.bytes[0] = event->trigger_effects.type_left;
+            std::memcpy(&feedback_.left.bytes[1], event->trigger_effects.left, 10);
+            feedback_.right.bytes[0] = event->trigger_effects.type_right;
+            std::memcpy(&feedback_.right.bytes[1], event->trigger_effects.right, 10);
+            feedback_.version = feedback_version_.fetch_add(1) + 1;
+            if (probe) {
+                std::fprintf(stderr, "[pad] trigger effects L=%02x R=%02x\n",
+                             feedback_.left.bytes[0], feedback_.right.bytes[0]);
+            }
+            break;
+        }
+        case CHIAKI_EVENT_LED_COLOR: {
+            std::lock_guard<std::mutex> lock(feedback_mutex_);
+            feedback_.led = true;
+            feedback_.r = event->led_state[0];
+            feedback_.g = event->led_state[1];
+            feedback_.b = event->led_state[2];
+            feedback_.version = feedback_version_.fetch_add(1) + 1;
+            if (probe) {
+                std::fprintf(stderr, "[pad] led %u %u %u\n", feedback_.r, feedback_.g,
+                             feedback_.b);
+            }
+            break;
+        }
+        case CHIAKI_EVENT_PLAYER_INDEX: {
+            static const uint8_t kMasks[5] = {0x04, 0x0A, 0x15, 0x1B, 0x1F};
+            const uint8_t index = event->player_index < 5 ? event->player_index : 4;
+            std::lock_guard<std::mutex> lock(feedback_mutex_);
+            feedback_.player_leds = true;
+            feedback_.player_mask = kMasks[index];
+            feedback_.version = feedback_version_.fetch_add(1) + 1;
+            if (probe) {
+                std::fprintf(stderr, "[pad] player index %u\n", index);
+            }
+            break;
+        }
+        case CHIAKI_EVENT_HAPTIC_INTENSITY: {
+            std::lock_guard<std::mutex> lock(feedback_mutex_);
+            switch (event->intensity) {
+                case Off: haptic_nibble_ = 0x0F; break;
+                case Weak: haptic_nibble_ = 0x03; break;
+                case Medium: haptic_nibble_ = 0x02; break;
+                default: haptic_nibble_ = 0x00; break;
+            }
+            feedback_.intensity = static_cast<uint8_t>((trigger_nibble_ << 4) | haptic_nibble_);
+            feedback_.version = feedback_version_.fetch_add(1) + 1;
+            break;
+        }
+        case CHIAKI_EVENT_TRIGGER_INTENSITY: {
+            std::lock_guard<std::mutex> lock(feedback_mutex_);
+            switch (event->intensity) {
+                case Off: trigger_nibble_ = 0x0F; break;
+                case Weak: trigger_nibble_ = 0x09; break;
+                case Medium: trigger_nibble_ = 0x06; break;
+                default: trigger_nibble_ = 0x00; break;
+            }
+            feedback_.intensity = static_cast<uint8_t>((trigger_nibble_ << 4) | haptic_nibble_);
+            feedback_.version = feedback_version_.fetch_add(1) + 1;
+            break;
+        }
+        case CHIAKI_EVENT_MOTION_RESET: {            chiaki_accel_new_zero_set_active(&accel_zero_, tracker_.accel_x, tracker_.accel_y,
+                                             tracker_.accel_z, false);
+            break;
+        }
         default:
             break;
     }
+}
+
+PadConsoleFeedback Streaming::feedback() const {
+    std::lock_guard<std::mutex> lock(feedback_mutex_);
+    return feedback_;
 }
 
 void Streaming::AudioHeaderCallback(ChiakiAudioHeader* header, void* user) {
@@ -369,15 +470,55 @@ void Streaming::SendController(const PadState& pad) {
     if (!initialised_) {
         return;
     }
-    ChiakiControllerState state{};
-    state.buttons = MapButtons(pad.buttons);
-    state.l2_state = static_cast<uint8_t>(pad.l2 * 255.0f);
-    state.r2_state = static_cast<uint8_t>(pad.r2 * 255.0f);
-    state.left_x = static_cast<int16_t>(pad.lx * 32767.0f);
-    state.left_y = static_cast<int16_t>(-pad.ly * 32767.0f);
-    state.right_x = static_cast<int16_t>(pad.rx * 32767.0f);
-    state.right_y = static_cast<int16_t>(-pad.ry * 32767.0f);
-    chiaki_session_set_controller_state(&session_, &state);
+
+    ChiakiControllerState next = controller_state_;
+    next.buttons = MapButtons(pad.buttons);
+    next.l2_state = static_cast<uint8_t>(pad.l2 * 255.0f);
+    next.r2_state = static_cast<uint8_t>(pad.r2 * 255.0f);
+    next.left_x = static_cast<int16_t>(pad.lx * 32767.0f);
+    next.left_y = static_cast<int16_t>(-pad.ly * 32767.0f);
+    next.right_x = static_cast<int16_t>(pad.rx * 32767.0f);
+    next.right_y = static_cast<int16_t>(-pad.ry * 32767.0f);
+
+    // Touchpad: two fingers, tracked by report slot. Coordinates are already in
+    // the console's native range (0..1919 / 0..1079).
+    for (int i = 0; i < 2; ++i) {
+        const TouchPoint& touch = pad.touch[i];
+        if (touch.active) {
+            if (!touch_active_[i]) {
+                const int8_t id = chiaki_controller_state_start_touch(&next, touch.x, touch.y);
+                if (id >= 0) {
+                    touch_ids_[i] = static_cast<uint8_t>(id);
+                    touch_active_[i] = true;
+                }
+            } else {
+                chiaki_controller_state_set_touch_pos(&next, touch_ids_[i], touch.x, touch.y);
+            }
+        } else if (touch_active_[i]) {
+            chiaki_controller_state_stop_touch(&next, touch_ids_[i]);
+            touch_active_[i] = false;
+            touch_ids_[i] = 0xFF;
+        }
+    }
+
+    // Motion: DualSense reports 1/1024 deg/s gyro and 1/8192 g accelerometer;
+    // chiaki expects rad/s and g, plus a Madgwick quaternion the console uses.
+    if (motion_enabled_) {
+        constexpr float kGyroScale = 3.14159265358979f / (180.0f * 1024.0f);
+        constexpr float kAccelScale = 1.0f / 8192.0f;
+        chiaki_orientation_tracker_update(
+            &tracker_, pad.gyro[0] * kGyroScale, pad.gyro[1] * kGyroScale,
+            pad.gyro[2] * kGyroScale, pad.accel[0] * kAccelScale,
+            pad.accel[1] * kAccelScale, pad.accel[2] * kAccelScale, &accel_zero_, false,
+            static_cast<uint32_t>(chiaki_time_now_monotonic_us()));
+        chiaki_orientation_tracker_apply_to_controller_state(&tracker_, &next);
+    }
+
+    if (chiaki_controller_state_equals(&next, &controller_state_)) {
+        return;
+    }
+    controller_state_ = next;
+    chiaki_session_set_controller_state(&session_, &controller_state_);
 }
 
 }  // namespace brp::session
