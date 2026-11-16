@@ -33,6 +33,11 @@ public:
     void EndFrame();
     void Clear(D2D1_COLOR_F color);
 
+    // Global UI scale. All drawing is in a virtual 1600x900-ish space; on a
+    // 1440p/4K backbuffer the transform keeps text and hit areas readable.
+    void SetScale(float scale) { scale_ = scale > 0.0f ? scale : 1.0f; }
+    float scale() const { return scale_; }
+
     void FillRect(const D2D1_RECT_F& rect, D2D1_COLOR_F color);
     void FillRounded(const D2D1_RECT_F& rect, float radius, D2D1_COLOR_F color);
     void StrokeRounded(const D2D1_RECT_F& rect, float radius, D2D1_COLOR_F color, float stroke);
@@ -82,6 +87,7 @@ private:
     std::vector<bool> clip_stack_;  // true = rounded layer, false = axis-aligned
 
     std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<IDWriteTextFormat>> formats_;
+    float scale_ = 1.0f;
 };
 
 }  // namespace brp::ui

@@ -65,6 +65,7 @@ enum WidgetId {
     W_Motion = 51,
     W_RenderTarget = 52,
     W_PairHome = 42,
+    W_ResumeOverlay = 60,
 };
 
 constexpr float kContentX = 344.0f;
@@ -297,7 +298,12 @@ void App::DispatchClick() {
                 screen_ = Screen::Settings;
                 break;
             case Hit::Back:
-                screen_ = Screen::Home;
+                if (screen_ == Screen::StreamSettings) {
+                    screen_ = Screen::Stream;
+                    open_dropdown_ = -1;
+                } else {
+                    screen_ = Screen::Home;
+                }
                 break;
             case Hit::Tab:
                 tab_ = static_cast<Tab>(it->index);
@@ -328,6 +334,9 @@ void App::DispatchClick() {
                     tab_ = Tab::Connection;
                 } else if (it->index == W_Disconnect) {
                     DisconnectStream();
+                } else if (it->index == W_ResumeOverlay) {
+                    screen_ = Screen::Stream;
+                    open_dropdown_ = -1;
                 } else if (it->index == W_Pair) {
                     if (pin_.size() == 8) {
                         pairing_.Start(profile_, static_cast<uint32_t>(std::stoul(pin_)));
@@ -399,11 +408,35 @@ void App::HandleKey(int vk) {
             break;
 
         case Screen::Stream:
-            if (vk == VK_ESCAPE) {
+            if (vk == VK_TAB) {
+                screen_ = Screen::StreamSettings;
+                open_dropdown_ = -1;
+                mouse_active_at_ = clock_;
+            } else if (vk == VK_ESCAPE) {
                 DisconnectStream();
             } else if (vk == 'H') {
                 hud_ = !hud_;
-            } else if (vk >= '1' && vk <= '3') {
+            } else if (vk >= '1' && vk <= '5') {
+                upscale_ = vk - '1';
+                presenter_.SetUpscaleMode(upscale_);
+            }
+            break;
+
+        case Screen::StreamSettings:
+            if (vk == VK_ESCAPE) {
+                if (open_dropdown_ >= 0) {
+                    open_dropdown_ = -1;
+                } else {
+                    screen_ = Screen::Stream;
+                    mouse_active_at_ = clock_;
+                }
+            } else if (vk == VK_TAB) {
+                screen_ = Screen::Stream;
+                open_dropdown_ = -1;
+                mouse_active_at_ = clock_;
+            } else if (vk == 'H') {
+                hud_ = !hud_;
+            } else if (vk >= '1' && vk <= '5') {
                 upscale_ = vk - '1';
                 presenter_.SetUpscaleMode(upscale_);
             }
@@ -997,7 +1030,18 @@ void App::ApplyControllerOutput(bool force) {
 }
 
 void App::Frame(double time_seconds, const PointerState& pointer) {
+    const float physical_w = static_cast<float>(window_->width());
+    const float physical_h = static_cast<float>(window_->height());
+    ui_scale_ = std::clamp(physical_h / 900.0f, 1.0f, 2.5f);
+    ui_w_ = physical_w / ui_scale_;
+    ui_h_ = physical_h / ui_scale_;
+    ui_.SetScale(ui_scale_);
+
     pointer_ = pointer;
+    if (ui_scale_ != 1.0f) {
+        pointer_.x = static_cast<int>(std::lround(pointer.x / ui_scale_));
+        pointer_.y = static_cast<int>(std::lround(pointer.y / ui_scale_));
+    }
     clock_ = time_seconds;
     hits_.clear();
     hover_ = Hit::None;
@@ -1076,7 +1120,7 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     const float target = static_cast<float>(selected_);
     scroll_ += (target - scroll_) * (1.0f - std::exp(-16.0f * static_cast<float>(dt)));
 
-    if (screen_ == Screen::Stream) {
+    if (screen_ == Screen::Stream || screen_ == Screen::StreamSettings) {
         presenter_.Render(time_seconds);
     } else {
         const float bg[4] = {0.010f, 0.016f, 0.028f, 1.0f};
@@ -1093,6 +1137,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
             break;
         case Screen::Stream:
             RenderStream(time_seconds);
+            break;
+        case Screen::StreamSettings:
+            RenderStreamSettings(time_seconds);
             break;
     }
     ui_.EndFrame();
@@ -1200,7 +1247,7 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         const char* path = "app-home.bmp";
         if (screen_ == Screen::Settings) {
             path = "app-settings.bmp";
-        } else if (screen_ == Screen::Stream) {
+        } else if (screen_ == Screen::Stream || screen_ == Screen::StreamSettings) {
             path = "app-stream.bmp";
         }
         if (presenter_.CaptureToBmp(path)) {
@@ -1229,7 +1276,7 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
 }
 
 void App::RenderTopBar() {
-    const float w = static_cast<float>(window_->width());
+    const float w = ui_w_;
 
     ui_.Text(L"BETTERREMOTEPLAY", {48.0f, 26.0f, 480.0f, 52.0f}, 14.0f, th::Rgba(th::kInk, 0.92f),
              DWRITE_FONT_WEIGHT_SEMI_BOLD);
@@ -1258,7 +1305,7 @@ void App::RenderTopBar() {
 }
 
 void App::DrawConsoleCard() {
-    const float w = static_cast<float>(window_->width());
+    const float w = ui_w_;
     const D2D1_RECT_F card{w - 392.0f, 96.0f, w - 40.0f, 96.0f + 156.0f};
 
     ui_.FillRounded(card, 18.0f, th::Rgba(0xFFFFFF, 0.05f));
@@ -1356,9 +1403,9 @@ void App::DrawTile(const D2D1_RECT_F& rect, const GameEntry& game, float alpha, 
 }
 
 void App::DrawHints(const wchar_t* hints, float alpha) {
-    ui_.Text(hints, {0.0f, static_cast<float>(window_->height()) - 40.0f,
-                     static_cast<float>(window_->width()),
-                     static_cast<float>(window_->height()) - 14.0f},
+    ui_.Text(hints, {0.0f, ui_h_ - 40.0f,
+                     ui_w_,
+                     ui_h_ - 14.0f},
              12.0f, th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
 }
@@ -1370,7 +1417,7 @@ void App::DrawSettingLabel(const wchar_t* label, float y, bool enabled) {
 }
 
 void App::DrawInfoRow(const wchar_t* label, const std::wstring& value, float y) {
-    const float right = static_cast<float>(window_->width()) - 64.0f;
+    const float right = ui_w_ - 64.0f;
     DrawSettingLabel(label, y, true);
     ui_.TextEllipsis(value.c_str(), {right - 420.0f, y, right, y + 56.0f}, 15.0f,
                      th::Rgba(th::kInkDim), DWRITE_FONT_WEIGHT_NORMAL,
@@ -1379,7 +1426,7 @@ void App::DrawInfoRow(const wchar_t* label, const std::wstring& value, float y) 
 
 void App::DrawDropdown(const wchar_t* label, const std::vector<std::wstring>& options, int selected,
                        float y, int id, bool enabled) {
-    const float right = static_cast<float>(window_->width()) - 64.0f;
+    const float right = ui_w_ - 64.0f;
     DrawSettingLabel(label, y, enabled);
 
     const D2D1_RECT_F control{right - 340.0f, y + 8.0f, right, y + 54.0f};
@@ -1433,7 +1480,7 @@ void App::DrawButton(const wchar_t* label, const D2D1_RECT_F& rect, int id, bool
 }
 
 void App::DrawPinRow(float y) {
-    const float right = static_cast<float>(window_->width()) - 64.0f;
+    const float right = ui_w_ - 64.0f;
     DrawSettingLabel(L"Pairing PIN", y, true);
 
     const float box = 38.0f;
@@ -1468,7 +1515,7 @@ void App::DrawPopup() {
     const float item_h = 38.0f;
     const float height = item_h * static_cast<float>(popup_.options.size());
     float top = popup_.anchor.bottom + 6.0f;
-    if (top + height + 8.0f > static_cast<float>(window_->height()) - 40.0f) {
+    if (top + height + 8.0f > ui_h_ - 40.0f) {
         top = popup_.anchor.top - 6.0f - height - 8.0f;
     }
 
@@ -1494,8 +1541,8 @@ void App::DrawPopup() {
 }
 
 void App::RenderIntro(double t) {
-    const float w = static_cast<float>(window_->width());
-    const float h = static_cast<float>(window_->height());
+    const float w = ui_w_;
+    const float h = ui_h_;
 
     ui_.BeginFrame();
 
@@ -1553,8 +1600,8 @@ void App::RenderIntro(double t) {
 
 void App::RenderHome(double t) {
     (void)t;
-    const float w = static_cast<float>(window_->width());
-    const float h = static_cast<float>(window_->height());
+    const float w = ui_w_;
+    const float h = ui_h_;
 
     ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(th::kBgTop), th::Rgba(th::kBgBottom));
     ui_.FillRadial(w * 0.5f, h * 0.42f, w * 0.55f, th::Rgba(0x2E6BFF, 0.18f),
@@ -1655,8 +1702,8 @@ void App::RenderHome(double t) {
 
 void App::RenderSettings(double t) {
     (void)t;
-    const float w = static_cast<float>(window_->width());
-    const float h = static_cast<float>(window_->height());
+    const float w = ui_w_;
+    const float h = ui_h_;
 
     ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(0x0A1018), th::Rgba(th::kBgBottom));
     ui_.FillRadial(w * 0.5f, -h * 0.1f, w * 0.7f, th::Rgba(0x1B3A66, 0.25f),
@@ -1960,7 +2007,7 @@ void App::RenderSettings(double t) {
 
 void App::RenderStream(double t) {
     (void)t;
-    const float w = static_cast<float>(window_->width());
+    const float w = ui_w_;
 
     if (hud_) {
         ui_.FillLinearV({0.0f, 0.0f, w, 150.0f}, th::Rgba(0x000000, 0.55f),
@@ -2042,6 +2089,69 @@ void App::RenderStream(double t) {
             }
         }
 
-        DrawHints(L"Esc   disconnect      H   toggle HUD      1 / 2 / 3   upscaler", chrome_alpha);
+        DrawHints(L"Tab   settings      Esc   disconnect      H   HUD      1..5   upscaler",
+                  chrome_alpha);
     }
+}
+
+void App::RenderStreamSettings(double t) {
+    (void)t;
+    const float w = ui_w_;
+    const float h = ui_h_;
+
+    ui_.FillRect({0.0f, 0.0f, w, h}, th::Rgba(0x000000, 0.66f));
+    const D2D1_RECT_F panel{300.0f, 70.0f, w - 40.0f, h - 70.0f};
+    ui_.FillRounded(panel, 18.0f, th::Rgba(0x0B1220, 0.96f));
+    ui_.StrokeRounded(panel, 18.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
+    ui_.Text(L"Stream settings", {kContentX, 92.0f, w - 64.0f, 130.0f}, 24.0f,
+             th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+
+    float y = 150.0f;
+    DrawDropdown(L"Upscaler",
+                 {L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen", L"Lanczos + RCAS",
+                  L"FSR1 (EASU)"},
+                 upscale_, y, W_Upscaler);
+    y += 56.0f;
+    DrawDropdown(L"Upscale target", {L"Window / display", L"1080p", L"1440p", L"2160p"},
+                 render_target_, y, W_RenderTarget);
+    y += 56.0f;
+    {
+        const bool available = FrameGenAvailable();
+        std::vector<std::wstring> options;
+        if (available) {
+            options = {L"Off", L"NVIDIA VFG 2x (120 fps)"};
+        } else {
+            options = {L"Off  -  NVIDIA VFX runtime missing"};
+        }
+        DrawDropdown(L"Frame generation", options, frame_gen_ == 2 ? 1 : 0, y, W_FrameGen,
+                     available);
+    }
+    y += 56.0f;
+    DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
+    y += 56.0f;
+    DrawDropdown(L"Frame buffer", {L"0 (lowest latency)", L"1", L"2", L"3 (smoothest)"},
+                 stream_buffer_, y, W_FrameBuffer);
+    y += 56.0f;
+    DrawDropdown(L"Video decoder (next session)",
+                 {L"Auto", L"D3D11VA", L"D3D12VA", L"Vulkan", L"DXVA2", L"CUDA (NVDEC)",
+                  L"Software"},
+                 std::clamp(profile_.decoder, 0, 6), y, W_Decoder);
+    y += 56.0f;
+
+    DrawButton(L"Resume", {kContentX, y + 6.0f, kContentX + 200.0f, y + 50.0f},
+               W_ResumeOverlay, true);
+    DrawButton(L"Disconnect", {kContentX + 220.0f, y + 6.0f, kContentX + 420.0f, y + 50.0f},
+               W_Disconnect, false);
+    y += 62.0f;
+
+    std::wstring note = L"Changes apply live  -  decoder and bitrate need a new session";
+    if (frame_gen_ >= 2 && fg_ready_) {
+        note += L"  -  NVIDIA VFG active";
+    } else if (!FrameGenAvailable()) {
+        note += L"  -  NVIDIA VFX runtime missing";
+    }
+    ui_.Text(note.c_str(), {kContentX, y, w - 64.0f, y + 26.0f}, 12.0f,
+             th::Rgba(th::kMuted));
+    DrawHints(L"Tab / Esc   resume      H   toggle HUD      1..5   upscaler", 1.0f);
+    DrawPopup();
 }

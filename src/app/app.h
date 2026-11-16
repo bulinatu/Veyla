@@ -51,7 +51,7 @@ public:
     int present_hz() const;
 
 private:
-    enum class Screen { Home, Settings, Stream };
+    enum class Screen { Home, Settings, Stream, StreamSettings };
     enum class Tab { Display, Audio, Controller, Connection, About };
 
     enum class Hit {
@@ -84,6 +84,7 @@ private:
     void RenderHome(double t);
     void RenderSettings(double t);
     void RenderStream(double t);
+    void RenderStreamSettings(double t);
     void RenderIntro(double t);
 
     void RenderTopBar();
@@ -127,6 +128,9 @@ private:
     Win32Window* window_ = nullptr;
     Presenter presenter_;
     ui::Renderer ui_;
+    float ui_scale_ = 1.0f;
+    float ui_w_ = 1600.0f;
+    float ui_h_ = 900.0f;
 
     Screen screen_ = Screen::Home;
     Tab tab_ = Tab::Display;

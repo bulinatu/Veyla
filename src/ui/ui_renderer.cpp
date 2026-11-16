@@ -112,7 +112,7 @@ bool Renderer::BindSwapchain(ID3D11Texture2D* backbuffer) {
 
 void Renderer::BeginFrame() {
     dc_->BeginDraw();
-    dc_->SetTransform(D2D1::Matrix3x2F::Identity());
+    dc_->SetTransform(D2D1::Matrix3x2F::Scale(scale_, scale_));
 }
 
 void Renderer::EndFrame() {
