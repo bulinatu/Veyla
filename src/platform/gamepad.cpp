@@ -424,7 +424,7 @@ void Gamepad::PollXInput() {
 
     PadState next;
     next.connected = true;
-    next.name = "Xbox controller";
+    next.name = "XInput pad (Steam-compatible)";
     next.buttons = 0;
 
     const WORD buttons = xinput_state.Gamepad.wButtons;
@@ -458,8 +458,25 @@ void Gamepad::PollXInput() {
     ApplyState(next);
 }
 
+void Gamepad::SetBackend(Backend backend) {
+    if (backend_ == backend) {
+        return;
+    }
+    backend_ = backend;
+    CloseDevice();
+    retry_at_ = 0.0;
+}
+
 void Gamepad::Poll() {
     const double now = NowSeconds();
+
+    if (backend_ == Backend::XInput) {
+        if (sony_active_) {
+            CloseDevice();
+        }
+        PollXInput();
+        return;
+    }
 
     if (handle_ != INVALID_HANDLE_VALUE) {
         PumpRead();
@@ -468,7 +485,7 @@ void Gamepad::Poll() {
         retry_at_ = now + 2.0;
     }
 
-    if (!sony_active_) {
+    if (!sony_active_ && backend_ == Backend::Auto) {
         PollXInput();
     }
 }

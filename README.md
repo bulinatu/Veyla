@@ -7,7 +7,7 @@ A better PlayStation 5 → PC Remote Play client.
 **What exists right now**
 
 - **`brp.exe` — the app.** PS5-inspired rail, settings, controller lab, and a stream screen running the real post-process pipeline with a live latency HUD. Mouse and controller navigation, no browser in the video path. See [docs/08-app.md](docs/08-app.md) and [docs/10-input.md](docs/10-input.md).
-- **DualSense support.** Raw HID (no DS4Windows) + XInput fallback. Parse: buttons, sticks, triggers, touch points, gyro/accel, battery. Output: lightbar RGB, 8 adaptive-trigger effects, rumble, player LEDs, mic LED. Bluetooth output uses the `0x31` report with CRC32.
+- **DualSense support.** Raw HID (no DS4Windows) + XInput fallback. Parse: buttons, sticks, triggers, touch points, gyro/accel, battery. Output: lightbar RGB, 8 adaptive-trigger effects, rumble, player LEDs, mic LED. Bluetooth output uses the `0x31` report with CRC32. Input source is selectable: native HID, or XInput (which is how Steam Input's Xbox emulation is consumed).
 - **Audio.** WASAPI shared-mode engine inside the app: 48 kHz float stereo in, endpoint out. No virtual cable, no driver, no external DLL. The DualSense 3.5 mm jack is a normal USB audio endpoint — select it and audio goes to the controller. See [docs/11-audio.md](docs/11-audio.md).
 - **Session import.** Console identity + PSN account from a local PXPlay install (metadata only — PXPlay encrypts its keys; see [docs/09-session.md](docs/09-session.md)).
 - **`brp-bench`** — benchmark of the media path. 0.19 ms p50 at 1080p→4K on the target machine. See [docs/07-bench-log.md](docs/07-bench-log.md).
@@ -90,6 +90,7 @@ Useful flags: `--width/--height` output size, `--src-width/--src-height` source 
 | [docs/09-session.md](docs/09-session.md) | Session data: what PXPlay exposes, what is encrypted, our session file format |
 | [docs/10-input.md](docs/10-input.md) | Mouse, keyboard, controller navigation, DualSense input/output matrix |
 | [docs/11-audio.md](docs/11-audio.md) | Audio: WASAPI in-process, DualSense jack over USB, latency, A/V clock plan |
+| [docs/12-steam-input.md](docs/12-steam-input.md) | Steam Input: Xbox emulation vs Steamworks API, trade-offs, setup |
 
 ## Legal note
 

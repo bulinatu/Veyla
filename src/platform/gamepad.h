@@ -95,14 +95,24 @@ struct PadOutput {
 
 // Controller input plus DualSense output. Two input backends, one state:
 //   * raw HID for Sony pads (DualSense / DualShock 4), USB and Bluetooth,
-//   * XInput fallback for Xbox pads and virtual pads.
+//   * XInput fallback for Xbox pads, virtual pads and Steam Input's Xbox
+//     emulation.
 class Gamepad {
 public:
+    enum class Backend {
+        Auto,    // native HID first, XInput if no Sony pad
+        SonyHid, // native HID only
+        XInput,  // Steam Input's Xbox emulation / Xbox pads
+    };
+
     Gamepad() = default;
     ~Gamepad();
 
     Gamepad(const Gamepad&) = delete;
     Gamepad& operator=(const Gamepad&) = delete;
+
+    void SetBackend(Backend backend);
+    Backend backend() const { return backend_; }
 
     void Poll();
 
@@ -143,6 +153,7 @@ private:
 
     PadState state_;
     uint32_t pressed_ = 0;
+    Backend backend_ = Backend::Auto;
 };
 
 }  // namespace brp

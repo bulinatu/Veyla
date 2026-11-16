@@ -32,7 +32,7 @@ std::string EnvString(const char* name) {
 }
 
 constexpr int kSettingCount = 9;
-constexpr int kControllerCount = 7;
+constexpr int kControllerCount = 8;
 constexpr int kAudioCount = 4;
 
 const wchar_t* kUpscalerNames[3] = {L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen"};
@@ -56,6 +56,11 @@ const uint8_t kPlayerLedMasks[] = {0x00, 0x04, 0x0A, 0x0F, 0x1F, 0x15};
 constexpr int kPlayerLedCount = static_cast<int>(std::size(kPlayerLedMasks));
 
 const wchar_t* kMicLedNames[] = {L"Off", L"On", L"Pulse"};
+
+const wchar_t* kInputSourceNames[] = {L"Auto (native first)", L"Native HID only",
+                                      L"Steam Input / XInput"};
+const Gamepad::Backend kInputBackends[] = {Gamepad::Backend::Auto, Gamepad::Backend::SonyHid,
+                                           Gamepad::Backend::XInput};
 
 TriggerEffect BuildTriggerEffect(int effect, int strength) {
     switch (effect) {
@@ -221,7 +226,7 @@ void App::DispatchClick() {
                 break;
             case Hit::ControllerRow:
                 controller_row_ = it->index;
-                if (it->index == 6) {
+                if (it->index == 7) {
                     screen_ = Screen::Home;
                 }
                 break;
@@ -235,7 +240,7 @@ void App::DispatchClick() {
                 break;
             case Hit::ControllerAction:
                 controller_row_ = it->index;
-                if (it->index == 3) {
+                if (it->index == 4) {
                     TriggerRumble();
                 }
                 break;
@@ -332,7 +337,7 @@ void App::HandleKey(int vk) {
             } else if (vk == VK_RIGHT) {
                 ChangeControllerValue(+1);
             } else if (vk == VK_RETURN) {
-                if (controller_row_ == 3) {
+                if (controller_row_ == 4) {
                     TriggerRumble();
                 }
             } else if (vk == VK_ESCAPE || vk == 'C') {
@@ -498,30 +503,34 @@ void App::ChangeAudioValue(int direction) {
 void App::ChangeControllerValue(int direction) {
     switch (controller_row_) {
         case 0:
-            lightbar_index_ = (lightbar_index_ + direction + kLightbarCount) % kLightbarCount;
+            input_source_ = (input_source_ + direction + 3) % 3;
+            pad_.SetBackend(kInputBackends[input_source_]);
             break;
         case 1:
-            trigger_effect_ = (trigger_effect_ + direction + kTriggerCount) % kTriggerCount;
+            lightbar_index_ = (lightbar_index_ + direction + kLightbarCount) % kLightbarCount;
             break;
         case 2:
-            trigger_strength_ = std::clamp(trigger_strength_ + direction, 1, 8);
+            trigger_effect_ = (trigger_effect_ + direction + kTriggerCount) % kTriggerCount;
             break;
         case 3:
+            trigger_strength_ = std::clamp(trigger_strength_ + direction, 1, 8);
+            break;
+        case 4:
             if (direction != 0) {
                 TriggerRumble();
             }
             break;
-        case 4:
+        case 5:
             player_leds_ = (player_leds_ + direction + kPlayerLedCount) % kPlayerLedCount;
             break;
-        case 5:
+        case 6:
             mic_led_ = (mic_led_ + direction + 3) % 3;
             break;
         default:
             break;
     }
 
-    if (controller_row_ != 3) {
+    if (controller_row_ != 4) {
         output_dirty_ = true;
     }
 }
@@ -940,6 +949,8 @@ void App::RenderController(double t) {
     ui_.Text(L"Controller", {x0, 84.0f, x0 + panel_w, 146.0f}, 40.0f, th::Rgba(th::kInk),
              DWRITE_FONT_WEIGHT_SEMI_BOLD);
     std::wstring pad_status = PadStatus(pad_.state());
+    pad_status += L"   ·   ";
+    pad_status += kInputSourceNames[input_source_];
     if (pad_.is_sony()) {
         pad_status += last_send_ok_ ? L"   ·   output reports OK" : L"   ·   output reports failed";
     }
@@ -956,6 +967,7 @@ void App::RenderController(double t) {
     const std::wstring strength_value = Widen(std::to_string(trigger_strength_));
 
     const Row rows[kControllerCount] = {
+        {L"Input source", kInputSourceNames[input_source_], true},
         {L"Lightbar", lightbar_value, true},
         {L"Adaptive trigger", kTriggerNames[trigger_effect_], true},
         {L"Trigger strength", strength_value, true},
@@ -989,9 +1001,9 @@ void App::RenderController(double t) {
                  DWRITE_TEXT_ALIGNMENT_TRAILING);
 
         AddHit(Hit::ControllerRow, i, row_rect);
-        if (i == 3) {
+        if (i == 4) {
             AddHit(Hit::ControllerAction, i, row_rect);
-        } else if (i < 6) {
+        } else if (i != 7) {
             AddHit(Hit::ControllerLeft, i,
                    {row_rect.left, row_rect.top, row_rect.left + panel_w * 0.35f, row_rect.bottom});
             AddHit(Hit::ControllerRight, i,

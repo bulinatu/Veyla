@@ -103,6 +103,7 @@ private:
     int setting_row_ = 0;
     int controller_row_ = 0;
     int audio_row_ = 0;
+    int input_source_ = 0;  // 0 Auto, 1 native HID, 2 Steam Input / XInput
     bool hud_ = true;
     int upscale_ = 1;
     bool quit_ = false;
