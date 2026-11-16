@@ -12,6 +12,7 @@
 
 #include "audio/audio_engine.h"
 #include "media/nv_vfx.h"
+#include "media/nv_vsr.h"
 #include "media/pipeline.h"
 #include "net/reachability.h"
 #include "platform/gamepad.h"
@@ -125,6 +126,11 @@ private:
     bool EnsureFrameGen();
     std::wstring FindFrameGenRuntime() const;
 
+    bool VsrAvailable() const;
+    bool EnsureVsr();
+    std::wstring FindVsrRuntime() const;
+    void DisableVsr();
+
     Win32Window* window_ = nullptr;
     Presenter presenter_;
     ui::Renderer ui_;
@@ -215,6 +221,14 @@ private:
     std::wstring fg_note_;
     std::deque<media::NvVfx::Frame> fg_queue_;
     media::NvVfx::Frame fg_last_;
+
+    // neural upscaling (NVIDIA RTX VSR)
+    media::NvVsr nv_vsr_;
+    bool vsr_present_ = false;
+    bool vsr_ready_ = false;
+    int vsr_quality_ = 0;  // 0 off, else 1..4 / 21 / 23
+    std::wstring vsr_note_;
+    media::NvVsr::Frame vsr_frame_;
 
     // Connect flow: check the control port, wake the console if it is asleep,
     // then start the session.

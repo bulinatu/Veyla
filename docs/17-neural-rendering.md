@@ -1,10 +1,83 @@
-# 17 - Neural rendering (DLSSNR) - status and plan
+# 17 - Neural rendering: RTX VSR shipped, DLSSNR pending
 
-Status: **not integrated yet.** The DLL is present, the feature works in Magpie on this
-machine, but a standalone NGX host is the missing piece. This document records exactly
-what is known so the next attempt does not repeat the failed experiments.
+Status:
+
+- **NVIDIA RTX Video Super Resolution (VSR): implemented and verified live** on the
+  RTX 4090 at 1080p -> 1440p and 1080p -> 2160p. It is the shipped neural upscaler.
+- **DLSS Neural Rendering (`nvngx_dlssnr.dll`): not integrated.** It needs a native
+  NGX D3D12 signed-snippet host; the research notes below are kept so the next
+  attempt does not repeat the failed experiments.
 
 ---
+
+## RTX VSR (shipped)
+
+VSR is an AI upscaler/denoiser exposed by NVIDIA's Video Effects runtime as the
+`VideoSuperRes` effect. It uses the same proprietary runtime as VFG:
+`NVVideoEffects.dll`, `NVCVImage.dll`, `nvngxruntime.dll`, plus the effect and
+model DLLs `nvVFXVideoSuperRes.dll` and `nvngx_vsr.dll`.
+
+Pipeline:
+
+```
+HEVC -> hw decode -> RGBA8 (BT.709/2020, limited range)
+     -> RTX VSR (1080p -> render target: 1440p or 2160p)
+     -> present (presenter source_final = no second upscale)
+```
+
+Quality levels exposed in `Settings > Display > Neural upscaling (RTX VSR)`:
+
+| UI | NvVFX `QualityLevel` |
+|---|---|
+| AI Low / Medium / High / Ultra | 1 / 2 / 3 / 4 |
+| AI Streaming Medium / Ultra | 21 / 23 |
+| AI High (recommended default) | 3 |
+
+Strength is fixed at 1.0. Input and output are 8-bit RGBA today; the effect also
+accepts 10-bit RGB10A2 (`ImageEncodingMode = 1`) and that becomes useful once the
+decoder keeps a 10-bit surface (currently swscale writes RGBA8).
+
+Measured on the RTX 4090 (driver 32.0.16.2124), live PS5 stream, D3D12VA decode:
+
+| Path | VSR time | App frame rate |
+|---|---|---|
+| 1080p -> 1440p, quality 3 | 7.5 - 9.6 ms | 54 - 56 fps |
+| 1080p -> 2160p, quality 3 | 9.9 - 11.2 ms | 54 - 56 fps |
+| 1080p -> 2160p, quality 2 | 9.3 - 9.7 ms | 58.7 fps |
+
+`vsr_probe` isolates the effect (no decode, no socket) and writes
+`build/shots/vsr-input.bmp` + `vsr-output.bmp`:
+
+```powershell
+.\scripts\build.ps1 -Target vsr_probe
+.\build\Release\vsr_probe.exe third_party\nvidia-vfx\runtime 3 2560 1440
+```
+
+### VSR vs VFG are mutually exclusive
+
+VFG needs a 1080p input pair and produces 1080p generated frames; VSR needs an
+output larger than its input. Running VSR on every generated frame would need
+`120 x ~8 ms` of GPU per second, which does not fit. The UI therefore turns one
+off when the other is enabled:
+
+- selecting RTX VSR turns frame generation off (and writes `frame_gen: 0`);
+- selecting NVIDIA VFG 2x turns VSR off (and writes `vsr: 0`).
+
+The setting is persisted as `"vsr"` in `session.json`.
+
+### Failure handling
+
+- Runtime lookup: `<exe>/nvidia-vfx/runtime`, `<exe>/nvidia-vfx`,
+  `<exe>/../../third_party/nvidia-vfx/runtime`, `./third_party/nvidia-vfx/runtime`.
+  Both `nvVFXVideoSuperRes.dll` and `nvngx_vsr.dll` must exist.
+- Init failure (missing DLLs, no NVIDIA GPU, target smaller than the stream) leaves
+  the regular upscaler active and shows the reason in Settings > Display.
+- A mid-session `Process` failure disables VSR, persists `vsr: 0` and immediately
+  falls back to `SetSourceFrame` so the stream never freezes.
+
+---
+
+## DLSSNR (not integrated)
 
 ## What `nvngx_dlssnr.dll` is
 
@@ -65,7 +138,6 @@ a zero depth contract is accepted.
 ---
 
 ## Integration plan (not yet implemented)
-
 A correct integration into BetterRemotePlay needs:
 
 1. **D3D12 device + queue** on the same adapter as the D3D11 presenter (LUID match).

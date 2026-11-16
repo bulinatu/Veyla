@@ -13,6 +13,7 @@ add_library(brp_media STATIC
     src/platform/win32_window.cpp
     src/media/pipeline.cpp
     src/media/nv_vfx.cpp
+    src/media/nv_vsr.cpp
 )
 target_include_directories(brp_media PUBLIC src)
 target_compile_definitions(brp_media PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
@@ -33,6 +34,11 @@ add_executable(vfx_probe tools/vfx_probe/main.cpp)
 target_link_libraries(vfx_probe PRIVATE brp_media)
 target_compile_options(vfx_probe PRIVATE /Zi)
 target_link_options(vfx_probe PRIVATE /DEBUG)
+
+add_executable(vsr_probe tools/vsr_probe/main.cpp)
+target_link_libraries(vsr_probe PRIVATE brp_media)
+target_compile_options(vsr_probe PRIVATE /Zi)
+target_link_options(vsr_probe PRIVATE /DEBUG)
 
 # --- Application shell (Direct2D UI over the same D3D11 device) -------------
 

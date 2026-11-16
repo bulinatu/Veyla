@@ -23,7 +23,8 @@ if (-not (Test-Path $Source)) {
 
 $files = @(
     "nvngxruntime.dll", "NVCVImage.dll", "NVVideoEffects.dll",
-    "nvVFXVideoFrameGeneration.dll", "cudart64_12.dll",
+    "nvVFXVideoFrameGeneration.dll", "nvVFXVideoSuperRes.dll", "nvngx_vsr.dll",
+    "cudart64_12.dll",
     "nppc64_12.dll", "nppial64_12.dll", "nppicc64_12.dll", "nppidei64_12.dll",
     "nppif64_12.dll", "nppig64_12.dll", "nppim64_12.dll", "nppist64_12.dll",
     "nppitc64_12.dll"
@@ -59,8 +60,9 @@ if (Test-Path $licenseSource) {
 if ($missing.Count -gt 0) {
     Write-Warning ("missing from source: " + ($missing -join ", "))
 }
-if (-not (Test-Path (Join-Path $Dest "nvVFXVideoFrameGeneration.dll"))) {
-    throw "nvVFXVideoFrameGeneration.dll was not copied; check -Source"
+if (-not (Test-Path (Join-Path $Dest "nvVFXVideoFrameGeneration.dll")) -and
+    -not (Test-Path (Join-Path $Dest "nvVFXVideoSuperRes.dll"))) {
+    throw "neither nvVFXVideoFrameGeneration.dll nor nvVFXVideoSuperRes.dll was copied; check -Source"
 }
 
 Write-Host "NVIDIA VFX runtime installed to $Dest"

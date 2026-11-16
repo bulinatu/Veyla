@@ -78,7 +78,7 @@ cbuffer PsParams : register(b0)
     float2 gSrcSize;
     float gHdr;
     float2 gOutSize;
-    float gPad0;
+    float gSrcPq;
     float4 gCon0;
     float4 gCon1;
     float4 gCon2;
@@ -321,15 +321,31 @@ float4 PSMain(VSOut i) : SV_TARGET
 
     if (gHdr > 0.5)
     {
-        // SDR source into an HDR10 (PQ) container at ~100 nits reference.
-        float3 lin = pow(max(col, 0.0), 2.2) * (100.0 / 10000.0);
+        if (gSrcPq < 0.5)
+        {
+            // SDR source into an HDR10 (PQ) container at ~100 nits reference.
+            float3 lin = pow(max(col, 0.0), 2.2) * (100.0 / 10000.0);
+            const float m1 = 0.1593017578125;
+            const float m2 = 78.84375;
+            const float c1 = 0.8359375;
+            const float c2 = 18.8515625;
+            const float c3 = 18.6875;
+            float3 p = pow(lin, m1);
+            col = pow((c1 + c2 * p) / (1.0 + c3 * p), m2);
+        }
+        // else: the source is already PQ/BT.2020; pass it through untouched.
+    }
+    else if (gSrcPq > 0.5)
+    {
+        // HDR10 source on an SDR output: decode PQ, map 100 nits to SDR white.
         const float m1 = 0.1593017578125;
         const float m2 = 78.84375;
         const float c1 = 0.8359375;
         const float c2 = 18.8515625;
         const float c3 = 18.6875;
-        float3 p = pow(lin, m1);
-        col = pow((c1 + c2 * p) / (1.0 + c3 * p), m2);
+        float3 p = pow(saturate(col), 1.0 / m2);
+        float3 lin = pow(max(p - c1, 0.0) / max(c2 - c3 * p, 1e-6), 1.0 / m1);
+        col = pow(saturate(lin * 100.0), 1.0 / 2.2);
     }
 
     return float4(saturate(col), 1.0);

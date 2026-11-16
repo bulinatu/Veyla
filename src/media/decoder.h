@@ -9,6 +9,7 @@ namespace brp::media {
 struct DecodedFrame {
     int width = 0;
     int height = 0;
+    bool pq = false;             // source transfer is PQ (HDR10)
     std::vector<uint8_t> rgba;  // tightly packed RGBA
 };
 
@@ -57,6 +58,10 @@ public:
     std::string backend_name() const { return backend_name_; }
     std::string backend_note() const { return backend_note_; }
 
+    // 0 bilinear, 1 bicubic, 2 lanczos. Applies to the YUV->RGB/chroma stage.
+    void SetChromaQuality(int quality) { chroma_quality_ = quality; }
+    int chroma_quality() const { return chroma_quality_; }
+
     std::string codec_name() const { return codec_name_; }
     int width() const { return width_; }
     int height() const { return height_; }
@@ -92,6 +97,7 @@ private:
     DecodeBackend active_backend_ = DecodeBackend::Software;
     std::string backend_name_ = "software";
     std::string backend_note_;
+    int chroma_quality_ = 1;
     std::string codec_name_;
 };
 

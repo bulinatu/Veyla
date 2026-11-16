@@ -174,6 +174,15 @@ Problem markers:
 
 ---
 
+## Relationship with RTX VSR
+
+VFG and RTX VSR are mutually exclusive in the current pipeline: VFG needs 1080p
+input/output pairs, while VSR produces a 1440p/2160p output and cannot be run on
+every generated frame within a 60 fps budget. Selecting one in
+`Settings > Display` turns the other off. See `docs/17-neural-rendering.md`.
+
+---
+
 ## Licensing note
 
 The VFX runtime is NVIDIA proprietary and is not part of this AGPL-3.0 source tree or

@@ -26,6 +26,8 @@ struct PresenterConfig {
     bool vsync = false;
     bool allow_tearing = true;
     bool hdr = false;
+    bool source_pq = false;  // decoded source is PQ/BT.2020 (HDR10)
+    bool source_final = false;  // source is already at the render target size
     int upscale_mode = 2;  // 0 bilinear, 1 catmull-rom, 2 catmull-rom + sharpen
 };
 
@@ -76,11 +78,18 @@ public:
     ID3D11RenderTargetView* rtv() const { return rtv_.Get(); }
 
     // Uploads a decoded RGBA frame as the source instead of the synthetic one.
-    bool SetSourceFrame(const uint8_t* rgba, int width, int height);
+    // `source_pq` marks an HDR10 PQ/BT.2020 source (pass-through when the
+    // swapchain is HDR, tone-mapped when it is SDR).
+    bool SetSourceFrame(const uint8_t* rgba, int width, int height, bool source_pq = false);
 
     // Uses an existing GPU texture view (frame generation output) as the source.
     // The caller keeps the view alive until the next SetSourceView/Render.
-    void SetSourceView(ID3D11ShaderResourceView* view, int width, int height);
+    void SetSourceView(ID3D11ShaderResourceView* view, int width, int height,
+                       bool source_pq = false);
+
+    // Marks the source as already upscaled to the render target (RTX VSR). The
+    // stage pass then copies without running the selected upscaler/sharpen.
+    void SetSourceFinal(bool final) { cfg_.source_final = final; }
 
     void Clear(const float rgba[4]);
     void PresentNow(bool vsync);

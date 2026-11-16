@@ -21,7 +21,8 @@ Last updated: live streaming + full controller pipeline.
 | User interface | **WORKS** — 1440p/4K UI scaling, Tab stream-settings overlay |
 | Frame generation | **WORKS** — NVIDIA VFG 2× at 120 fps (synchronous; async blocked) |
 | Input rate | 60–1000 Hz, dedicated thread + high-resolution timer |
-| Frame gen / neural | Not started (user deferred neural; Smooth Motion is the documented path) |
+| Neural upscaling | **WORKS** — RTX VSR 1080p→1440p/2160p, 7–11 ms; exclusive with VFG |
+| Colour pipeline | **WORKS** — chroma bilinear/bicubic/Lanczos + PQ detect/pass-through/tone-map |
 
 ---
 
@@ -194,13 +195,16 @@ Verified: audio header 2ch/48kHz received during a live session; video 1080p60 a
 1. User hardware test: rumble + adaptive triggers + touchpad + gyro in-game.
    Watch `BRP_PAD_PROBE=1` for `[pad] rumble`, `[hid] rumble`, trigger effects and
    the Rumble test; firmware 0x0630 now uses the new rumble path.
-2. Frame generation: worker-owned D3D11 device + shared textures (the same-device
+2. RTX VSR: user visual test at 1440p/2160p (AI High vs FSR1); optional 10-bit
+   RGB10A2 path once the decoder keeps 10-bit surfaces (docs/17).
+3. DLSSNR neural rendering (same-resolution): port Magpie's native NGX D3D12 host
+   (docs/17). This is separate from VSR and still not integrated.
+4. Frame generation: worker-owned D3D11 device + shared textures (the same-device
    worker failed with a CUDA interop device-ordinal crash; see docs/15).
-3. DLSSNR neural rendering: port Magpie's native NGX D3D12 host (docs/17).
-4. DualSense haptic audio (USB only): decode the console haptics Opus stream and
+5. DualSense haptic audio (USB only): decode the console haptics Opus stream and
    route it to the controller's 4-channel endpoint.
-5. Vblank pacing (`DwmFlush`) and zero-copy decode.
-6. Verify VFG + 1440p/2160p target and VFG + HDR combinations.
+6. Vblank pacing (`DwmFlush`) and zero-copy decode.
+7. Verify VFG + 1440p/2160p target and VFG + HDR combinations.
 
 ## Decoder backends (selectable)
 
@@ -253,6 +257,14 @@ next performance step, not a decoder selection issue.
 ## Colour + HDR
 
 - swscale now receives explicit BT.709/BT.2020 + limited-range info (fixes washed-out image).
+- Chroma upsampling is selectable per session (`Settings -> Display -> Chroma
+  upsampling`): bilinear (fast), bicubic (default) or Lanczos, all with
+  `SWS_FULL_CHR_H_INT | SWS_ACCURATE_RND` so chroma is filtered at full resolution
+  rather than nearest/bilinear. Applies to the YUV->RGB stage in `decoder.cpp`.
+- Source transfer is inspected (`AVFrame.color_trc == SMPTE2084`). A PQ/BT.2020
+  stream is passed through untouched on an HDR10 swapchain and tone-mapped
+  (PQ decode -> 100 nits SDR) on an SDR swapchain. SDR into an HDR container still
+  goes through the sRGB->PQ encode.
 - HDR10 path implemented: swapchain R10G10B10A2 + PQ color space, shader PQ encode, UI colours PQ-encoded via theme::SetHdr.
 - HDR is applied at STARTUP (profile.hdr); live swapchain recreation fails with E_ACCESSDENIED on the same HWND, so the dropdown writes the setting and says restart.
 - Verified SDR streaming still works after the changes.
@@ -284,5 +296,14 @@ negligible next to decode.
 The 1440p/2160p options are **client-side supersampling/upscaling of the 1080p
 stream**. They cannot add detail the console did not send; they trade a little
 GPU time for a resolution-matched present (and clean high-res captures).
-Frame generation: no in-app model yet; recommended path is NVIDIA Smooth Motion (driver, applies to our DX11 swapchain).
+
+### Neural upscaling (RTX VSR)
+
+`Settings -> Display -> Neural upscaling (RTX VSR)` replaces the selected upscaler
+with NVIDIA's AI video upscaler, which writes directly at the render target size
+(1440p/2160p). The presenter is told the source is already final so it does not
+resample or sharpen twice. Measured 7.5–11 ms depending on target/quality; see
+`docs/17-neural-rendering.md`. VSR cannot be combined with VFG.
+
+Frame generation: see `docs/15-frame-generation.md` (NVIDIA VFG 2×).
 

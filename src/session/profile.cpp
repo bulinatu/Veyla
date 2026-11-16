@@ -371,7 +371,9 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"frame_buffer\": " << profile.frame_buffer << ",\n";
     json << "  \"pad_rate_hz\": " << profile.pad_rate_hz << ",\n";
     json << "  \"frame_gen\": " << profile.frame_gen << ",\n";
+    json << "  \"vsr\": " << profile.vsr << ",\n";
     json << "  \"decoder\": " << profile.decoder << ",\n";
+    json << "  \"chroma\": " << profile.chroma << ",\n";
     json << "  \"lightbar\": " << profile.lightbar << ",\n";
     json << "  \"trigger_effect\": " << profile.trigger_effect << ",\n";
     json << "  \"trigger_strength\": " << profile.trigger_strength << ",\n";
@@ -437,7 +439,9 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     if (ExtractNumber(json, "frame_buffer", number)) p.frame_buffer = static_cast<int>(number);
     if (ExtractNumber(json, "pad_rate_hz", number)) p.pad_rate_hz = static_cast<int>(number);
     if (ExtractNumber(json, "frame_gen", number)) p.frame_gen = static_cast<int>(number);
+    if (ExtractNumber(json, "vsr", number)) p.vsr = static_cast<int>(number);
     if (ExtractNumber(json, "decoder", number)) p.decoder = static_cast<int>(number);
+    if (ExtractNumber(json, "chroma", number)) p.chroma = static_cast<int>(number);
     if (ExtractNumber(json, "lightbar", number)) p.lightbar = static_cast<int>(number);
     if (ExtractNumber(json, "trigger_effect", number)) p.trigger_effect = static_cast<int>(number);
     if (ExtractNumber(json, "trigger_strength", number)) p.trigger_strength = static_cast<int>(number);

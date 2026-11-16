@@ -363,11 +363,20 @@ bool Decoder::Convert(const void* frame_ptr, DecodedFrame& out) {
 
     out.width = source->width;
     out.height = source->height;
+    out.pq = source->color_trc == AVCOL_TRC_SMPTE2084;
     out.rgba.resize(static_cast<size_t>(source->width) * source->height * 4);
+
+    int sws_flags = SWS_BICUBIC;
+    if (chroma_quality_ == 0) {
+        sws_flags = SWS_BILINEAR;
+    } else if (chroma_quality_ == 2) {
+        sws_flags = SWS_LANCZOS;
+    }
+    sws_flags |= SWS_FULL_CHR_H_INT | SWS_ACCURATE_RND;
 
     scaler_ = sws_getCachedContext(Sws(scaler_), source->width, source->height,
                                    static_cast<AVPixelFormat>(source->format), source->width,
-                                   source->height, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr,
+                                   source->height, AV_PIX_FMT_RGBA, sws_flags, nullptr,
                                    nullptr, nullptr);
     if (!scaler_) {
         return false;

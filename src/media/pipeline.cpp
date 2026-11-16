@@ -348,11 +348,13 @@ void Presenter::CollectTiming() {
     }
 }
 
-bool Presenter::SetSourceFrame(const uint8_t* rgba, int width, int height) {
+bool Presenter::SetSourceFrame(const uint8_t* rgba, int width, int height, bool source_pq) {
     if (!rgba || width <= 0 || height <= 0) {
         return false;
     }
     source_override_.Reset();
+    cfg_.source_pq = source_pq;
+    cfg_.source_final = false;
     if (!source_ || cfg_.source_width != width || cfg_.source_height != height) {
         cfg_.source_width = width;
         cfg_.source_height = height;
@@ -368,11 +370,13 @@ bool Presenter::SetSourceFrame(const uint8_t* rgba, int width, int height) {
     return true;
 }
 
-void Presenter::SetSourceView(ID3D11ShaderResourceView* view, int width, int height) {
+void Presenter::SetSourceView(ID3D11ShaderResourceView* view, int width, int height,
+                              bool source_pq) {
     if (!view) {
         return;
     }
     source_override_ = view;
+    cfg_.source_pq = source_pq;
     if (width > 0 && height > 0) {
         cfg_.source_width = width;
         cfg_.source_height = height;
@@ -483,6 +487,7 @@ void Presenter::Render(double time_seconds) {
         PsParams ps{};
         ps.sharpen = sharpen;
         ps.hdr = hdr;
+        ps.pad0 = cfg_.source_pq ? 1.0f : 0.0f;
         ps.mode = static_cast<float>(mode);
         ps.src_w = static_cast<float>(src_w);
         ps.src_h = static_cast<float>(src_h);
@@ -538,8 +543,11 @@ void Presenter::Render(double time_seconds) {
         context_->Draw(3, 0);
     };
 
-    set_params(cfg_.source_width, cfg_.source_height, stage_w, stage_h, cfg_.upscale_mode,
-               (cfg_.upscale_mode == 3) ? 0.45f : 0.35f, cfg_.hdr ? 1.0f : 0.0f);
+    set_params(cfg_.source_width, cfg_.source_height, stage_w, stage_h,
+               cfg_.source_final ? 0 : cfg_.upscale_mode,
+               cfg_.source_final ? 0.0f
+                                 : ((cfg_.upscale_mode == 3) ? 0.45f : 0.35f),
+               cfg_.hdr ? 1.0f : 0.0f);
     ID3D11RenderTargetView* stage_rtv = use_target ? target_rtv_.Get() : rtv_.Get();
     context_->OMSetRenderTargets(1, &stage_rtv, nullptr);
     set_viewport(0, 0, stage_w, stage_h);

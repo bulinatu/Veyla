@@ -161,6 +161,7 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
     std::string decoder_error;
     decoder_.SetBackend(static_cast<media::DecodeBackend>(
         std::clamp(profile.decoder, 0, 6)));
+    decoder_.SetChromaQuality(std::clamp(profile.chroma, 0, 2));
     if (!decoder_.OpenStream(media::StreamCodec::Hevc, decoder_error)) {
         error = "decoder: " + decoder_error;
         return false;

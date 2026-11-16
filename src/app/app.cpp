@@ -36,11 +36,32 @@ std::string EnvString(const char* name) {
     return value ? std::string(value) : std::string();
 }
 
+// RTX VSR quality levels exposed in the UI (0 = off).
+const int kVsrLevels[] = {0, 1, 2, 3, 4, 21, 23};
+
+const std::vector<std::wstring>& VsrLabels() {
+    static const std::vector<std::wstring> labels = {
+        L"Off",          L"AI Low",   L"AI Medium", L"AI High",
+        L"AI Ultra",     L"AI Streaming Medium", L"AI Streaming Ultra"};
+    return labels;
+}
+
+int VsrIndex(int quality) {
+    for (int i = 0; i < 7; ++i) {
+        if (kVsrLevels[i] == quality) {
+            return i;
+        }
+    }
+    return 0;
+}
+
 enum WidgetId {
     W_Upscaler = 1,
     W_Hud,
     W_FrameGen,
     W_Decoder = 53,
+    W_Chroma = 55,
+    W_Vsr = 56,
     W_Hdr,
     W_AudioDevice = 10,
     W_AudioBuffer,
@@ -233,6 +254,30 @@ bool App::Init(Win32Window* window) {
 
     frame_gen_ = profile_.frame_gen >= 2 ? 2 : 0;
     nv_vfx_present_ = !FindFrameGenRuntime().empty();
+
+    // RTX VSR and VFG both consume the decoded frame; VSR wins at startup and
+    // turns frame generation off, matching the UI exclusivity rule.
+    vsr_quality_ = profile_.vsr;
+    bool valid_vsr = false;
+    for (int level : kVsrLevels) {
+        if (level != 0 && level == vsr_quality_) {
+            valid_vsr = true;
+        }
+    }
+    if (!valid_vsr) {
+        vsr_quality_ = 0;
+    }
+    vsr_present_ = !FindVsrRuntime().empty();
+    if (vsr_quality_ > 0) {
+        if (vsr_present_ && EnsureVsr()) {
+            // VSR replaces VFG: keep the persisted profile consistent.
+            frame_gen_ = 0;
+            profile_.frame_gen = 0;
+        } else {
+            vsr_quality_ = 0;
+            profile_.vsr = 0;
+        }
+    }
     if (frame_gen_ >= 2 && (!nv_vfx_present_ || !EnsureFrameGen())) {
         frame_gen_ = 0;
     }
@@ -528,6 +573,11 @@ void App::ApplyDropdown(int id, int index) {
                 SaveProfile();
                 break;
             }
+            if (value > 0 && vsr_quality_ > 0) {
+                DisableVsr();
+                profile_.vsr = 0;
+                stream_note_ = "Frame generation replaced RTX VSR.";
+            }
             frame_gen_ = value;
             profile_.frame_gen = value;
             fg_queue_.clear();
@@ -535,7 +585,7 @@ void App::ApplyDropdown(int id, int index) {
             fg_generated_ = 0;
             if (value == 0 && stream_active_ && !stream_frame_.rgba.empty()) {
                 presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
-                                          stream_frame_.height);
+                                          stream_frame_.height, stream_frame_.pq);
             }
             SaveProfile();
             break;
@@ -545,6 +595,43 @@ void App::ApplyDropdown(int id, int index) {
             SaveProfile();
             stream_note_ = "Decoder selected; it applies to the next session.";
             break;
+        case W_Chroma:
+            profile_.chroma = std::clamp(index, 0, 2);
+            SaveProfile();
+            stream_note_ = "Chroma upsampling applies to the next session.";
+            break;
+        case W_Vsr: {
+            const int level = kVsrLevels[std::clamp(index, 0, 6)];
+            if (level == 0) {
+                DisableVsr();
+                profile_.vsr = 0;
+                if (stream_active_ && !stream_frame_.rgba.empty()) {
+                    presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
+                                              stream_frame_.height, stream_frame_.pq);
+                }
+                SaveProfile();
+                break;
+            }
+            vsr_quality_ = level;
+            if (!EnsureVsr()) {
+                vsr_quality_ = 0;
+                profile_.vsr = 0;
+                stream_note_ = "RTX VSR unavailable: " + std::string("see Settings > Display");
+                SaveProfile();
+                break;
+            }
+            if (frame_gen_ >= 2 || profile_.frame_gen >= 2) {
+                frame_gen_ = 0;
+                profile_.frame_gen = 0;
+                fg_queue_.clear();
+                fg_last_ = {};
+                fg_generated_ = 0;
+            }
+            profile_.vsr = level;
+            stream_note_ = "RTX VSR enabled; it replaces frame generation.";
+            SaveProfile();
+            break;
+        }
         case W_Hud:
             hud_ = index == 1;
             profile_.hud = hud_;
@@ -695,6 +782,17 @@ void App::ApplyRenderTarget() {
     static const int kTargets[4][2] = {{0, 0}, {1920, 1080}, {2560, 1440}, {3840, 2160}};
     const int index = std::clamp(render_target_, 0, 3);
     presenter_.SetUpscaleTarget(kTargets[index][0], kTargets[index][1]);
+
+    // VSR output follows the render target, so a live target change rebuilds it.
+    if (vsr_quality_ > 0) {
+        if (!EnsureVsr()) {
+            const std::wstring note = vsr_note_;
+            DisableVsr();
+            profile_.vsr = 0;
+            SaveProfile();
+            vsr_note_ = note;
+        }
+    }
 }
 
 int App::present_hz() const {
@@ -733,8 +831,7 @@ bool App::FrameGenAvailable() const {
     return nv_vfx_present_ || nv_vfx_.runtime_loaded();
 }
 
-bool App::EnsureFrameGen() {
-    std::string detail;
+bool App::EnsureFrameGen() {    std::string detail;
     if (!nv_vfx_.runtime_loaded()) {
         const std::wstring dir = FindFrameGenRuntime();
         if (dir.empty()) {
@@ -758,6 +855,79 @@ bool App::EnsureFrameGen() {
     fg_ready_ = true;
     fg_note_ = L"NVIDIA VFG ready";
     return true;
+}
+
+std::wstring App::FindVsrRuntime() const {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    std::vector<fs::path> candidates;
+
+    wchar_t exe_path[MAX_PATH] = {};
+    if (::GetModuleFileNameW(nullptr, exe_path, MAX_PATH) > 0) {
+        const fs::path exe_dir = fs::path(exe_path).parent_path();
+        candidates.push_back(exe_dir / "nvidia-vfx" / "runtime");
+        candidates.push_back(exe_dir / "nvidia-vfx");
+        candidates.push_back(exe_dir / ".." / ".." / "third_party" / "nvidia-vfx" / "runtime");
+    }
+    const fs::path cwd = fs::current_path(ec);
+    if (!ec) {
+        candidates.push_back(cwd / "third_party" / "nvidia-vfx" / "runtime");
+        candidates.push_back(cwd / "nvidia-vfx" / "runtime");
+    }
+
+    for (const fs::path& dir : candidates) {
+        const fs::path effect = dir / "nvVFXVideoSuperRes.dll";
+        const fs::path model = dir / "nvngx_vsr.dll";
+        if (fs::exists(effect, ec) && !ec && fs::exists(model, ec) && !ec) {
+            return fs::absolute(dir, ec).wstring();
+        }
+        ec.clear();
+    }
+    return {};
+}
+
+bool App::VsrAvailable() const {
+    return vsr_present_ || nv_vsr_.runtime_loaded();
+}
+
+bool App::EnsureVsr() {
+    std::string detail;
+    if (!nv_vsr_.runtime_loaded()) {
+        const std::wstring dir = FindVsrRuntime();
+        if (dir.empty()) {
+            vsr_note_ =
+                L"RTX VSR runtime missing: put nvVFXVideoSuperRes.dll + nvngx_vsr.dll in "
+                L"third_party\\nvidia-vfx\\runtime";
+            return false;
+        }
+        if (!nv_vsr_.LoadRuntime(dir, detail)) {
+            vsr_note_ = L"RTX VSR runtime: " + Widen(detail);
+            return false;
+        }
+    }
+    const int width = profile_.width > 0 ? profile_.width : 1920;
+    const int height = profile_.height > 0 ? profile_.height : 1080;
+    const int out_w = presenter_.render_width();
+    const int out_h = presenter_.render_height();
+    if (out_w < width || out_h < height) {
+        vsr_note_ = L"RTX VSR cannot downscale: pick a 1440p/2160p upscale target";
+        return false;
+    }
+    if (!nv_vsr_.Initialize(presenter_.device(), presenter_.context(), width, height, out_w,
+                            out_h, vsr_quality_, 1.0f, detail)) {
+        vsr_note_ = L"RTX VSR init: " + Widen(detail);
+        return false;
+    }
+    vsr_ready_ = true;
+    vsr_note_ = L"RTX VSR ready";
+    return true;
+}
+
+void App::DisableVsr() {
+    vsr_quality_ = 0;
+    vsr_ready_ = false;
+    vsr_frame_ = {};
+    nv_vsr_.Shutdown();
 }
 
 App::~App() {
@@ -887,6 +1057,19 @@ void App::StartStream() {
     streaming_.SetAudio(&audio_);
     pad_.SetConsoleFeedback(PadConsoleFeedback{});
     feedback_version_ = 0;
+
+    if (vsr_quality_ > 0 && !EnsureVsr()) {
+        const std::wstring note = vsr_note_;
+        DisableVsr();
+        profile_.vsr = 0;
+        SaveProfile();
+        vsr_note_ = note;
+        stream_note_ = "RTX VSR unavailable; using the regular upscaler.";
+        std::fprintf(stderr, "[app] RTX VSR disabled: %ls\n", vsr_note_.c_str());
+    }
+    if (vsr_quality_ > 0) {
+        frame_gen_ = 0;
+    }
 
     if (frame_gen_ >= 2 && !EnsureFrameGen()) {
         frame_gen_ = 0;
@@ -1156,7 +1339,22 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         // Controller input is sent by the dedicated pad thread, independent of
         // the presentation loop.
         if (streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
-            if (frame_gen_ >= 2 && fg_ready_) {
+            if (vsr_quality_ > 0 && vsr_ready_) {
+                std::string detail;
+                if (nv_vsr_.Process(stream_frame_.rgba.data(), stream_frame_.width,
+                                    stream_frame_.height, vsr_frame_, detail)) {
+                    presenter_.SetSourceView(vsr_frame_.srv.Get(), nv_vsr_.out_width(),
+                                             nv_vsr_.out_height(), stream_frame_.pq);
+                    presenter_.SetSourceFinal(true);
+                } else {
+                    vsr_note_ = L"RTX VSR: " + Widen(detail);
+                    std::fprintf(stderr, "[app] RTX VSR failed: %s\n", detail.c_str());
+                    DisableVsr();
+                    profile_.vsr = 0;
+                    presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
+                                              stream_frame_.height, stream_frame_.pq);
+                }
+            } else if (frame_gen_ >= 2 && fg_ready_) {
                 std::vector<media::NvVfx::Frame> sequence;
                 std::string detail;
                 if (nv_vfx_.PushFrame(stream_frame_.rgba.data(), stream_frame_.width,
@@ -1177,11 +1375,12 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                     fg_queue_.clear();
                     fg_last_ = {};
                     presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
-                                              stream_frame_.height);
+                                              stream_frame_.height, stream_frame_.pq);
                 }
             } else {
+                presenter_.SetSourceFinal(false);
                 presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
-                                          stream_frame_.height);
+                                          stream_frame_.height, stream_frame_.pq);
             }
         }
 
@@ -1191,8 +1390,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                 fg_queue_.pop_front();
             }
             if (fg_last_.srv) {
+                presenter_.SetSourceFinal(false);
                 presenter_.SetSourceView(fg_last_.srv.Get(), stream_frame_.width,
-                                         stream_frame_.height);
+                                         stream_frame_.height, stream_frame_.pq);
             }
         }
 
@@ -1226,12 +1426,22 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         }
     }
 
-    static const bool decode_probe = std::getenv("BRP_DECODE_PROBE") != nullptr;
-    static double decode_probe_at = 0.0;
+    static const bool vsr_probe = std::getenv("BRP_FG_PROBE") != nullptr;
+    static double vsr_probe_at = 0.0;
+    if (vsr_probe && stream_active_ && vsr_quality_ > 0 && vsr_ready_ &&
+        clock_ - vsr_probe_at >= 1.0) {
+        vsr_probe_at = clock_;
+        std::fprintf(stderr, "[vsr] quality %d, %dx%d -> %dx%d, last %.2f ms\n", vsr_quality_,
+                     stream_frame_.width, stream_frame_.height, nv_vsr_.out_width(),
+                     nv_vsr_.out_height(), nv_vsr_.last_ms());
+    }
+
+    static const bool decode_probe = std::getenv("BRP_DECODE_PROBE") != nullptr;    static double decode_probe_at = 0.0;
     if (decode_probe && stream_active_ && clock_ - decode_probe_at >= 1.0) {
         decode_probe_at = clock_;
-        std::fprintf(stderr, "[app] fps %.1f decoder=%s audio=%d vfg=%d\n", streaming_.fps(),
-                     streaming_.decoder_name().c_str(), streaming_.audio_frames(), frame_gen_);
+        std::fprintf(stderr, "[app] fps %.1f decoder=%s audio=%d vfg=%d vsr=%d\n", streaming_.fps(),
+                     streaming_.decoder_name().c_str(), streaming_.audio_frames(), frame_gen_,
+                     vsr_quality_);
     }
 
     if (pad_.is_sony() &&
@@ -1755,6 +1965,9 @@ void App::RenderSettings(double t) {
                          {L"Window / display", L"1080p", L"1440p", L"2160p"}, render_target_, y,
                          W_RenderTarget);
             y += kRowH;
+            DrawDropdown(L"Neural upscaling (RTX VSR)", VsrLabels(), VsrIndex(vsr_quality_), y,
+                         W_Vsr, VsrAvailable());
+            y += kRowH;
             DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
             y += kRowH;
             {
@@ -1782,6 +1995,29 @@ void App::RenderSettings(double t) {
                           L"CUDA (NVDEC)", L"Software"},
                          std::clamp(profile_.decoder, 0, 6), y, W_Decoder);
             y += kRowH;
+            DrawDropdown(L"Chroma upsampling (next session)",
+                         {L"Bilinear (fast)", L"Bicubic", L"Lanczos (sharpest)"},
+                         std::clamp(profile_.chroma, 0, 2), y, W_Chroma);
+            y += kRowH;
+
+            if (vsr_quality_ > 0 && vsr_ready_) {
+                wchar_t text[192];
+                swprintf_s(text, L"RTX VSR active  -  %dx%d  -  last %.1f ms",
+                           nv_vsr_.out_width(), nv_vsr_.out_height(), nv_vsr_.last_ms());
+                ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
+                y += 24.0f;
+            } else if (!VsrAvailable()) {
+                ui_.Text(
+                    L"RTX VSR runtime not found: nvVFXVideoSuperRes.dll + nvngx_vsr.dll in "
+                    L"third_party\\nvidia-vfx\\runtime",
+                    {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f, th::Rgba(th::kMuted));
+                y += 24.0f;
+            } else if (vsr_quality_ > 0 && !vsr_note_.empty()) {
+                ui_.Text(vsr_note_.c_str(), {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
+                y += 24.0f;
+            }
 
             if (frame_gen_ >= 2 && fg_ready_) {
                 wchar_t text[192];
@@ -2032,7 +2268,9 @@ void App::RenderStream(double t) {
         if (stream_active_) {
             wchar_t stats[256];
             wchar_t fg_text[64] = L"";
-            if (frame_gen_ >= 2 && fg_ready_) {
+            if (vsr_quality_ > 0 && vsr_ready_) {
+                swprintf_s(fg_text, L"  -  VSR %.1f ms", nv_vsr_.last_ms());
+            } else if (frame_gen_ >= 2 && fg_ready_) {
                 swprintf_s(fg_text, L"  -  VFG %dx gen %d", frame_gen_, fg_generated_);
             }
             swprintf_s(stats, L"PS5  -  %.1f fps%s  -  audio %d  -  peak %.2f  -  %s",
@@ -2115,6 +2353,9 @@ void App::RenderStreamSettings(double t) {
     DrawDropdown(L"Upscale target", {L"Window / display", L"1080p", L"1440p", L"2160p"},
                  render_target_, y, W_RenderTarget);
     y += 56.0f;
+    DrawDropdown(L"Neural upscaling (RTX VSR)", VsrLabels(), VsrIndex(vsr_quality_), y, W_Vsr,
+                 VsrAvailable());
+    y += 56.0f;
     {
         const bool available = FrameGenAvailable();
         std::vector<std::wstring> options;
@@ -2145,9 +2386,13 @@ void App::RenderStreamSettings(double t) {
     y += 62.0f;
 
     std::wstring note = L"Changes apply live  -  decoder and bitrate need a new session";
-    if (frame_gen_ >= 2 && fg_ready_) {
+    if (vsr_quality_ > 0 && vsr_ready_) {
+        wchar_t vsr_text[128];
+        swprintf_s(vsr_text, L"  -  RTX VSR %.1f ms", nv_vsr_.last_ms());
+        note += vsr_text;
+    } else if (frame_gen_ >= 2 && fg_ready_) {
         note += L"  -  NVIDIA VFG active";
-    } else if (!FrameGenAvailable()) {
+    } else if (!FrameGenAvailable() && !VsrAvailable()) {
         note += L"  -  NVIDIA VFX runtime missing";
     }
     ui_.Text(note.c_str(), {kContentX, y, w - 64.0f, y + 26.0f}, 12.0f,
