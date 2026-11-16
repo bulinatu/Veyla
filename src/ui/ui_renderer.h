@@ -46,6 +46,12 @@ public:
               DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL,
               DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING,
               DWRITE_PARAGRAPH_ALIGNMENT valign = DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    // Same as Text, but truncates with an ellipsis instead of clipping mid-glyph.
+    void TextEllipsis(const wchar_t* text, const D2D1_RECT_F& rect, float size,
+                      D2D1_COLOR_F color,
+                      DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL,
+                      DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING);
     float TextWidth(const wchar_t* text, float size,
                     DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL);
 

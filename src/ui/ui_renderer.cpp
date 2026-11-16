@@ -243,8 +243,34 @@ void Renderer::Text(const wchar_t* text, const D2D1_RECT_F& rect, float size, D2
                    D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
 }
 
-float Renderer::TextWidth(const wchar_t* text, float size, DWRITE_FONT_WEIGHT weight) {
-    IDWriteTextFormat* format = Format(size, weight, DWRITE_TEXT_ALIGNMENT_LEADING,
+void Renderer::TextEllipsis(const wchar_t* text, const D2D1_RECT_F& rect, float size,
+                            D2D1_COLOR_F color, DWRITE_FONT_WEIGHT weight,
+                            DWRITE_TEXT_ALIGNMENT align) {
+    IDWriteTextFormat* format = Format(size, weight, align, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    if (!format || !text) {
+        return;
+    }
+
+    ComPtr<IDWriteTextLayout> layout;
+    if (FAILED(dwrite_->CreateTextLayout(text, static_cast<UINT32>(std::wcslen(text)), format,
+                                         rect.right - rect.left, rect.bottom - rect.top,
+                                         &layout))) {
+        return;
+    }
+
+    DWRITE_TRIMMING trimming{};
+    trimming.granularity = DWRITE_TRIMMING_GRANULARITY_CHARACTER;
+    ComPtr<IDWriteInlineObject> ellipsis;
+    if (SUCCEEDED(dwrite_->CreateEllipsisTrimmingSign(layout.Get(), &ellipsis))) {
+        layout->SetTrimming(&trimming, ellipsis.Get());
+    }
+
+    brush_->SetColor(color);
+    dc_->DrawTextLayout(D2D1::Point2F(rect.left, rect.top), layout.Get(), brush_.Get(),
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP);
+}
+
+float Renderer::TextWidth(const wchar_t* text, float size, DWRITE_FONT_WEIGHT weight) {    IDWriteTextFormat* format = Format(size, weight, DWRITE_TEXT_ALIGNMENT_LEADING,
                                        DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     if (!format || !text) {
         return 0.0f;

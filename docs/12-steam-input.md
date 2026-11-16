@@ -21,7 +21,7 @@ The important one for this project is the first: **if Steam Input is set to Xbox
 
 ## What is implemented
 
-The Controller screen now has an **Input source** row:
+Settings → Controller now has an **Input source** dropdown:
 
 | Value | Behaviour |
 |---|---|
@@ -31,7 +31,7 @@ The Controller screen now has an **Input source** row:
 
 Choosing `Steam Input / XInput` closes the HID handle, so it does not fight Steam for the device. Choosing `Auto` reopens HID within 2 s.
 
-![Controller](images/app-controller.png)
+![Controller settings](images/app-settings-controller.png)
 
 The screenshot is with **Steam Input / XInput** selected and no virtual pad present, which is why it reports `No controller detected`. With Steam running and Xbox emulation enabled, the same selection shows `XInput pad (Steam-compatible)`.
 
@@ -39,7 +39,7 @@ The screenshot is with **Steam Input / XInput** selected and no virtual pad pres
 
 1. Steam → Settings → Controller → enable **Steam Input** for the DualSense.
 2. In the per-controller layout, choose **Xbox controller emulation** (not "native").
-3. Our app → Controller → Input source → `Steam Input / XInput`.
+3. Our app → Settings → Controller → Input source → `Steam Input / XInput`.
 
 Steam then applies your layout, gyro, touchpad and deadzones, and we see the result as a normal XInput pad.
 

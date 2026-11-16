@@ -51,14 +51,14 @@ That is the exact shape an Opus decoder produces, so wiring the session later is
 
 `Engine::Enumerate()` lists active render endpoints, marks the default and flags controller-named devices (`DualSense`, `Wireless Controller`, `DualShock`) so the UI can put them at the top.
 
-The Audio screen lets you cycle endpoints and buffer size, and shows:
+Settings → Audio lets you pick an endpoint and buffer size, and shows:
 
 - device name and negotiated format
 - current latency and underrun count
 - a live peak meter
 - a 440 Hz test tone with fades, so the path can be verified without a console
 
-![Audio screen](images/app-audio.png)
+![Audio settings](images/app-settings-audio.png)
 
 Verified on this machine: default endpoint `Headphones (ROG DELTA S ANIMATE)`, `48000 Hz · stereo · float32`, meter moves during the test tone.
 

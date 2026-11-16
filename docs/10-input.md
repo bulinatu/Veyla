@@ -26,7 +26,7 @@ Hit regions are rebuilt every frame while drawing, then tested in reverse draw o
 |---|---|
 | Home | `Left`/`Right` or `A`/`D` select · `Enter` stream · `S`/`Tab` settings · `C` controller · `Esc` quit |
 | Settings | `Up`/`Down` select · `Left`/`Right` change · `Enter` open · `S`/`Esc` back |
-| Controller | `Up`/`Down` select · `Left`/`Right` change · `Enter` rumble · `C`/`Esc` back |
+| Settings → Controller | Dropdowns and buttons; `Tab` switches category |
 | Stream | `Esc` back · `H` HUD · `1`/`2`/`3` upscaler |
 | Any | `F12` capture frame |
 
@@ -107,7 +107,7 @@ The `0x26` layout is cross-checked against a captured PlayStation Accessories US
 
 ## Testing it
 
-Home → `C`, or Settings → `Controller test`:
+Settings → Controller (the Controller category).
 
 - Lightbar: 8 presets, applied live.
 - Adaptive trigger: 8 effects; strength 1–8; applies to both triggers.
@@ -116,7 +116,7 @@ Home → `C`, or Settings → `Controller test`:
 - Live readout: buttons, sticks, triggers, touch point, battery.
 - Subtitle reports `output reports OK` / `failed`, i.e. whether the write actually reached the device.
 
-![Controller](images/app-controller.png)
+![Controller settings](images/app-settings-controller.png)
 
 Verified on this machine: DualSense over **Bluetooth**, input 78 bytes, output writes accepted (78-byte `0x31` + CRC).
 

@@ -31,11 +31,34 @@ std::string EnvString(const char* name) {
     return value ? std::string(value) : std::string();
 }
 
-constexpr int kSettingCount = 9;
-constexpr int kControllerCount = 8;
-constexpr int kAudioCount = 4;
+enum WidgetId {
+    W_Upscaler = 1,
+    W_Hud,
+    W_FrameGen,
+    W_Hdr,
+    W_AudioDevice = 10,
+    W_AudioBuffer,
+    W_TestTone,
+    W_InputSource = 20,
+    W_Lightbar,
+    W_Trigger,
+    W_Strength,
+    W_Rumble,
+    W_PlayerLeds,
+    W_MicLed,
+    W_Probe = 40,
+};
 
-const wchar_t* kUpscalerNames[3] = {L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen"};
+constexpr float kContentX = 344.0f;
+constexpr float kRowH = 66.0f;
+
+const wchar_t* kTriggerNames[] = {L"Off",    L"Rigid",     L"Pulse", L"Feedback",
+                                  L"Weapon", L"Vibration", L"Bow",   L"Galloping"};
+constexpr int kTriggerCount = static_cast<int>(std::size(kTriggerNames));
+
+const wchar_t* kLightbarNames[] = {L"Blue", L"Red", L"Green", L"Amber",
+                                   L"Violet", L"Teal", L"White", L"Off"};
+constexpr int kLightbarCount = static_cast<int>(std::size(kLightbarNames));
 
 struct Rgb {
     uint8_t r, g, b;
@@ -45,11 +68,6 @@ const Rgb kLightbarColors[] = {
     {0x5A, 0xA9, 0xFF}, {0xFF, 0x4D, 0x4D}, {0x57, 0xD6, 0x8A}, {0xFF, 0xC1, 0x45},
     {0xB1, 0x4B, 0xFF}, {0x14, 0xB8, 0xA6}, {0xF4, 0xF7, 0xFC}, {0x00, 0x00, 0x00},
 };
-constexpr int kLightbarCount = static_cast<int>(std::size(kLightbarColors));
-
-const wchar_t* kTriggerNames[] = {L"Off",   L"Rigid",  L"Pulse", L"Feedback",
-                                  L"Weapon", L"Vibration", L"Bow",   L"Galloping"};
-constexpr int kTriggerCount = static_cast<int>(std::size(kTriggerNames));
 
 const wchar_t* kPlayerLedNames[] = {L"Off", L"Center", L"Inner", L"Outer", L"All", L"Mid"};
 const uint8_t kPlayerLedMasks[] = {0x00, 0x04, 0x0A, 0x0F, 0x1F, 0x15};
@@ -61,6 +79,17 @@ const wchar_t* kInputSourceNames[] = {L"Auto (native first)", L"Native HID only"
                                       L"Steam Input / XInput"};
 const Gamepad::Backend kInputBackends[] = {Gamepad::Backend::Auto, Gamepad::Backend::SonyHid,
                                            Gamepad::Backend::XInput};
+
+const int kBufferSizes[] = {10, 20, 30, 40};
+
+int BufferIndex(int ms) {
+    for (int i = 0; i < 4; ++i) {
+        if (kBufferSizes[i] == ms) {
+            return i;
+        }
+    }
+    return 1;
+}
 
 TriggerEffect BuildTriggerEffect(int effect, int strength) {
     switch (effect) {
@@ -78,19 +107,6 @@ TriggerEffect BuildTriggerEffect(int effect, int strength) {
         default: return TriggerEffect::Off();
     }
 }
-
-struct ButtonLabel {
-    uint32_t mask;
-    const wchar_t* label;
-};
-
-const ButtonLabel kButtonLabels[] = {
-    {PadUp, L"Up"},       {PadDown, L"Down"},     {PadLeft, L"Left"},   {PadRight, L"Right"},
-    {PadCross, L"Cross"}, {PadCircle, L"Circle"}, {PadSquare, L"Square"},
-    {PadTriangle, L"Triangle"}, {PadL1, L"L1"},   {PadR1, L"R1"},       {PadL2, L"L2"},
-    {PadR2, L"R2"},       {PadL3, L"L3"},         {PadR3, L"R3"},       {PadShare, L"Create"},
-    {PadOptions, L"Options"}, {PadPS, L"PS"},     {PadTouchpad, L"Touchpad"}, {PadMute, L"Mute"},
-};
 
 std::wstring PadStatus(const PadState& pad) {
     if (!pad.connected) {
@@ -130,8 +146,8 @@ bool App::Init(Win32Window* window) {
         std::string save_detail;
         session::Save(profile_, session_path, save_detail);
         session_note_ =
-            "Imported console identity and PSN account from PXPlay (its registration keys are "
-            "encrypted). Pairing needs the 8-digit code from the console.";
+            "Imported console identity and PSN account from PXPlay. Registration keys stay "
+            "encrypted in PXPlay; pairing needs the 8-digit console code.";
     } else {
         session_note_ = "No console configured yet.";
     }
@@ -184,6 +200,16 @@ void App::DispatchClick() {
         if (!Contains(it->rect, pointer_.x, pointer_.y)) {
             continue;
         }
+
+        if (open_dropdown_ >= 0 && it->hit != Hit::DropdownItem) {
+            if (it->hit == Hit::Dropdown) {
+                open_dropdown_ = (open_dropdown_ == it->index) ? -1 : it->index;
+            } else {
+                open_dropdown_ = -1;
+            }
+            return;
+        }
+
         switch (it->hit) {
             case Hit::Tile:
                 if (selected_ == it->index) {
@@ -197,71 +223,33 @@ void App::DispatchClick() {
             case Hit::SettingsButton:
                 screen_ = Screen::Settings;
                 break;
-            case Hit::ControllerButton:
-                screen_ = Screen::Controller;
-                break;
             case Hit::Back:
                 screen_ = Screen::Home;
                 break;
-            case Hit::SettingRow:
-                setting_row_ = it->index;
-                if (it->index == 7) {
-                    screen_ = Screen::Audio;
-                    audio_row_ = 0;
-                    if (!audio_opened_) {
+            case Hit::Tab:
+                tab_ = static_cast<Tab>(it->index);
+                open_dropdown_ = -1;
+                break;
+            case Hit::ConsoleConnect:
+                StartProbe();
+                break;
+            case Hit::Dropdown:
+                open_dropdown_ = it->index;
+                break;
+            case Hit::DropdownItem:
+                ApplyDropdown(it->index / 1000, it->index % 1000);
+                open_dropdown_ = -1;
+                break;
+            case Hit::Button:
+                if (it->index == W_TestTone) {
+                    if (!audio_.is_open()) {
                         OpenAudioDevice();
                     }
-                } else if (it->index == 8) {
-                    screen_ = Screen::Controller;
-                    controller_row_ = 0;
-                }
-                break;
-            case Hit::SettingLeft:
-                setting_row_ = it->index;
-                ChangeSetting(-1);
-                break;
-            case Hit::SettingRight:
-                setting_row_ = it->index;
-                ChangeSetting(+1);
-                break;
-            case Hit::ControllerRow:
-                controller_row_ = it->index;
-                if (it->index == 7) {
-                    screen_ = Screen::Home;
-                }
-                break;
-            case Hit::ControllerLeft:
-                controller_row_ = it->index;
-                ChangeControllerValue(-1);
-                break;
-            case Hit::ControllerRight:
-                controller_row_ = it->index;
-                ChangeControllerValue(+1);
-                break;
-            case Hit::ControllerAction:
-                controller_row_ = it->index;
-                if (it->index == 4) {
-                    TriggerRumble();
-                }
-                break;
-            case Hit::AudioRow:
-                audio_row_ = it->index;
-                if (it->index == 3) {
-                    screen_ = Screen::Home;
-                }
-                break;
-            case Hit::AudioLeft:
-                audio_row_ = it->index;
-                ChangeAudioValue(-1);
-                break;
-            case Hit::AudioRight:
-                audio_row_ = it->index;
-                ChangeAudioValue(+1);
-                break;
-            case Hit::AudioAction:
-                audio_row_ = it->index;
-                if (it->index == 2) {
                     audio_.PlayTestTone(0.6);
+                } else if (it->index == W_Rumble) {
+                    TriggerRumble();
+                } else if (it->index == W_Probe) {
+                    StartProbe();
                 }
                 break;
             case Hit::None:
@@ -269,6 +257,7 @@ void App::DispatchClick() {
         }
         return;
     }
+    open_dropdown_ = -1;
 }
 
 void App::HandleKey(int vk) {
@@ -279,69 +268,34 @@ void App::HandleKey(int vk) {
 
     switch (screen_) {
         case Screen::Home:
-            if (vk == VK_LEFT || vk == 'A') {
+            if (vk == VK_LEFT) {
                 selected_ = std::max(0, selected_ - 1);
-            } else if (vk == VK_RIGHT || vk == 'D') {
+            } else if (vk == VK_RIGHT) {
                 selected_ = std::min(static_cast<int>(games_.size()) - 1, selected_ + 1);
             } else if (vk == VK_RETURN) {
                 screen_ = Screen::Stream;
             } else if (vk == 'S' || vk == VK_TAB) {
                 screen_ = Screen::Settings;
-                setting_row_ = 0;
-            } else if (vk == 'C') {
-                screen_ = Screen::Controller;
-                controller_row_ = 0;
-            } else if (vk == 'M') {
-                screen_ = Screen::Audio;
-                audio_row_ = 0;
-                if (!audio_opened_) {
-                    OpenAudioDevice();
-                }
             } else if (vk == VK_ESCAPE) {
                 quit_ = true;
             }
             break;
 
         case Screen::Settings:
-            if (vk == VK_UP) {
-                setting_row_ = std::max(0, setting_row_ - 1);
-            } else if (vk == VK_DOWN) {
-                setting_row_ = std::min(kSettingCount - 1, setting_row_ + 1);
-            } else if (vk == VK_LEFT) {
-                ChangeSetting(-1);
-            } else if (vk == VK_RIGHT) {
-                ChangeSetting(+1);
-            } else if (vk == VK_RETURN) {
-                if (setting_row_ == 7) {
-                    screen_ = Screen::Audio;
-                    audio_row_ = 0;
-                    if (!audio_opened_) {
-                        OpenAudioDevice();
-                    }
-                } else if (setting_row_ == 8) {
-                    screen_ = Screen::Controller;
-                    controller_row_ = 0;
+            if (vk == VK_ESCAPE) {
+                if (open_dropdown_ >= 0) {
+                    open_dropdown_ = -1;
+                } else {
+                    screen_ = Screen::Home;
                 }
-            } else if (vk == VK_ESCAPE || vk == 'S') {
+            } else if (vk == 'S') {
                 screen_ = Screen::Home;
-            }
-            break;
-
-        case Screen::Controller:
-            if (vk == VK_UP) {
-                controller_row_ = std::max(0, controller_row_ - 1);
-            } else if (vk == VK_DOWN) {
-                controller_row_ = std::min(kControllerCount - 1, controller_row_ + 1);
+            } else if (vk == VK_TAB || vk == VK_RIGHT) {
+                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 1) % 5);
+                open_dropdown_ = -1;
             } else if (vk == VK_LEFT) {
-                ChangeControllerValue(-1);
-            } else if (vk == VK_RIGHT) {
-                ChangeControllerValue(+1);
-            } else if (vk == VK_RETURN) {
-                if (controller_row_ == 4) {
-                    TriggerRumble();
-                }
-            } else if (vk == VK_ESCAPE || vk == 'C') {
-                screen_ = Screen::Home;
+                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 4) % 5);
+                open_dropdown_ = -1;
             }
             break;
 
@@ -353,26 +307,6 @@ void App::HandleKey(int vk) {
             } else if (vk >= '1' && vk <= '3') {
                 upscale_ = vk - '1';
                 presenter_.SetUpscaleMode(upscale_);
-            }
-            break;
-
-        case Screen::Audio:
-            if (vk == VK_UP) {
-                audio_row_ = std::max(0, audio_row_ - 1);
-            } else if (vk == VK_DOWN) {
-                audio_row_ = std::min(kAudioCount - 1, audio_row_ + 1);
-            } else if (vk == VK_LEFT) {
-                ChangeAudioValue(-1);
-            } else if (vk == VK_RIGHT) {
-                ChangeAudioValue(+1);
-            } else if (vk == VK_RETURN) {
-                if (audio_row_ == 2) {
-                    audio_.PlayTestTone(0.6);
-                } else if (audio_row_ == 3) {
-                    screen_ = Screen::Home;
-                }
-            } else if (vk == VK_ESCAPE || vk == 'M') {
-                screen_ = Screen::Home;
             }
             break;
     }
@@ -410,52 +344,73 @@ void App::HandlePad() {
     const uint32_t pressed = pad_.ConsumePressed();
 
     if (pressed & PadCross) {
-        if (screen_ == Screen::Home || screen_ == Screen::Settings) {
-            HandleKey(VK_RETURN);
-        } else if (screen_ == Screen::Controller) {
-            TriggerRumble();
+        if (screen_ == Screen::Home) {
+            screen_ = Screen::Stream;
         }
     }
     if ((pressed & PadCircle) && screen_ != Screen::Home) {
-        HandleKey(VK_ESCAPE);
+        screen_ = Screen::Home;
     }
     if (pressed & PadOptions) {
         if (screen_ == Screen::Home) {
             screen_ = Screen::Settings;
-            setting_row_ = 0;
         } else if (screen_ != Screen::Stream) {
             screen_ = Screen::Home;
         }
     }
     if ((pressed & PadL1) && screen_ == Screen::Home) {
-        HandleKey(VK_LEFT);
+        selected_ = std::max(0, selected_ - 1);
     }
     if ((pressed & PadR1) && screen_ == Screen::Home) {
-        HandleKey(VK_RIGHT);
+        selected_ = std::min(static_cast<int>(games_.size()) - 1, selected_ + 1);
     }
 }
 
-void App::ChangeSetting(int direction) {
-    if (setting_row_ == 0) {
-        upscale_ = (upscale_ + direction + 3) % 3;
-        presenter_.SetUpscaleMode(upscale_);
-    } else if (setting_row_ == 1) {
-        if (direction != 0) {
-            hud_ = !hud_;
-        }
-    } else if (setting_row_ == 7) {
-        if (direction != 0) {
-            screen_ = Screen::Audio;
-            audio_row_ = 0;
-            if (!audio_opened_) {
+void App::ApplyDropdown(int id, int index) {
+    switch (id) {
+        case W_Upscaler:
+            upscale_ = std::clamp(index, 0, 2);
+            presenter_.SetUpscaleMode(upscale_);
+            break;
+        case W_Hud:
+            hud_ = index == 1;
+            break;
+        case W_AudioDevice:
+            if (!audio_devices_.empty()) {
+                audio_device_ = std::clamp(index, 0, static_cast<int>(audio_devices_.size()) - 1);
                 OpenAudioDevice();
             }
-        }
-    } else if (setting_row_ == 8) {
-        if (direction != 0) {
-            screen_ = Screen::Controller;
-            controller_row_ = 0;
-        }
+            break;
+        case W_AudioBuffer:
+            audio_buffer_ms_ = kBufferSizes[std::clamp(index, 0, 3)];
+            OpenAudioDevice();
+            break;
+        case W_InputSource:
+            input_source_ = std::clamp(index, 0, 2);
+            pad_.SetBackend(kInputBackends[input_source_]);
+            break;
+        case W_Lightbar:
+            lightbar_index_ = std::clamp(index, 0, kLightbarCount - 1);
+            output_dirty_ = true;
+            break;
+        case W_Trigger:
+            trigger_effect_ = std::clamp(index, 0, kTriggerCount - 1);
+            output_dirty_ = true;
+            break;
+        case W_Strength:
+            trigger_strength_ = std::clamp(index + 1, 1, 8);
+            output_dirty_ = true;
+            break;
+        case W_PlayerLeds:
+            player_leds_ = std::clamp(index, 0, kPlayerLedCount - 1);
+            output_dirty_ = true;
+            break;
+        case W_MicLed:
+            mic_led_ = std::clamp(index, 0, 2);
+            output_dirty_ = true;
+            break;
+        default:
+            break;
     }
 }
 
@@ -467,80 +422,17 @@ void App::OpenAudioDevice() {
     audio_opened_ = true;
 }
 
-void App::ChangeAudioValue(int direction) {
-    if (direction == 0) {
-        return;
-    }
-
-    switch (audio_row_) {
-        case 0:
-            if (!audio_devices_.empty()) {
-                const int count = static_cast<int>(audio_devices_.size());
-                audio_device_ = (audio_device_ + direction + count) % count;
-                OpenAudioDevice();
-            }
-            break;
-        case 1: {
-            const int sizes[] = {10, 20, 30, 40};
-            int index = 0;
-            for (int i = 0; i < 4; ++i) {
-                if (sizes[i] == audio_buffer_ms_) {
-                    index = i;
-                }
-            }
-            audio_buffer_ms_ = sizes[(index + direction + 4) % 4];
-            OpenAudioDevice();
-            break;
-        }
-        case 2:
-            audio_.PlayTestTone(0.6);
-            break;
-        default:
-            break;
-    }
-}
-
-void App::ChangeControllerValue(int direction) {
-    switch (controller_row_) {
-        case 0:
-            input_source_ = (input_source_ + direction + 3) % 3;
-            pad_.SetBackend(kInputBackends[input_source_]);
-            break;
-        case 1:
-            lightbar_index_ = (lightbar_index_ + direction + kLightbarCount) % kLightbarCount;
-            break;
-        case 2:
-            trigger_effect_ = (trigger_effect_ + direction + kTriggerCount) % kTriggerCount;
-            break;
-        case 3:
-            trigger_strength_ = std::clamp(trigger_strength_ + direction, 1, 8);
-            break;
-        case 4:
-            if (direction != 0) {
-                TriggerRumble();
-            }
-            break;
-        case 5:
-            player_leds_ = (player_leds_ + direction + kPlayerLedCount) % kPlayerLedCount;
-            break;
-        case 6:
-            mic_led_ = (mic_led_ + direction + 3) % 3;
-            break;
-        default:
-            break;
-    }
-
-    if (controller_row_ != 4) {
-        output_dirty_ = true;
-    }
-}
-
 void App::TriggerRumble() {
     rumble_until_ = clock_ + 0.45;
     output_dirty_ = true;
 }
 
+void App::StartProbe() {
+    probe_.Start(profile_.host, 9295);
+}
+
 void App::ApplyControllerOutput(bool force) {
+    (void)force;
     if (!pad_.is_sony()) {
         return;
     }
@@ -574,7 +466,6 @@ void App::ApplyControllerOutput(bool force) {
     last_send_ok_ = pad_.SendOutput(out);
     last_output_ = clock_;
     output_dirty_ = false;
-    (void)force;
 }
 
 void App::Frame(double time_seconds, const PointerState& pointer) {
@@ -589,17 +480,12 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     dt = std::clamp(dt, 0.0, 0.1);
 
     pad_.Poll();
+    probe_.Poll();
     HandlePad();
 
-    if (pointer_.wheel != 0.0f) {
+    if (pointer_.wheel != 0.0f && screen_ == Screen::Home) {
         const int steps = static_cast<int>(pointer_.wheel);
-        if (screen_ == Screen::Home) {
-            selected_ = std::clamp(selected_ - steps, 0, static_cast<int>(games_.size()) - 1);
-        } else if (screen_ == Screen::Settings) {
-            setting_row_ = std::clamp(setting_row_ - steps, 0, kSettingCount - 1);
-        } else if (screen_ == Screen::Controller) {
-            controller_row_ = std::clamp(controller_row_ - steps, 0, kControllerCount - 1);
-        }
+        selected_ = std::clamp(selected_ - steps, 0, static_cast<int>(games_.size()) - 1);
     }
 
     const float target = static_cast<float>(selected_);
@@ -622,12 +508,6 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
             break;
         case Screen::Stream:
             RenderStream(time_seconds);
-            break;
-        case Screen::Controller:
-            RenderController(time_seconds);
-            break;
-        case Screen::Audio:
-            RenderAudio(time_seconds);
             break;
     }
     ui_.EndFrame();
@@ -652,10 +532,6 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
             path = "app-settings.bmp";
         } else if (screen_ == Screen::Stream) {
             path = "app-stream.bmp";
-        } else if (screen_ == Screen::Controller) {
-            path = "app-controller.bmp";
-        } else if (screen_ == Screen::Audio) {
-            path = "app-audio.bmp";
         }
         if (presenter_.CaptureToBmp(path)) {
             std::printf("captured %s\n", path);
@@ -672,21 +548,13 @@ void App::RenderTopBar() {
 
     ui_.Text(L"BETTERREMOTEPLAY", {48.0f, 26.0f, 480.0f, 52.0f}, 14.0f, th::Rgba(th::kInk, 0.92f),
              DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    ui_.Text(L"DEMO LIBRARY", {48.0f, 52.0f, 480.0f, 72.0f}, 11.0f, th::Rgba(th::kMuted, 0.9f));
 
-    const bool ready = profile_.has_console() && !profile_.needs_pairing();
-    const std::wstring status = Widen(profile_.status_line());
-    ui_.FillCircle(52.0f, 88.0f, 4.0f, th::Rgba(ready ? th::kOnline : th::kOffline));
-    ui_.Text(status.c_str(), {64.0f, 76.0f, 520.0f, 100.0f}, 12.0f, th::Rgba(th::kMuted));
-
-    // Settings button
-    const D2D1_RECT_F settings_rect{w - 372.0f, 28.0f, w - 232.0f, 64.0f};
+    const D2D1_RECT_F settings_rect{w - 200.0f, 28.0f, w - 96.0f, 64.0f};
     const bool settings_hover = hover_ == Hit::SettingsButton;
-    ui_.FillRounded(settings_rect, 18.0f,
-                    th::Rgba(0xFFFFFF, settings_hover ? 0.12f : 0.06f));
+    ui_.FillRounded(settings_rect, 18.0f, th::Rgba(0xFFFFFF, settings_hover ? 0.12f : 0.06f));
     ui_.StrokeRounded(settings_rect, 18.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
-    ui_.Text(L"Settings", {settings_rect.left, settings_rect.top, settings_rect.right,
-                           settings_rect.bottom},
+    ui_.Text(L"Settings",
+             {settings_rect.left, settings_rect.top, settings_rect.right, settings_rect.bottom},
              13.0f, th::Rgba(th::kInk, 0.9f), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
     AddHit(Hit::SettingsButton, -1, settings_rect);
@@ -695,13 +563,72 @@ void App::RenderTopBar() {
     ::GetLocalTime(&st);
     wchar_t clock_text[16];
     swprintf_s(clock_text, L"%02d:%02d", st.wHour, st.wMinute);
-    ui_.Text(clock_text, {w - 200.0f, 28.0f, w - 140.0f, 60.0f}, 20.0f,
+    ui_.Text(clock_text, {w - 340.0f, 28.0f, w - 290.0f, 60.0f}, 20.0f,
              th::Rgba(th::kInk, 0.92f), DWRITE_FONT_WEIGHT_SEMI_BOLD,
              DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    ui_.FillCircle(w - 72.0f, 44.0f, 18.0f, th::Rgba(0x253046));
-    ui_.Text(L"C", {w - 90.0f, 26.0f, w - 54.0f, 62.0f}, 15.0f, th::Rgba(th::kInk),
+    ui_.FillCircle(w - 60.0f, 44.0f, 18.0f, th::Rgba(0x253046));
+    ui_.Text(L"C", {w - 78.0f, 26.0f, w - 42.0f, 62.0f}, 15.0f, th::Rgba(th::kInk),
              DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
+}
+
+void App::DrawConsoleCard() {
+    const float w = static_cast<float>(window_->width());
+    const D2D1_RECT_F card{w - 392.0f, 96.0f, w - 40.0f, 96.0f + 156.0f};
+
+    ui_.FillRounded(card, 18.0f, th::Rgba(0xFFFFFF, 0.05f));
+    ui_.StrokeRounded(card, 18.0f, th::Rgba(0xFFFFFF, 0.09f), 1.0f);
+
+    ui_.Text(L"CONSOLE", {card.left + 20.0f, card.top + 14.0f, card.right - 20.0f,
+                          card.top + 34.0f},
+             10.5f, th::Rgba(th::kMuted, 0.9f), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+
+    const std::wstring name =
+        profile_.has_console() ? Widen(profile_.display_name()) : std::wstring(L"No console");
+    ui_.Text(name.c_str(), {card.left + 20.0f, card.top + 34.0f, card.right - 20.0f,
+                            card.top + 68.0f},
+             21.0f, th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+
+    uint32_t dot = th::kOffline;
+    std::wstring status;
+    switch (probe_.state()) {
+        case net::ProbeState::Checking:
+            dot = th::kAccent;
+            status = L"Checking the control port...";
+            break;
+        case net::ProbeState::Reachable:
+            dot = th::kOnline;
+            status = L"Reachable";
+            break;
+        case net::ProbeState::Unreachable:
+            dot = th::kOffline;
+            status = L"No answer on the control port";
+            break;
+        case net::ProbeState::NoAddress:
+            dot = th::kMuted;
+            status = L"No address configured";
+            break;
+        case net::ProbeState::Idle:
+        default:
+            status = Widen(profile_.status_line());
+            break;
+    }
+
+    ui_.FillCircle(card.left + 26.0f, card.top + 88.0f, 4.0f, th::Rgba(dot));
+    ui_.Text(status.c_str(), {card.left + 38.0f, card.top + 76.0f, card.right - 160.0f,
+                              card.top + 100.0f},
+             12.0f, th::Rgba(th::kMuted));
+
+    if (!profile_.host.empty()) {
+        ui_.Text(Widen(profile_.host).c_str(),
+                 {card.left + 20.0f, card.top + 104.0f, card.right - 160.0f, card.top + 126.0f},
+                 11.0f, th::Rgba(th::kMuted, 0.75f));
+    }
+
+    const bool checking = probe_.state() == net::ProbeState::Checking;
+    DrawButton(checking ? L"Checking" : L"Connect",
+               {card.right - 148.0f, card.top + 102.0f, card.right - 16.0f, card.top + 142.0f},
+               W_Probe, true);
 }
 
 void App::DrawTile(const D2D1_RECT_F& rect, const GameEntry& game, float alpha, bool selected,
@@ -742,28 +669,115 @@ void App::DrawTile(const D2D1_RECT_F& rect, const GameEntry& game, float alpha, 
     }
 }
 
-void App::DrawPill(float center_x, float top, const wchar_t* label, float width, bool hovered,
-                   Hit hit, int index) {
-    const D2D1_RECT_F r{center_x - width * 0.5f, top, center_x + width * 0.5f, top + 46.0f};
-    ui_.FillRounded(r, 23.0f, th::Rgba(th::kAccent, hovered ? 0.26f : 0.16f));
-    ui_.StrokeRounded(r, 23.0f, th::Rgba(th::kAccent, hovered ? 1.0f : 0.85f), 1.5f);
-
-    const float ty = top + 23.0f;
-    const float tx = r.left + 30.0f;
-    ui_.FillTriangle({tx, ty - 7.0f}, {tx, ty + 7.0f}, {tx + 11.0f, ty}, th::Rgba(th::kInk));
-
-    ui_.Text(label, {r.left + 50.0f, r.top, r.right - 14.0f, r.bottom}, 15.0f, th::Rgba(th::kInk),
-             DWRITE_FONT_WEIGHT_SEMI_BOLD);
-
-    AddHit(hit, index, r);
-}
-
 void App::DrawHints(const wchar_t* hints) {
-    ui_.Text(hints, {0.0f, static_cast<float>(window_->height()) - 44.0f,
+    ui_.Text(hints, {0.0f, static_cast<float>(window_->height()) - 40.0f,
                      static_cast<float>(window_->width()),
-                     static_cast<float>(window_->height()) - 16.0f},
+                     static_cast<float>(window_->height()) - 14.0f},
              12.0f, th::Rgba(th::kMuted, 0.85f), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
+}
+
+void App::DrawSettingLabel(const wchar_t* label, float y, bool enabled) {
+    ui_.Text(label, {kContentX, y, kContentX + 460.0f, y + 56.0f}, 16.0f,
+             th::Rgba(enabled ? th::kInk : th::kMuted, enabled ? 0.95f : 0.6f),
+             DWRITE_FONT_WEIGHT_NORMAL);
+}
+
+void App::DrawInfoRow(const wchar_t* label, const std::wstring& value, float y) {
+    const float right = static_cast<float>(window_->width()) - 64.0f;
+    DrawSettingLabel(label, y, true);
+    ui_.TextEllipsis(value.c_str(), {right - 420.0f, y, right, y + 56.0f}, 15.0f,
+                     th::Rgba(th::kInkDim), DWRITE_FONT_WEIGHT_NORMAL,
+                     DWRITE_TEXT_ALIGNMENT_TRAILING);
+}
+
+void App::DrawDropdown(const wchar_t* label, const std::vector<std::wstring>& options, int selected,
+                       float y, int id, bool enabled) {
+    const float right = static_cast<float>(window_->width()) - 64.0f;
+    DrawSettingLabel(label, y, enabled);
+
+    const D2D1_RECT_F control{right - 340.0f, y + 8.0f, right, y + 54.0f};
+    const bool hovered = hover_ == Hit::Dropdown && hover_index_ == id;
+
+    ui_.FillRounded(control, 10.0f,
+                    th::Rgba(0xFFFFFF, hovered ? 0.10f : (enabled ? 0.06f : 0.03f)));
+    ui_.StrokeRounded(control, 10.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
+
+    std::wstring value;
+    if (!options.empty() && selected >= 0 && selected < static_cast<int>(options.size())) {
+        value = options[static_cast<size_t>(selected)];
+    }
+    ui_.TextEllipsis(value.c_str(),
+                     {control.left + 16.0f, control.top, control.right - 44.0f, control.bottom},
+                     14.5f, th::Rgba(enabled ? th::kInk : th::kMuted, 0.95f));
+
+    const float cx = control.right - 22.0f;
+    const float cy = (control.top + control.bottom) * 0.5f;
+    ui_.FillTriangle({cx - 5.0f, cy - 2.5f}, {cx + 5.0f, cy - 2.5f}, {cx, cy + 3.5f},
+                     th::Rgba(th::kMuted, 0.9f));
+
+    if (!enabled) {
+        return;
+    }
+
+    AddHit(Hit::Dropdown, id, control);
+
+    if (open_dropdown_ == id) {
+        popup_.id = id;
+        popup_.anchor = control;
+        popup_.options = options;
+        popup_.selected = selected;
+    }
+}
+
+void App::DrawButton(const wchar_t* label, const D2D1_RECT_F& rect, int id, bool primary) {
+    const bool hovered = hover_ == Hit::Button && hover_index_ == id;
+    const float alpha = hovered ? 1.0f : 0.85f;
+    if (primary) {
+        ui_.FillRounded(rect, 12.0f, th::Rgba(th::kAccent, hovered ? 0.30f : 0.20f));
+        ui_.StrokeRounded(rect, 12.0f, th::Rgba(th::kAccent, 0.9f), 1.2f);
+    } else {
+        ui_.FillRounded(rect, 12.0f, th::Rgba(0xFFFFFF, hovered ? 0.12f : 0.06f));
+        ui_.StrokeRounded(rect, 12.0f, th::Rgba(0xFFFFFF, 0.12f), 1.0f);
+    }
+    ui_.Text(label, {rect.left, rect.top, rect.right, rect.bottom}, 13.5f,
+             th::Rgba(th::kInk, alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+             DWRITE_TEXT_ALIGNMENT_CENTER);
+    AddHit(Hit::Button, id, rect);
+}
+
+void App::DrawPopup() {
+    if (popup_.id < 0 || open_dropdown_ != popup_.id || popup_.options.empty()) {
+        popup_.id = -1;
+        return;
+    }
+
+    const float item_h = 38.0f;
+    const float height = item_h * static_cast<float>(popup_.options.size());
+    float top = popup_.anchor.bottom + 6.0f;
+    if (top + height + 8.0f > static_cast<float>(window_->height()) - 40.0f) {
+        top = popup_.anchor.top - 6.0f - height - 8.0f;
+    }
+
+    const D2D1_RECT_F panel{popup_.anchor.left, top, popup_.anchor.right, top + height + 8.0f};
+    ui_.FillRounded(panel, 12.0f, th::Rgba(0x141B28, 0.98f));
+    ui_.StrokeRounded(panel, 12.0f, th::Rgba(0xFFFFFF, 0.14f), 1.0f);
+
+    for (int i = 0; i < static_cast<int>(popup_.options.size()); ++i) {
+        const D2D1_RECT_F item{panel.left + 6.0f, panel.top + 4.0f + i * item_h,
+                               panel.right - 6.0f, panel.top + 4.0f + (i + 1) * item_h};
+        const int index = popup_.id * 1000 + i;
+        const bool hovered = hover_ == Hit::DropdownItem && hover_index_ == index;
+        if (hovered) {
+            ui_.FillRounded(item, 8.0f, th::Rgba(0xFFFFFF, 0.08f));
+        }
+        ui_.Text(popup_.options[static_cast<size_t>(i)].c_str(),
+                 {item.left + 12.0f, item.top, item.right - 12.0f, item.bottom}, 14.0f,
+                 th::Rgba(i == popup_.selected ? th::kAccent : th::kInk, 0.95f));
+        AddHit(Hit::DropdownItem, index, item);
+    }
+
+    popup_.id = -1;
 }
 
 void App::RenderHome(double t) {
@@ -780,11 +794,14 @@ void App::RenderHome(double t) {
                    th::Rgba(0x2B4C8C, 0.0f));
 
     RenderTopBar();
+    DrawConsoleCard();
 
     const float tile_h = std::clamp(h * 0.44f, 240.0f, 420.0f);
     const float tile_w = tile_h * 0.75f;
     const float gap = tile_h * 0.065f;
-    const float center_y = h * 0.50f;
+    // Shift the rail left because the console card occupies the top right.
+    const float center_x = w * 0.46f;
+    const float center_y = h * 0.55f;
 
     std::vector<int> order(games_.size());
     for (size_t i = 0; i < order.size(); ++i) {
@@ -803,7 +820,7 @@ void App::RenderHome(double t) {
         const float scale = 1.0f - 0.055f * k;
         const float tw = tile_w * scale;
         const float th = tile_h * scale;
-        const float x = w * 0.5f + d * (tile_w + gap) - tw * 0.5f;
+        const float x = center_x + d * (tile_w + gap) - tw * 0.5f;
         const float y = center_y - th * 0.5f;
         const D2D1_RECT_F rect{x, y, x + tw, y + th};
         DrawTile(rect, games_[static_cast<size_t>(idx)], 1.0f - 0.30f * k, idx == selected_,
@@ -812,26 +829,35 @@ void App::RenderHome(double t) {
     }
 
     const float rail_bottom = center_y + tile_h * 0.5f;
-    ui_.Text(game.title, {w * 0.5f - 600.0f, rail_bottom + 24.0f, w * 0.5f + 600.0f,
-                          rail_bottom + 72.0f},
-             36.0f, th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+    ui_.Text(game.title, {center_x - 600.0f, rail_bottom + 20.0f, center_x + 600.0f,
+                          rail_bottom + 66.0f},
+             34.0f, th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD,
              DWRITE_TEXT_ALIGNMENT_CENTER);
-    ui_.Text(game.meta, {w * 0.5f - 600.0f, rail_bottom + 74.0f, w * 0.5f + 600.0f,
-                         rail_bottom + 100.0f},
+    ui_.Text(game.meta, {center_x - 600.0f, rail_bottom + 68.0f, center_x + 600.0f,
+                         rail_bottom + 94.0f},
              15.0f, th::Rgba(th::kMuted), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
 
-    DrawPill(w * 0.5f, rail_bottom + 112.0f, L"Stream", 200.0f, hover_ == Hit::Stream, Hit::Stream,
-             -1);
+    const D2D1_RECT_F stream_rect{center_x - 100.0f, rail_bottom + 104.0f,
+                                  center_x + 100.0f, rail_bottom + 150.0f};
+    const bool stream_hover = hover_ == Hit::Stream;
+    ui_.FillRounded(stream_rect, 23.0f, th::Rgba(th::kAccent, stream_hover ? 0.28f : 0.18f));
+    ui_.StrokeRounded(stream_rect, 23.0f, th::Rgba(th::kAccent, stream_hover ? 1.0f : 0.85f), 1.5f);
+    ui_.FillTriangle({stream_rect.left + 30.0f, rail_bottom + 120.0f},
+                     {stream_rect.left + 30.0f, rail_bottom + 134.0f},
+                     {stream_rect.left + 41.0f, rail_bottom + 127.0f}, th::Rgba(th::kInk));
+    ui_.Text(L"Stream", {stream_rect.left + 50.0f, stream_rect.top, stream_rect.right - 14.0f,
+                         stream_rect.bottom},
+             15.0f, th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    AddHit(Hit::Stream, -1, stream_rect);
 
     if (pad_.state().connected) {
-        ui_.FillCircle(52.0f, h - 74.0f, 4.0f, th::Rgba(th::kOnline));
-        ui_.Text(Widen(pad_.state().name).c_str(), {64.0f, h - 86.0f, 420.0f, h - 62.0f}, 12.0f,
+        ui_.FillCircle(52.0f, h - 70.0f, 4.0f, th::Rgba(th::kOnline));
+        ui_.Text(Widen(pad_.state().name).c_str(), {64.0f, h - 82.0f, 420.0f, h - 58.0f}, 12.0f,
                  th::Rgba(th::kMuted));
     }
 
-    DrawHints(L"Left / Right   Navigate      Enter   Stream      S   Settings      C   Controller"
-              L"      M   Audio      Esc   Quit");
+    DrawHints(L"Click a game to select, click again to stream      Settings (top right)      Esc to quit");
 }
 
 void App::RenderSettings(double t) {
@@ -840,10 +866,9 @@ void App::RenderSettings(double t) {
     const float h = static_cast<float>(window_->height());
 
     ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(0x0A1018), th::Rgba(th::kBgBottom));
-    ui_.FillRadial(w * 0.5f, -h * 0.1f, w * 0.7f, th::Rgba(0x1B3A66, 0.28f),
+    ui_.FillRadial(w * 0.5f, -h * 0.1f, w * 0.7f, th::Rgba(0x1B3A66, 0.25f),
                    th::Rgba(0x1B3A66, 0.0f));
 
-    // Back button
     const D2D1_RECT_F back{w - 132.0f, 28.0f, w - 40.0f, 64.0f};
     ui_.FillRounded(back, 18.0f, th::Rgba(0xFFFFFF, hover_ == Hit::Back ? 0.12f : 0.06f));
     ui_.StrokeRounded(back, 18.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
@@ -851,346 +876,189 @@ void App::RenderSettings(double t) {
              th::Rgba(th::kInk, 0.9f), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER);
     AddHit(Hit::Back, -1, back);
 
-    const float panel_w = std::min(1040.0f, w - 96.0f);
-    const float x0 = (w - panel_w) * 0.5f;
-
-    ui_.Text(L"Settings", {x0, 84.0f, x0 + panel_w, 146.0f}, 40.0f, th::Rgba(th::kInk),
+    ui_.Text(L"Settings", {48.0f, 44.0f, 420.0f, 96.0f}, 34.0f, th::Rgba(th::kInk),
              DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    const std::wstring subtitle =
-        session_note_.empty() ? L"Changes apply live. Console features unlock after pairing."
-                              : Widen(session_note_);
-    ui_.Text(subtitle.c_str(), {x0, 148.0f, x0 + panel_w, 174.0f}, 13.0f, th::Rgba(th::kMuted));
+    if (!session_note_.empty()) {
+        ui_.Text(Widen(session_note_).c_str(), {48.0f, 98.0f, w - 64.0f, 122.0f}, 12.0f,
+                 th::Rgba(th::kMuted));
+    }
 
-    struct Row {
-        const wchar_t* label;
-        std::wstring value;
-        bool enabled;
-    };
-
-    const std::wstring console_value = Widen(
-        profile_.has_console() ? profile_.status_line() : std::string("Offline · no console"));
-    const std::wstring account_value = Widen(
-        profile_.psn_account_id.empty() ? std::string("not set") : std::string("imported"));
-    const std::wstring bitrate_value = Widen(std::to_string(profile_.bitrate_kbps / 1000) +
-                                             " Mbps · waits for PS5");
-
-    const Row rows[kSettingCount] = {
-        {L"Upscaler", kUpscalerNames[upscale_], true},
-        {L"Latency HUD", hud_ ? L"On" : L"Off", true},
-        {L"Frame generation", L"Off  ·  needs RIFE model", false},
-        {L"HDR output", L"Off  ·  waits for PS5", false},
-        {L"Bitrate", bitrate_value, false},
-        {L"Console", console_value, false},
-        {L"PSN account", account_value, false},
-        {L"Audio output",
-         audio_.is_open() ? Widen(audio_.device_name())
-                          : (audio_failed_ ? std::wstring(L"open failed") : std::wstring(L"Open  ›")),
-         true},
-        {L"Controller test", L"Open  ›", true},
-    };
-
-    const float row_h = 60.0f;
-    float y = 206.0f;
-
-    for (int i = 0; i < kSettingCount; ++i) {
-        const D2D1_RECT_F row_rect{x0, y, x0 + panel_w, y + row_h - 6.0f};
-        const bool selected = i == setting_row_;
-        const bool hovered = hover_ == Hit::SettingRow && hover_index_ == i;
+    const wchar_t* tab_names[] = {L"Display", L"Audio", L"Controller", L"Connection", L"About"};
+    for (int i = 0; i < 5; ++i) {
+        const D2D1_RECT_F tab{48.0f, 148.0f + i * 54.0f, 300.0f, 148.0f + i * 54.0f + 44.0f};
+        const bool selected = static_cast<int>(tab_) == i;
+        const bool hovered = hover_ == Hit::Tab && hover_index_ == i;
 
         if (selected || hovered) {
-            ui_.FillRounded(row_rect, 12.0f, th::Rgba(0xFFFFFF, hovered ? 0.08f : 0.06f));
+            ui_.FillRounded(tab, 12.0f, th::Rgba(0xFFFFFF, hovered ? 0.10f : 0.07f));
         }
         if (selected) {
-            ui_.FillRounded({x0 + 10.0f, y + 10.0f, x0 + 14.0f, y + row_h - 16.0f}, 2.0f,
-                            th::Rgba(th::kAccent, 0.95f));
+            ui_.FillRounded({tab.left + 2.0f, tab.top + 9.0f, tab.left + 6.0f, tab.bottom - 9.0f},
+                            2.0f, th::Rgba(th::kAccent, 0.95f));
         }
-
-        const float text_alpha = rows[i].enabled ? 1.0f : 0.45f;
-        ui_.Text(rows[i].label, {x0 + 28.0f, y, x0 + panel_w * 0.55f, y + row_h - 6.0f}, 17.0f,
-                 th::Rgba(th::kInk, text_alpha), DWRITE_FONT_WEIGHT_NORMAL);
-        ui_.Text(rows[i].value.c_str(),
-                 {x0 + panel_w * 0.45f, y, x0 + panel_w - 28.0f, y + row_h - 6.0f}, 15.0f,
-                 th::Rgba(rows[i].enabled ? th::kInkDim : th::kMuted, text_alpha),
-                 DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_TRAILING);
-
-        AddHit(Hit::SettingRow, i, row_rect);
-        if (rows[i].enabled) {
-            AddHit(Hit::SettingLeft, i,
-                   {row_rect.left, row_rect.top, row_rect.left + panel_w * 0.35f, row_rect.bottom});
-            AddHit(Hit::SettingRight, i,
-                   {row_rect.left + panel_w * 0.62f, row_rect.top, row_rect.right, row_rect.bottom});
-        }
-
-        y += row_h;
+        ui_.Text(tab_names[i], {tab.left + 26.0f, tab.top, tab.right - 10.0f, tab.bottom}, 15.0f,
+                 th::Rgba(selected ? th::kInk : th::kInkDim));
+        AddHit(Hit::Tab, i, tab);
     }
 
-    DrawHints(L"Up / Down   Select      Left / Right   Change      Enter   Open      S / Esc   Back");
-}
+    ui_.FillRect({324.0f, 140.0f, 325.0f, h - 60.0f}, th::Rgba(0xFFFFFF, 0.06f));
 
-void App::RenderController(double t) {
-    (void)t;
-    const float w = static_cast<float>(window_->width());
-    const float h = static_cast<float>(window_->height());
+    float y = 148.0f;
 
-    ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(0x0A1018), th::Rgba(th::kBgBottom));
-    ui_.FillRadial(w * 0.5f, -h * 0.1f, w * 0.7f, th::Rgba(0x243B63, 0.30f),
-                   th::Rgba(0x243B63, 0.0f));
-
-    const D2D1_RECT_F back{w - 132.0f, 28.0f, w - 40.0f, 64.0f};
-    ui_.FillRounded(back, 18.0f, th::Rgba(0xFFFFFF, hover_ == Hit::Back ? 0.12f : 0.06f));
-    ui_.StrokeRounded(back, 18.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
-    ui_.Text(L"Back", {back.left, back.top, back.right, back.bottom}, 13.0f,
-             th::Rgba(th::kInk, 0.9f), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER);
-    AddHit(Hit::Back, -1, back);
-
-    const float panel_w = std::min(1040.0f, w - 96.0f);
-    const float x0 = (w - panel_w) * 0.5f;
-
-    ui_.Text(L"Controller", {x0, 84.0f, x0 + panel_w, 146.0f}, 40.0f, th::Rgba(th::kInk),
-             DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    std::wstring pad_status = PadStatus(pad_.state());
-    pad_status += L"   ·   ";
-    pad_status += kInputSourceNames[input_source_];
-    if (pad_.is_sony()) {
-        pad_status += last_send_ok_ ? L"   ·   output reports OK" : L"   ·   output reports failed";
-    }
-    ui_.Text(pad_status.c_str(), {x0, 148.0f, x0 + panel_w, 174.0f}, 13.0f,
-             th::Rgba(th::kMuted));
-
-    struct Row {
-        const wchar_t* label;
-        std::wstring value;
-        bool enabled;
-    };
-
-    const std::wstring lightbar_value = Widen("Preset " + std::to_string(lightbar_index_ + 1));
-    const std::wstring strength_value = Widen(std::to_string(trigger_strength_));
-
-    const Row rows[kControllerCount] = {
-        {L"Input source", kInputSourceNames[input_source_], true},
-        {L"Lightbar", lightbar_value, true},
-        {L"Adaptive trigger", kTriggerNames[trigger_effect_], true},
-        {L"Trigger strength", strength_value, true},
-        {L"Rumble test", L"Press Enter", true},
-        {L"Player LEDs", kPlayerLedNames[player_leds_], true},
-        {L"Mic LED", kMicLedNames[mic_led_], true},
-        {L"Back", L"", true},
-    };
-
-    const float row_h = 56.0f;
-    float y = 204.0f;
-
-    for (int i = 0; i < kControllerCount; ++i) {
-        const D2D1_RECT_F row_rect{x0, y, x0 + panel_w, y + row_h - 6.0f};
-        const bool selected = i == controller_row_;
-        const bool hovered = hover_ == Hit::ControllerRow && hover_index_ == i;
-
-        if (selected || hovered) {
-            ui_.FillRounded(row_rect, 12.0f, th::Rgba(0xFFFFFF, hovered ? 0.08f : 0.06f));
-        }
-        if (selected) {
-            ui_.FillRounded({x0 + 10.0f, y + 9.0f, x0 + 14.0f, y + row_h - 15.0f}, 2.0f,
-                            th::Rgba(th::kAccent, 0.95f));
+    switch (tab_) {
+        case Tab::Display: {
+            DrawDropdown(L"Upscaler",
+                         {L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen"}, upscale_, y,
+                         W_Upscaler);
+            y += kRowH;
+            DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
+            y += kRowH;
+            DrawDropdown(L"Frame generation", {L"Off  ·  needs RIFE model"}, 0, y, W_FrameGen,
+                         false);
+            y += kRowH;
+            DrawDropdown(L"HDR output", {L"Off  ·  waits for PS5"}, 0, y, W_Hdr, false);
+            break;
         }
 
-        ui_.Text(rows[i].label, {x0 + 28.0f, y, x0 + panel_w * 0.55f, y + row_h - 6.0f}, 16.0f,
-                 th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_NORMAL);
-        ui_.Text(rows[i].value.c_str(),
-                 {x0 + panel_w * 0.45f, y, x0 + panel_w - 28.0f, y + row_h - 6.0f}, 15.0f,
-                 th::Rgba(th::kInkDim), DWRITE_FONT_WEIGHT_NORMAL,
-                 DWRITE_TEXT_ALIGNMENT_TRAILING);
-
-        AddHit(Hit::ControllerRow, i, row_rect);
-        if (i == 4) {
-            AddHit(Hit::ControllerAction, i, row_rect);
-        } else if (i != 7) {
-            AddHit(Hit::ControllerLeft, i,
-                   {row_rect.left, row_rect.top, row_rect.left + panel_w * 0.35f, row_rect.bottom});
-            AddHit(Hit::ControllerRight, i,
-                   {row_rect.left + panel_w * 0.62f, row_rect.top, row_rect.right, row_rect.bottom});
-        }
-
-        y += row_h;
-    }
-
-    // Live input panel
-    const PadState& pad = pad_.state();
-    const D2D1_RECT_F live{x0, y + 14.0f, x0 + panel_w, y + 14.0f + 132.0f};
-    ui_.FillRounded(live, 14.0f, th::Rgba(0xFFFFFF, 0.04f));
-
-    if (pad.connected) {
-        std::wstring buttons;
-        for (const ButtonLabel& label : kButtonLabels) {
-            if (pad.buttons & label.mask) {
-                if (!buttons.empty()) {
-                    buttons += L"   ";
-                }
-                buttons += label.label;
+        case Tab::Audio: {
+            std::vector<std::wstring> devices;
+            if (audio_devices_.empty()) {
+                devices.push_back(L"System default");
             }
+            for (const audio::DeviceInfo& device : audio_devices_) {
+                std::wstring name = Widen(device.name);
+                if (device.is_default) {
+                    name += L"  (default)";
+                } else if (device.is_controller) {
+                    name += L"  (controller)";
+                }
+                devices.push_back(name);
+            }
+            const int selected_device =
+                std::clamp(audio_device_, 0, static_cast<int>(devices.size()) - 1);
+            DrawDropdown(L"Output device", devices, selected_device, y, W_AudioDevice);
+            y += kRowH;
+            DrawDropdown(L"Buffer", {L"10 ms", L"20 ms", L"30 ms", L"40 ms"},
+                         BufferIndex(audio_buffer_ms_), y, W_AudioBuffer);
+            y += kRowH;
+
+            DrawButton(L"Play test tone", {kContentX, y + 6.0f, kContentX + 220.0f, y + 50.0f},
+                       W_TestTone, false);
+            y += kRowH;
+
+            std::wstring info;
+            if (audio_.is_open()) {
+                wchar_t buffer[256];
+                swprintf_s(buffer, L"%s   ·   %.0f ms   ·   underruns %d",
+                           Widen(audio_.format_text()).c_str(), audio_.latency_ms(),
+                           audio_.underruns());
+                info = buffer;
+            } else {
+                info = audio_failed_ ? L"Could not open the device (busy or removed)"
+                                     : L"Not started";
+            }
+            ui_.Text(info.c_str(), {kContentX, y, w - 64.0f, y + 40.0f}, 12.0f,
+                     th::Rgba(th::kMuted));
+            break;
         }
-        if (buttons.empty()) {
-            buttons = L"none";
+
+        case Tab::Controller: {
+            DrawDropdown(L"Input source", {kInputSourceNames[0], kInputSourceNames[1],
+                                           kInputSourceNames[2]},
+                         input_source_, y, W_InputSource);
+            y += kRowH;
+            DrawDropdown(L"Lightbar", {kLightbarNames[0], kLightbarNames[1], kLightbarNames[2],
+                                       kLightbarNames[3], kLightbarNames[4], kLightbarNames[5],
+                                       kLightbarNames[6], kLightbarNames[7]},
+                         lightbar_index_, y, W_Lightbar);
+            y += kRowH;
+            DrawDropdown(L"Adaptive trigger",
+                         {kTriggerNames[0], kTriggerNames[1], kTriggerNames[2], kTriggerNames[3],
+                          kTriggerNames[4], kTriggerNames[5], kTriggerNames[6], kTriggerNames[7]},
+                         trigger_effect_, y, W_Trigger);
+            y += kRowH;
+            DrawDropdown(L"Trigger strength",
+                         {L"1", L"2", L"3", L"4", L"5", L"6", L"7", L"8"}, trigger_strength_ - 1,
+                         y, W_Strength);
+            y += kRowH;
+            DrawDropdown(L"Player LEDs",
+                         {kPlayerLedNames[0], kPlayerLedNames[1], kPlayerLedNames[2],
+                          kPlayerLedNames[3], kPlayerLedNames[4], kPlayerLedNames[5]},
+                         player_leds_, y, W_PlayerLeds);
+            y += kRowH;
+            DrawDropdown(L"Mic LED", {kMicLedNames[0], kMicLedNames[1], kMicLedNames[2]}, mic_led_,
+                         y, W_MicLed);
+            y += kRowH;
+
+            DrawButton(L"Rumble test", {kContentX, y + 6.0f, kContentX + 220.0f, y + 50.0f},
+                       W_Rumble, false);
+            y += kRowH;
+
+            std::wstring status = PadStatus(pad_.state());
+            if (pad_.is_sony()) {
+                status += last_send_ok_ ? L"   ·   output reports OK" : L"   ·   output reports failed";
+            }
+            ui_.Text(status.c_str(), {kContentX, y, w - 64.0f, y + 40.0f}, 12.0f,
+                     th::Rgba(th::kMuted));
+            break;
         }
 
-        wchar_t line[256];
-        swprintf_s(line, L"Buttons   %s", buttons.c_str());
-        ui_.Text(line, {live.left + 24.0f, live.top + 10.0f, live.right - 24.0f, live.top + 40.0f},
-                 13.0f, th::Rgba(th::kInkDim));
+        case Tab::Connection: {
+            DrawInfoRow(L"Console",
+                        profile_.has_console() ? Widen(profile_.display_name())
+                                               : std::wstring(L"None"),
+                        y);
+            y += kRowH;
+            DrawInfoRow(L"Address", profile_.host.empty() ? L"Not set" : Widen(profile_.host), y);
+            y += kRowH;
+            DrawInfoRow(L"Pairing",
+                        profile_.needs_pairing() ? L"Needed (8-digit console code)" : L"Paired", y);
+            y += kRowH;
+            DrawInfoRow(L"PSN account",
+                        profile_.psn_account_id.empty() ? L"Not set" : L"Imported", y);
+            y += kRowH;
+            DrawInfoRow(L"Stream defaults",
+                        Widen(std::to_string(profile_.bitrate_kbps / 1000) + " Mbps · " +
+                              profile_.codec + (profile_.hdr ? " · HDR" : " · SDR")),
+                        y);
+            y += kRowH;
 
-        swprintf_s(line, L"Sticks    L %.2f / %.2f      R %.2f / %.2f", pad.lx, pad.ly, pad.rx,
-                   pad.ry);
-        ui_.Text(line, {live.left + 24.0f, live.top + 38.0f, live.right - 24.0f, live.top + 64.0f},
-                 13.0f, th::Rgba(th::kInkDim));
+            DrawButton(L"Test reachability", {kContentX, y + 6.0f, kContentX + 240.0f, y + 50.0f},
+                       W_Probe, true);
+            y += kRowH;
 
-        swprintf_s(line, L"Triggers  L2 %.2f      R2 %.2f", pad.l2, pad.r2);
-        ui_.Text(line, {live.left + 24.0f, live.top + 64.0f, live.right - 24.0f, live.top + 90.0f},
-                 13.0f, th::Rgba(th::kInkDim));
-
-        if (pad.touch[0].active) {
-            swprintf_s(line, L"Touch     %u, %u      Touchpad %s", pad.touch[0].x,
-                       pad.touch[0].y, (pad.buttons & PadTouchpad) ? L"pressed" : L"");
-        } else {
-            swprintf_s(line, L"Touch     -");
+            std::wstring detail = Widen(probe_.detail());
+            if (detail.empty()) {
+                detail = L"Checks whether something answers on the control port (9295).";
+            }
+            ui_.Text(detail.c_str(), {kContentX, y, w - 64.0f, y + 44.0f}, 12.0f,
+                     th::Rgba(th::kMuted));
+            break;
         }
-        ui_.Text(line, {live.left + 24.0f, live.top + 90.0f, live.right - 24.0f, live.top + 116.0f},
-                 13.0f, th::Rgba(th::kInkDim));
-    } else {
-        ui_.Text(L"Connect a DualSense (USB or Bluetooth) to test lightbar, triggers and rumble.",
-                 {live.left + 24.0f, live.top + 10.0f, live.right - 24.0f, live.bottom - 10.0f},
-                 13.0f, th::Rgba(th::kMuted));
+
+        case Tab::About: {
+            ui_.Text(L"BetterRemotePlay 0.3", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
+                     th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+            y += 48.0f;
+            ui_.Text(L"A PS5 to PC Remote Play client with a real post-process pipeline: "
+                     L"color, upscaling, latency instrumentation, DualSense output and "
+                     L"in-process audio.",
+                     {kContentX, y, w - 64.0f, y + 56.0f}, 13.0f, th::Rgba(th::kInkDim));
+            y += 70.0f;
+            ui_.Text(L"Not affiliated with Sony Interactive Entertainment. No Sony code, keys "
+                     L"or assets are included.",
+                     {kContentX, y, w - 64.0f, y + 56.0f}, 13.0f, th::Rgba(th::kMuted));
+            y += 60.0f;
+            ui_.Text(L"Docs: docs/01-landscape.md … docs/12-steam-input.md",
+                     {kContentX, y, w - 64.0f, y + 40.0f}, 13.0f, th::Rgba(th::kMuted));
+            break;
+        }
     }
 
-    DrawHints(L"Up / Down   Select      Left / Right   Change      Enter   Rumble      C / Esc   Back");
-}
+    DrawPopup();
 
-void App::RenderAudio(double t) {
-    (void)t;
-    const float w = static_cast<float>(window_->width());
-    const float h = static_cast<float>(window_->height());
-
-    ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(0x0A1018), th::Rgba(th::kBgBottom));
-    ui_.FillRadial(w * 0.5f, -h * 0.1f, w * 0.7f, th::Rgba(0x1E5A4A, 0.30f),
-                   th::Rgba(0x1E5A4A, 0.0f));
-
-    const D2D1_RECT_F back{w - 132.0f, 28.0f, w - 40.0f, 64.0f};
-    ui_.FillRounded(back, 18.0f, th::Rgba(0xFFFFFF, hover_ == Hit::Back ? 0.12f : 0.06f));
-    ui_.StrokeRounded(back, 18.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
-    ui_.Text(L"Back", {back.left, back.top, back.right, back.bottom}, 13.0f,
-             th::Rgba(th::kInk, 0.9f), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER);
-    AddHit(Hit::Back, -1, back);
-
-    const float panel_w = std::min(1040.0f, w - 96.0f);
-    const float x0 = (w - panel_w) * 0.5f;
-
-    ui_.Text(L"Audio", {x0, 84.0f, x0 + panel_w, 146.0f}, 40.0f, th::Rgba(th::kInk),
-             DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    ui_.Text(L"WASAPI shared mode, in-process: no virtual cable, no driver. The DualSense "
-             L"3.5 mm jack is a standard USB audio endpoint (USB only).",
-             {x0, 148.0f, x0 + panel_w, 174.0f}, 13.0f, th::Rgba(th::kMuted));
-
-    std::wstring device_value;
-    if (audio_devices_.empty()) {
-        device_value = L"System default";
-    } else {
-        const audio::DeviceInfo& info = audio_devices_[static_cast<size_t>(audio_device_)];
-        device_value = Widen(info.name);
-        if (info.is_default) {
-            device_value += L"  (default)";
-        } else if (info.is_controller) {
-            device_value += L"  (controller)";
-        }
-    }
-
-    struct Row {
-        const wchar_t* label;
-        std::wstring value;
-        bool enabled;
-    };
-
-    const Row rows[kAudioCount] = {
-        {L"Output device", device_value, true},
-        {L"Buffer", Widen(std::to_string(audio_buffer_ms_) + " ms"), true},
-        {L"Test tone", L"Enter", true},
-        {L"Back", L"", true},
-    };
-
-    const float row_h = 56.0f;
-    float y = 204.0f;
-
-    for (int i = 0; i < kAudioCount; ++i) {
-        const D2D1_RECT_F row_rect{x0, y, x0 + panel_w, y + row_h - 6.0f};
-        const bool selected = i == audio_row_;
-        const bool hovered = hover_ == Hit::AudioRow && hover_index_ == i;
-
-        if (selected || hovered) {
-            ui_.FillRounded(row_rect, 12.0f, th::Rgba(0xFFFFFF, hovered ? 0.08f : 0.06f));
-        }
-        if (selected) {
-            ui_.FillRounded({x0 + 10.0f, y + 9.0f, x0 + 14.0f, y + row_h - 15.0f}, 2.0f,
-                            th::Rgba(th::kOnline, 0.95f));
-        }
-
-        ui_.Text(rows[i].label, {x0 + 28.0f, y, x0 + panel_w * 0.45f, y + row_h - 6.0f}, 16.0f,
-                 th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_NORMAL);
-        if (!rows[i].value.empty()) {
-            ui_.Text(rows[i].value.c_str(),
-                     {x0 + panel_w * 0.30f, y, x0 + panel_w - 28.0f, y + row_h - 6.0f}, 15.0f,
-                     th::Rgba(th::kInkDim), DWRITE_FONT_WEIGHT_NORMAL,
-                     DWRITE_TEXT_ALIGNMENT_TRAILING);
-        }
-
-        AddHit(Hit::AudioRow, i, row_rect);
-        if (i == 2) {
-            AddHit(Hit::AudioAction, i, row_rect);
-        } else if (i == 0 || i == 1) {
-            AddHit(Hit::AudioLeft, i,
-                   {row_rect.left, row_rect.top, row_rect.left + panel_w * 0.30f, row_rect.bottom});
-            AddHit(Hit::AudioRight, i,
-                   {row_rect.left + panel_w * 0.62f, row_rect.top, row_rect.right, row_rect.bottom});
-        }
-
-        y += row_h;
-    }
-
-    const D2D1_RECT_F live{x0, y + 14.0f, x0 + panel_w, y + 14.0f + 150.0f};
-    ui_.FillRounded(live, 14.0f, th::Rgba(0xFFFFFF, 0.04f));
-
-    if (audio_.is_open()) {
-        wchar_t line[512];
-        swprintf_s(line, L"Device      %s", Widen(audio_.device_name()).c_str());
-        ui_.Text(line, {live.left + 24.0f, live.top + 12.0f, live.right - 24.0f, live.top + 36.0f},
-                 13.0f, th::Rgba(th::kInkDim));
-
-        swprintf_s(line, L"Format      %s", Widen(audio_.format_text()).c_str());
-        ui_.Text(line, {live.left + 24.0f, live.top + 38.0f, live.right - 24.0f, live.top + 62.0f},
-                 13.0f, th::Rgba(th::kInkDim));
-
-        swprintf_s(line, L"Latency     %.1f ms        Underruns  %d", audio_.latency_ms(),
-                   audio_.underruns());
-        ui_.Text(line, {live.left + 24.0f, live.top + 64.0f, live.right - 24.0f, live.top + 88.0f},
-                 13.0f, th::Rgba(th::kInkDim));
-
-        // Peak meter
-        const D2D1_RECT_F meter{live.left + 24.0f, live.top + 104.0f, live.left + 24.0f + 320.0f,
-                                live.top + 120.0f};
-        ui_.FillRounded(meter, 4.0f, th::Rgba(0xFFFFFF, 0.08f));
-        const float level = std::clamp(audio_.peak(), 0.0f, 1.0f);
-        if (level > 0.001f) {
-            ui_.FillRounded({meter.left, meter.top, meter.left + 320.0f * level, meter.bottom},
-                            4.0f, th::Rgba(level > 0.98f ? 0xFF6B6B : th::kOnline, 0.9f));
-        }
-        ui_.Text(L"Peak", {meter.right + 16.0f, meter.top - 8.0f, meter.right + 90.0f,
-                           meter.bottom + 8.0f},
-                12.0f, th::Rgba(th::kMuted));
-    } else {
-        ui_.Text(audio_failed_
-                     ? L"Could not open the device. It may be in use exclusively or was removed."
-                     : L"Not started. Press Enter on Output device to open the endpoint.",
-                 {live.left + 24.0f, live.top + 12.0f, live.right - 24.0f, live.bottom - 12.0f},
-                 13.0f, th::Rgba(th::kMuted));
-    }
-
-    DrawHints(L"Up / Down   Select      Left / Right   Change      Enter   Play tone      M / Esc   Back");
+    DrawHints(L"Click a category, then a dropdown      Tab / Left / Right   switch category"
+              L"      Esc   back");
 }
 
 void App::RenderStream(double t) {
@@ -1229,5 +1097,5 @@ void App::RenderStream(double t) {
              th::Rgba(th::kInk, 0.9f), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER);
     AddHit(Hit::Back, -1, back);
 
-    DrawHints(L"Esc   Back      H   Toggle HUD      1 / 2 / 3   Upscaler");
+    DrawHints(L"Esc   back      H   toggle HUD      1 / 2 / 3   upscaler");
 }

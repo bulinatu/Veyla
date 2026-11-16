@@ -2,11 +2,12 @@
 
 A better PlayStation 5 → PC Remote Play client.
 
-**Status:** Phase 1 — app with mouse/controller navigation, DualSense layer, and an in-process WASAPI audio engine (no drivers, no virtual cables). No console session yet.
+**Status:** Phase 1 — mouse-first app: console card on Home, categorized settings with dropdowns, real reachability probe, DualSense layer, in-process audio. No PS5 session yet.
 
 **What exists right now**
 
-- **`brp.exe` — the app.** PS5-inspired rail, settings, controller lab, and a stream screen running the real post-process pipeline with a live latency HUD. Mouse and controller navigation, no browser in the video path. See [docs/08-app.md](docs/08-app.md) and [docs/10-input.md](docs/10-input.md).
+- **`brp.exe` — the app.** Home with a game rail and a console card, five settings categories with dropdowns, and a stream screen running the real post-process pipeline. Mouse-first, no browser in the video path. See [docs/08-app.md](docs/08-app.md).
+- **Connection.** `Connect` runs a real TCP probe of the console control port (9295) and reports reachable/unreachable; pairing is the next step. See [docs/13-connection.md](docs/13-connection.md).
 - **DualSense support.** Raw HID (no DS4Windows) + XInput fallback. Parse: buttons, sticks, triggers, touch points, gyro/accel, battery. Output: lightbar RGB, 8 adaptive-trigger effects, rumble, player LEDs, mic LED. Bluetooth output uses the `0x31` report with CRC32. Input source is selectable: native HID, or XInput (which is how Steam Input's Xbox emulation is consumed).
 - **Audio.** WASAPI shared-mode engine inside the app: 48 kHz float stereo in, endpoint out. No virtual cable, no driver, no external DLL. The DualSense 3.5 mm jack is a normal USB audio endpoint — select it and audio goes to the controller. See [docs/11-audio.md](docs/11-audio.md).
 - **Session import.** Console identity + PSN account from a local PXPlay install (metadata only — PXPlay encrypts its keys; see [docs/09-session.md](docs/09-session.md)).
@@ -23,12 +24,10 @@ A better PlayStation 5 → PC Remote Play client.
 
 | Screen | Keys |
 |---|---|
-| Home | `Left`/`Right` select · `Enter` stream · `S` settings · `C` controller · `M` audio · `Esc` quit |
-| Settings | `Up`/`Down` · `Left`/`Right` change · `Enter` open · `S`/`Esc` back |
-| Controller | `Up`/`Down` · `Left`/`Right` change · `Enter` rumble · `C`/`Esc` back |
-| Audio | `Up`/`Down` · `Left`/`Right` change · `Enter` test tone · `M`/`Esc` back |
+| Home | `Left`/`Right` select · `Enter` stream · `S` settings · `Esc` quit |
+| Settings | `Tab` / `Left` / `Right` switch category · `Esc` close dropdown / back |
 | Stream | `Esc` back · `H` HUD · `1`/`2`/`3` upscaler · `F12` screenshot |
-| Mouse | Click tiles / rows / buttons; wheel moves selection |
+| Mouse | Click categories, dropdowns, items and buttons; wheel moves the rail |
 
 ---
 
@@ -91,6 +90,7 @@ Useful flags: `--width/--height` output size, `--src-width/--src-height` source 
 | [docs/10-input.md](docs/10-input.md) | Mouse, keyboard, controller navigation, DualSense input/output matrix |
 | [docs/11-audio.md](docs/11-audio.md) | Audio: WASAPI in-process, DualSense jack over USB, latency, A/V clock plan |
 | [docs/12-steam-input.md](docs/12-steam-input.md) | Steam Input: Xbox emulation vs Steamworks API, trade-offs, setup |
+| [docs/13-connection.md](docs/13-connection.md) | What Connect does today: reachability probe, states, what pairing adds |
 
 ## Legal note
 

@@ -1,93 +1,103 @@
 # 08 — The application shell
 
-Status: **v0.2 — navigable app, no console attached.** Everything on screen is real except the game library and the stream source, which are demo data standing in for PSN metadata and the PS5 decoder.
+Status: **v0.3 — mouse-first UI, console card, categorized settings with dropdowns.** Everything on screen is real except the game library and the stream source, which are demo data standing in for PSN metadata and the PS5 decoder.
 
 ---
 
-## What it is
+## Screens
 
-One native window, one D3D11 device, no browser:
+### Home
 
-- **Home** — PS5-inspired horizontal rail, animated selection, dynamic accent glow, live clock and console status.
-- **Settings** — working upscaler and HUD toggles; console-dependent rows are visible but clearly marked as waiting.
-- **Stream** — the measured post-process pipeline running full-window, with a live latency HUD.
+- Horizontal game rail, spring-animated selection, dynamic accent glow.
+- **Console card** (top right): console name, status, address, and a `Connect` button.
+- `Stream` opens the stream screen for the selected game.
+- Bottom-left shows the connected controller.
 
 ![Home](images/app-home.png)
 
-![Settings](images/app-settings.png)
+### Settings
 
-![Stream](images/app-stream.png)
+Five categories in a left sidebar, each with its own settings — nothing is lumped together:
 
-The stream screen is the same code path that will carry the PS5 feed: `source frame → color/upscale stage → present`. Today the source is a synthetic frame generator; swapping in an HEVC decoder output changes one pointer, not the pipeline.
+| Category | Contents |
+|---|---|
+| Display | Upscaler, latency HUD, frame generation (reserved), HDR (reserved) |
+| Audio | Output device, buffer size, test tone, live format/latency/underruns |
+| Controller | Input source, lightbar, adaptive trigger, strength, player LEDs, mic LED, rumble |
+| Connection | Console, address, pairing, PSN account, stream defaults, reachability test |
+| About | Version, description, legal note |
+
+Every setting is a **dropdown** (or a button), not a key cycle. Dropdowns open a popup list, close on outside click, and show the current value with ellipsis when it does not fit.
+
+![Settings — Display with an open dropdown](images/app-settings-display.png)
+
+![Settings — Audio](images/app-settings-audio.png)
+
+![Settings — Controller](images/app-settings-controller.png)
+
+![Settings — Connection after a probe](images/app-settings-connection.png)
+
+### Stream
+
+The measured post-process pipeline running full-window, with a live latency HUD and a controller chip.
 
 ---
 
-## Keys
+## Controls
 
-| Screen | Keys |
+| Where | Action |
 |---|---|
-| Home | `Left` / `Right` (or `A` / `D`) move selection · `Enter` stream · `S` or `Tab` settings · `Esc` quit |
-| Settings | `Up` / `Down` select row · `Left` / `Right` change value · `S` / `Esc` back |
-| Stream | `Esc` back · `H` toggle HUD · `1` / `2` / `3` upscaler |
+| Mouse | Hover highlights, click selects/activates, wheel moves the rail |
+| Home | `Left`/`Right` select · `Enter` stream · `S` settings · `Esc` quit |
+| Settings | `Tab` / `Left` / `Right` switch category · `Esc` closes a dropdown, then leaves |
+| Stream | `Esc` back · `H` HUD · `1`/`2`/`3` upscaler |
 | Any | `F12` capture the current frame to `app-<screen>.bmp` |
+
+Controller navigation still works on Home (d-pad/stick, Cross, Circle, Options).
 
 ---
 
 ## Code map
 
 ```
-src/main_app.cpp          message loop, 60 Hz pacing
-src/app/app.{h,cpp}       screens, layout, input, animation, demo library
-src/ui/ui_renderer.*      Direct2D + DirectWrite wrapper (rects, rounded clips,
-                          gradients, text cache)
-src/ui/theme.h            palette; 0xRRGGBB + alpha helpers
-src/media/pipeline.*      D3D11 device + flip-model swapchain + stream surface
-src/platform/win32_window.*  window + message pump, per-monitor DPI
-tools/brp-bench/          headless-ish benchmark of the media path
-tools/d2d_probe/          isolates D2D/D3D11 interop problems from app code
-tools/imgstat.py          detail/clipping metrics on captured frames
+src/main_app.cpp              message loop, 60 Hz pacing
+src/app/app.{h,cpp}           screens, hit regions, dropdowns, layout, animation
+src/ui/ui_renderer.*          Direct2D + DirectWrite (rects, rounded clips,
+                              gradients, text cache, ellipsis trimming)
+src/ui/theme.h                palette
+src/media/pipeline.*          D3D11 device, flip-model swapchain, stream surface
+src/audio/audio_engine.*      WASAPI render engine (in-process, no driver)
+src/net/reachability.*        TCP probe for the console control port
+src/session/profile.*         session file, PXPlay metadata import
+src/platform/gamepad.*        HID (DualSense/DS4) + XInput
+src/platform/win32_window.*   window, mouse/keyboard, per-monitor DPI
 ```
 
-`brp` = the app, `brp-bench` = the benchmark, `brp_media` / `brp_ui` = static libs.
+---
+
+## Design rules
+
+1. **No browser in the video path.** Direct2D onto the same swapchain; only the HUD composites over the stream.
+2. **One device.** Decoder, post-process, presenter and UI share one `ID3D11Device`.
+3. **Hit regions are built while drawing**, then tested in reverse draw order, so a click can never miss what is visible. Dropdown items are registered last, which is why a popup always wins over the control beneath it.
+4. **No fake controls.** Rows that are not implemented are disabled and labelled (for example `Off · needs RIFE model`), and `Connect` performs a real reachability probe rather than pretending to pair.
 
 ---
 
-## Design rules that are now enforced by the code
-
-1. **No browser in the video path.** The shell is Direct2D drawing onto the same swapchain. Nothing composites over the stream except the HUD, in the same pass.
-2. **One device.** The decoder, the post-process chain, the presenter, and the UI share one `ID3D11Device`. Zero cross-device copies.
-3. **The UI can never own a frame.** `App` calls `presenter.Render()` / `Clear()` and then draws. It does not allocate or queue frames.
-4. **Logging over guessing.** The pipeline reports per-frame GPU p50/p95; the HUD shows it live.
-
----
-
-## Gotchas found while building this (worth keeping)
-
-- **Direct2D refuses a target bitmap unless the underlying texture has `D3D11_BIND_SHADER_RESOURCE`.** A default swapchain backbuffer has only `RENDER_TARGET`. Fix: create the swapchain with `BufferUsage = RENDER_TARGET_OUTPUT | SHADER_INPUT`. Without it, every `CreateBitmapFromDxgiSurface` call returns `E_INVALIDARG` — with no useful diagnostics. Reproduce/verify with `d2d_probe`.
-- **D2D holds a reference to the backbuffer.** `ResizeBuffers` then fails with `DXGI_ERROR_INVALID_CALL`. Order must be: `ui.ReleaseTarget()` → `swapchain.ResizeBuffers()` → rebind target.
-- **`D2D1CreateDevice` requires the D3D11 device to be created with `D3D11_CREATE_DEVICE_BGRA_SUPPORT`.**
-- **Vsync is not a frame limiter on virtual/remote displays.** The UI loop paces itself at 60 Hz explicitly; without that it spun at ~2300 fps.
-
----
-
-## What is demo data, and what that means
+## What is demo data
 
 | Thing | Now | When wired |
 |---|---|---|
-| Game library | 8 invented titles with procedural art | PSN library via OAuth (Phase 6) |
-| Status dot | always "Console offline" | discovery result + session state |
-| Stream source | synthetic 1080p generator | HEVC decode output (Phase 2) |
-| HUD bitrate | not shown | requested vs actual from the session |
-| Frame generation row | disabled, labeled "needs RIFE model" | TensorRT RIFE stage (Phase 5) |
-| HDR row | disabled, labeled "waits for PS5" | 10-bit swapchain + PQ path (Phase 2) |
-
-Nothing in the UI claims a capability the pipeline doesn't have. That is deliberate: a settings screen that lies is worse than a shorter one.
+| Game library | 8 invented titles with procedural art | PSN library via OAuth |
+| Console card | Real metadata imported from PXPlay | Live discovery + session state |
+| `Connect` | TCP probe of port 9295 | Pairing + session handshake |
+| Stream source | Synthetic 1080p generator | HEVC decode output |
+| Bitrate / codec / HDR | Stored in the session profile, shown read-only | Negotiated with the console |
 
 ---
 
 ## Next
 
-1. Compile chiaki-ng's core into `brp-session`, pair the console, and replace the synthetic source with decoded frames.
-2. Swap the shader upscaler for CAS/NIS (no crushed blacks — see [07-bench-log.md](07-bench-log.md)).
-3. Fullscreen/exclusive presentation mode, so the output resolution setting is exact instead of window-sized.
-4. Command-line/config profiles per game, so the rail tiles can carry their own stream settings.
+1. Wire the chiaki-ng core into `brp-session` and turn `Connect` into a real pairing flow.
+2. Feed decoded Opus into the audio engine and decoded video into the presenter.
+3. Replace the rail's demo library with the user's PSN library.
