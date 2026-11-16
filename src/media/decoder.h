@@ -38,11 +38,13 @@ private:
     void* packet_ = nullptr;       // AVPacket*
     void* frame_ = nullptr;        // AVFrame*
     void* scaler_ = nullptr;       // SwsContext*
+    void* hw_device_ = nullptr;    // AVBufferRef* (D3D11VA)
+    void* sw_frame_ = nullptr;     // AVFrame* for hw->system transfer
+    bool hardware_ = false;
     int stream_index_ = -1;
     int width_ = 0;
     int height_ = 0;
     int frame_count_ = 0;
     std::string codec_name_;
 };
-
 }  // namespace brp::media
