@@ -28,6 +28,29 @@ if (MSVC)
     target_compile_options(brp-bench PRIVATE /W4 /permissive- /utf-8)
 endif()
 
+# --- Application shell (Direct2D UI over the same D3D11 device) -------------
+
+add_library(brp_ui STATIC
+    src/ui/ui_renderer.cpp
+)
+target_include_directories(brp_ui PUBLIC src)
+target_link_libraries(brp_ui PUBLIC brp_media d2d1 dwrite)
+
+add_executable(brp
+    src/main_app.cpp
+    src/app/app.cpp
+)
+target_link_libraries(brp PRIVATE brp_ui)
+
+# Diagnostic only: isolates D2D/D3D11 interop problems from app code.
+add_executable(d2d_probe tools/d2d_probe/main.cpp)
+target_link_libraries(d2d_probe PRIVATE d2d1 d3d11 dxgi)
+
+if (MSVC)
+    target_compile_options(brp_ui PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(brp PRIVATE /W4 /permissive- /utf-8)
+endif()
+
 # The real client will link the forked chiaki-ng session layer.
 # vendor/chiaki-ng/lib/src is the transport/protocol core (session, ctrl, takion,
 # fec, videoreceiver, audioreceiver, controller, discovery, regist, ...).

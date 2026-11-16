@@ -2,15 +2,29 @@
 
 A better PlayStation 5 → PC Remote Play client.
 
-**Status:** Phase 1 — toolchain, fork vendored, presentation path measured on real hardware. No decoder wired yet.
+**Status:** Phase 1 — the app runs. Home / Settings / Stream screens are live, the post-process pipeline is measured on real hardware, the chiaki-ng core is vendored. No console attached yet.
 
 **What exists right now**
 
-- `brp-bench`: a working D3D11 flip-model presenter + GPU post-process chain (synthetic 1080p frame → upscale → present) with per-frame GPU timestamps. Measures 0.19 ms p50 at 4K on the target machine. See [docs/07-bench-log.md](docs/07-bench-log.md).
-- `vendor/chiaki-ng`: the forked protocol core, pinned as a submodule (42 C sources ready to become `brp-session`).
-- Docs: protocol limits, feasibility matrix, architecture, 8-phase roadmap, decision log.
+- **`brp.exe` — the app.** PS5-inspired rail, settings, and a stream screen running the real post-process pipeline with a live latency HUD. Keyboard-driven, no browser in the video path. See [docs/08-app.md](docs/08-app.md).
+- **`brp-bench`** — headless-ish benchmark of the same media path, with per-frame GPU timestamps. 0.19 ms p50 at 1080p→4K on the target machine. See [docs/07-bench-log.md](docs/07-bench-log.md).
+- **`d2d_probe`** — isolates Direct2D/D3D11 interop failures from app code (it earned its keep: see the gotchas in 08).
+- **`tools/imgstat.py`** — detail/clipping metrics for captured frames.
+- **`vendor/chiaki-ng`** — forked protocol core, pinned as a submodule (42 C sources ready to become `brp-session`).
+- Docs: protocol limits, feasibility matrix, architecture, roadmap, ADRs, bench log, app notes.
 
-**Not yet:** decode, RTP wiring, PSN OAuth, shell, neural stages.
+**Not yet:** decode, RTP wiring, PSN OAuth, neural stages, HDR output.
+
+```powershell
+.\scripts\build.ps1
+.\build\Release\brp.exe
+```
+
+| Screen | Keys |
+|---|---|
+| Home | `Left`/`Right` select · `Enter` stream · `S` settings · `Esc` quit |
+| Settings | `Up`/`Down` · `Left`/`Right` change · `S`/`Esc` back |
+| Stream | `Esc` back · `H` HUD · `1`/`2`/`3` upscaler · `F12` screenshot |
 
 ---
 
@@ -68,6 +82,7 @@ Useful flags: `--width/--height` output size, `--src-width/--src-height` source 
 | [docs/05-roadmap.md](docs/05-roadmap.md) | Phased plan with acceptance criteria and measurable targets |
 | [docs/06-decisions.md](docs/06-decisions.md) | ADR log: fork, neural stages, network defaults, UI, measurement policy |
 | [docs/07-bench-log.md](docs/07-bench-log.md) | Measured results on the target machine, with interpretation |
+| [docs/08-app.md](docs/08-app.md) | The app: screens, keys, code map, design rules, interop gotchas |
 
 ## Legal note
 

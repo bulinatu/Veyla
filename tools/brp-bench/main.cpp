@@ -110,6 +110,9 @@ int main(int argc, char** argv) {
         }
 
         const int key = window.ConsumeKey();
+        if (key == VK_ESCAPE) {
+            break;
+        }
         if (key >= '1' && key <= '3') {
             presenter.SetUpscaleMode(key - '1');
         }

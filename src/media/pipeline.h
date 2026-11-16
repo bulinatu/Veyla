@@ -51,6 +51,16 @@ public:
     void SetUpscaleMode(int mode);
     int upscale_mode() const { return cfg_.upscale_mode; }
 
+    // Accessors so the app can composite Direct2D UI over the same surface.
+    ID3D11Device* device() const { return device_.Get(); }
+    ID3D11DeviceContext* context() const { return context_.Get(); }
+    IDXGISwapChain1* swapchain() const { return swapchain_.Get(); }
+    ID3D11Texture2D* backbuffer() const { return backbuffer_.Get(); }
+    ID3D11RenderTargetView* rtv() const { return rtv_.Get(); }
+
+    void Clear(const float rgba[4]);
+    void PresentNow(bool vsync);
+
     // Copies the current backbuffer to a 32-bit BMP. Must be called between
     // Render() and Present(): the backbuffer is only readable there.
     bool CaptureToBmp(const char* path);

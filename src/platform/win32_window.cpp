@@ -16,6 +16,9 @@ Win32Window::~Win32Window() {
 bool Win32Window::Create(const wchar_t* title, int width, int height) {
     HINSTANCE instance = GetModuleHandleW(nullptr);
 
+    // Per-monitor DPI so the UI is drawn in real pixels on every display.
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.style = CS_HREDRAW | CS_VREDRAW;
@@ -113,10 +116,6 @@ LRESULT Win32Window::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
         }
 
         case WM_KEYDOWN:
-            if (wparam == VK_ESCAPE) {
-                PostMessageW(hwnd, WM_CLOSE, 0, 0);
-                return 0;
-            }
             last_key_ = static_cast<int>(wparam);
             return 0;
 

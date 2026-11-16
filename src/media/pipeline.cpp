@@ -63,7 +63,7 @@ bool Presenter::Init(HWND hwnd, const PresenterConfig& cfg) {
     hwnd_ = hwnd;
     cfg_ = cfg;
 
-    UINT device_flags = 0;
+    UINT device_flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 #if defined(_DEBUG)
     device_flags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
@@ -108,7 +108,7 @@ bool Presenter::Init(HWND hwnd, const PresenterConfig& cfg) {
     desc.Stereo = FALSE;
     desc.SampleDesc.Count = 1;
     desc.SampleDesc.Quality = 0;
-    desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_SHADER_INPUT;
     desc.BufferCount = 2;
     desc.Scaling = DXGI_SCALING_STRETCH;
     desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
@@ -242,6 +242,7 @@ bool Presenter::Resize(int width, int height) {
     HRESULT hr = swapchain_->ResizeBuffers(0, static_cast<UINT>(width), static_cast<UINT>(height),
                                            DXGI_FORMAT_UNKNOWN, flags);
     if (FAILED(hr)) {
+        std::fprintf(stderr, "ResizeBuffers failed: 0x%08lX\n", static_cast<unsigned long>(hr));
         return false;
     }
 
@@ -374,17 +375,31 @@ void Presenter::Render(double time_seconds) {
     }
 }
 
-void Presenter::Present() {
+void Presenter::Clear(const float rgba[4]) {
+    ID3D11RenderTargetView* rtv = rtv_.Get();
+    context_->OMSetRenderTargets(1, &rtv, nullptr);
+    context_->ClearRenderTargetView(rtv, rgba);
+}
+
+void Presenter::PresentNow(bool vsync) {
     const UINT present_flags =
-        (tearing_ && cfg_.allow_tearing && !cfg_.vsync) ? DXGI_PRESENT_ALLOW_TEARING : 0;
-    swapchain_->Present(cfg_.vsync ? 1 : 0, present_flags);
+        (tearing_ && cfg_.allow_tearing && !vsync) ? DXGI_PRESENT_ALLOW_TEARING : 0;
+    swapchain_->Present(vsync ? 1 : 0, present_flags);
 
     CollectTiming();
     ++frames_;
 }
 
+void Presenter::Present() {
+    PresentNow(cfg_.vsync);
+}
+
 bool Presenter::CaptureToBmp(const char* path) {
+    if (!backbuffer_) {
+        return false;
+    }
     D3D11_TEXTURE2D_DESC td{};
+    backbuffer_->GetDesc(&td);
     backbuffer_->GetDesc(&td);
     td.Usage = D3D11_USAGE_STAGING;
     td.BindFlags = 0;
@@ -393,6 +408,7 @@ bool Presenter::CaptureToBmp(const char* path) {
 
     ComPtr<ID3D11Texture2D> staging;
     if (FAILED(device_->CreateTexture2D(&td, nullptr, &staging))) {
+        std::fprintf(stderr, "[capture] staging texture failed\n");
         return false;
     }
 
@@ -400,6 +416,7 @@ bool Presenter::CaptureToBmp(const char* path) {
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (FAILED(context_->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+        std::fprintf(stderr, "[capture] map failed\n");
         return false;
     }
 
@@ -410,6 +427,7 @@ bool Presenter::CaptureToBmp(const char* path) {
 
     std::FILE* f = nullptr;
     if (::fopen_s(&f, path, "wb") != 0 || f == nullptr) {
+        std::fprintf(stderr, "[capture] fopen failed\n");
         context_->Unmap(staging.Get(), 0);
         return false;
     }
