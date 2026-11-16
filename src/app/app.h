@@ -14,6 +14,7 @@
 #include "media/nv_vfx.h"
 #include "media/nv_vsr.h"
 #include "media/nv_dlss_sr.h"
+#include "media/nv_dlssnr.h"
 #include "media/pipeline.h"
 #include "net/reachability.h"
 #include "platform/gamepad.h"
@@ -54,7 +55,7 @@ public:
 
 private:
     enum class Screen { Home, Settings, Stream, StreamSettings };
-    enum class Tab { Display, Upscaling, Neural, Audio, Controller, Connection, About };
+    enum class Tab { Display, Upscaling, Performance, Neural, Audio, Controller, Connection, About };
 
     enum class Hit {
         None,
@@ -136,6 +137,12 @@ private:
     bool EnsureDlssSr(int in_width, int in_height);
     std::wstring FindDlssRuntime() const;
     void ApplyNeuralSettings();
+
+    bool NrAvailable() const;
+    bool EnsureNr();
+    std::wstring FindNrRuntime() const;
+    void ApplyNrSettings();
+    void DisableNr();
 
     Win32Window* window_ = nullptr;
     Presenter presenter_;
@@ -246,6 +253,15 @@ private:
     std::wstring dlss_note_;
     media::NvDlssSr::Frame dlss_frame_;
     bool overlay_neural_ = false;
+
+    // neural rendering (DLSSNR through the NGX worker)
+    media::NvDlssnr nr_;
+    bool nr_present_ = false;
+    bool nr_ready_ = false;
+    int nr_in_w_ = 0;
+    int nr_in_h_ = 0;
+    std::wstring nr_note_;
+    std::vector<uint8_t> nr_out_;
 
     // Connect flow: check the control port, wake the console if it is asleep,
     // then start the session.

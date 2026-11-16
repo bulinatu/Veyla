@@ -64,6 +64,8 @@ struct Profile {
     int nr_tone = 100;     // percent 0..200
     int nr_structure = 100;
     int nr_skin = 75;
+    int nr_mask = 0;
+    int nr_intensity = 100;
     int nr_ui = 0;
     int nr_hook = 0;       // 0 upscaled, 1 render, 2 present
     int nr_resolution = 0; // 0 match game

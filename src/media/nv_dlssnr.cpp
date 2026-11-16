@@ -1,0 +1,473 @@
+#include "media/nv_dlssnr.h"
+
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+
+namespace brp::media {
+namespace {
+
+constexpr uint32_t kVideoMagic = 0x33563544;      // DV5
+constexpr uint32_t kCreateAckMagic = 0x4B434143;  // CACK
+constexpr uint32_t kShmMagic = 0x494D4853;        // SHMI
+constexpr uint32_t kShmAckMagic = 0x4B434153;     // SACK
+constexpr uint32_t kOutsMagic = 0x5354554F;       // OUTS
+constexpr uint32_t kOutsAckMagic = 0x324B414F;    // OAK2
+constexpr uint32_t kFrameMagic = 0x314D5246;      // FMR1
+constexpr uint32_t kOutMagic = 0x3154554F;        // OUT1
+constexpr uint32_t kFrameFlagShm = 0x1;
+constexpr uint32_t kFrameFlagWantPixels = 0x2;
+
+#pragma pack(push, 1)
+struct VideoHeader {
+    uint32_t magic;
+    uint32_t width;
+    uint32_t height;
+    uint32_t warmup;
+    uint32_t frame_count;
+    uint32_t profile;
+    uint32_t preset;
+    uint32_t style;
+    uint32_t auto_mask;
+    uint32_t ui_correction;
+    float intensity;
+    float local_tone;
+    float local_structure;
+    float skin_structure;
+    uint32_t full_w;
+    uint32_t full_h;
+};
+struct ShmCommand {
+    uint32_t magic;
+    uint32_t color_bytes;
+    uint32_t motion_bytes;
+    uint32_t flags;
+    int64_t pts;
+    char name[64];
+};
+struct AckHeader {
+    uint32_t magic;
+    uint32_t ok;
+    uint32_t r0;
+    uint32_t r1;
+    int64_t pts;
+};
+struct FrameCommand {
+    uint32_t magic;
+    uint32_t index;
+    uint32_t reset;
+    uint32_t flags;
+    int64_t pts;
+};
+struct OutHeader {
+    uint32_t magic;
+    uint32_t index;
+    uint32_t ok;
+    uint32_t bytes;
+    uint32_t ngx_result;
+    int64_t pts;
+};
+#pragma pack(pop)
+
+static_assert(sizeof(VideoHeader) == 64, "VIDEO header must stay 64 bytes");
+static_assert(sizeof(ShmCommand) == 88, "SHMI/OUTS must stay 88 bytes");
+static_assert(sizeof(AckHeader) == 24, "ack header must stay 24 bytes");
+static_assert(sizeof(FrameCommand) == 24, "FRAME header must stay 24 bytes");
+static_assert(sizeof(OutHeader) == 28, "OUT header must stay 28 bytes");
+
+double NowMs() {
+    using clock = std::chrono::steady_clock;
+    static const clock::time_point start = clock::now();
+    return std::chrono::duration<double, std::milli>(clock::now() - start).count();
+}
+
+std::wstring ExeDirectory() {
+    wchar_t path[MAX_PATH] = {};
+    ::GetModuleFileNameW(nullptr, path, MAX_PATH);
+    std::wstring text = path;
+    const size_t slash = text.find_last_of(L"\\/");
+    return slash == std::wstring::npos ? std::wstring() : text.substr(0, slash);
+}
+
+std::string Hex(uint32_t value) {
+    char text[16];
+    std::snprintf(text, sizeof(text), "0x%08X", value);
+    return text;
+}
+
+}  // namespace
+
+NvDlssnr::~NvDlssnr() {
+    Stop();
+}
+
+void NvDlssnr::CloseHandles() {
+    if (in_view_) {
+        ::UnmapViewOfFile(in_view_);
+        in_view_ = nullptr;
+    }
+    if (out_view_) {
+        ::UnmapViewOfFile(out_view_);
+        out_view_ = nullptr;
+    }
+    if (in_map_) {
+        ::CloseHandle(in_map_);
+        in_map_ = nullptr;
+    }
+    if (out_map_) {
+        ::CloseHandle(out_map_);
+        out_map_ = nullptr;
+    }
+    if (stdin_write_) {
+        ::CloseHandle(stdin_write_);
+        stdin_write_ = nullptr;
+    }
+    if (stdout_read_) {
+        ::CloseHandle(stdout_read_);
+        stdout_read_ = nullptr;
+    }
+    if (log_file_) {
+        ::CloseHandle(log_file_);
+        log_file_ = nullptr;
+    }
+    if (process_) {
+        ::CloseHandle(process_);
+        process_ = nullptr;
+    }
+    if (job_) {
+        ::CloseHandle(job_);
+        job_ = nullptr;
+    }
+}
+
+void NvDlssnr::Stop() {
+    if (stdin_write_) {
+        ::CloseHandle(stdin_write_);
+        stdin_write_ = nullptr;
+    }
+    if (process_) {
+        if (::WaitForSingleObject(process_, 5000) != WAIT_OBJECT_0) {
+            if (job_) {
+                ::TerminateJobObject(job_, 1);
+            } else {
+                ::TerminateProcess(process_, 1);
+            }
+        }
+    }
+    CloseHandles();
+    ready_ = false;
+}
+
+bool NvDlssnr::WriteAll(const void* data, size_t bytes, std::string& detail) {
+    const auto* bytes_data = static_cast<const uint8_t*>(data);
+    size_t offset = 0;
+    while (offset < bytes) {
+        DWORD written = 0;
+        const DWORD chunk = static_cast<DWORD>(std::min<size_t>(bytes - offset, 1u << 20));
+        if (!::WriteFile(stdin_write_, bytes_data + offset, chunk, &written, nullptr) ||
+            written == 0) {
+            detail = "NR worker write failed (" + std::to_string(::GetLastError()) + ")";
+            return false;
+        }
+        offset += written;
+    }
+    return true;
+}
+
+bool NvDlssnr::ReadExact(void* data, size_t bytes, DWORD timeout_ms, std::string& detail) {
+    auto* out = static_cast<uint8_t*>(data);
+    const double deadline = NowMs() + timeout_ms;
+    size_t offset = 0;
+    while (offset < bytes) {
+        DWORD available = 0;
+        if (!::PeekNamedPipe(stdout_read_, nullptr, 0, nullptr, &available, nullptr)) {
+            detail = "NR worker pipe closed (" + std::to_string(::GetLastError()) + ")";
+            return false;
+        }
+        if (available > 0) {
+            DWORD read = 0;
+            const DWORD chunk = static_cast<DWORD>(std::min<size_t>(bytes - offset, available));
+            if (!::ReadFile(stdout_read_, out + offset, chunk, &read, nullptr) || read == 0) {
+                detail = "NR worker read failed (" + std::to_string(::GetLastError()) + ")";
+                return false;
+            }
+            offset += read;
+            continue;
+        }
+        if (NowMs() > deadline) {
+            detail = "NR worker timed out";
+            return false;
+        }
+        ::Sleep(1);
+    }
+    return true;
+}
+
+bool NvDlssnr::WaitForMagic(uint32_t expected, uint32_t* extra, std::string& detail) {
+    uint32_t magic = 0;
+    if (!ReadExact(&magic, sizeof(magic), 60000, detail)) {
+        return false;
+    }
+    if (magic != expected) {
+        detail = "NR worker unexpected reply " + Hex(magic) + ", wanted " + Hex(expected);
+        return false;
+    }
+    AckHeader ack{};
+    if (!ReadExact(reinterpret_cast<uint8_t*>(&ack) + 4, sizeof(ack) - 4, 60000, detail)) {
+        return false;
+    }
+    ack.magic = magic;
+    if (extra) {
+        *extra = ack.ok;
+    }
+    if (ack.ok == 0) {
+        detail = "NR worker refused " + Hex(expected);
+        return false;
+    }
+    return true;
+}
+
+bool NvDlssnr::Start(const std::wstring& worker_exe, const std::wstring& working_dir, int width,
+                     int height, int style, float tone, float structure, float skin, bool mask,
+                     bool ui, float intensity, std::string& detail) {
+    Stop();
+    if (width <= 0 || height <= 0) {
+        detail = "NR size is invalid";
+        return false;
+    }
+    if (!std::filesystem::exists(worker_exe)) {
+        detail = "NR worker not found: " + std::filesystem::path(worker_exe).string();
+        return false;
+    }
+
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+
+    HANDLE stdin_read = nullptr;
+    HANDLE stdout_write = nullptr;
+    if (!::CreatePipe(&stdin_read, &stdin_write_, &sa, 1 << 20) ||
+        !::CreatePipe(&stdout_read_, &stdout_write, &sa, 1 << 20)) {
+        detail = "cannot create NR pipes";
+        CloseHandles();
+        return false;
+    }
+    ::SetHandleInformation(stdin_write_, HANDLE_FLAG_INHERIT, 0);
+    ::SetHandleInformation(stdout_read_, HANDLE_FLAG_INHERIT, 0);
+
+    log_file_ = ::CreateFileW((ExeDirectory() + L"\\nr-worker.log").c_str(), GENERIC_WRITE,
+                              FILE_SHARE_READ, &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
+                              nullptr);
+    if (log_file_ == INVALID_HANDLE_VALUE) {
+        log_file_ = nullptr;
+    }
+
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    si.hStdInput = stdin_read;
+    si.hStdOutput = stdout_write;
+    si.hStdError = log_file_ ? log_file_ : stdout_write;
+
+    PROCESS_INFORMATION pi{};
+    std::wstring command = L"\"" + worker_exe + L"\" --live";
+    const BOOL created = ::CreateProcessW(worker_exe.c_str(), command.data(), nullptr, nullptr,
+                                          TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr,
+                                          working_dir.c_str(), &si, &pi);
+    ::CloseHandle(stdin_read);
+    ::CloseHandle(stdout_write);
+    if (!created) {
+        detail = "cannot start NR worker (" + std::to_string(::GetLastError()) + ")";
+        CloseHandles();
+        return false;
+    }
+    process_ = pi.hProcess;
+
+    job_ = ::CreateJobObjectW(nullptr, nullptr);
+    if (job_) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION info{};
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        ::SetInformationJobObject(job_, JobObjectExtendedLimitInformation, &info, sizeof(info));
+        ::AssignProcessToJobObject(job_, process_);
+    }
+    ::ResumeThread(pi.hThread);
+    ::CloseHandle(pi.hThread);
+
+    VideoHeader header{};
+    header.magic = kVideoMagic;
+    header.width = static_cast<uint32_t>(width);
+    header.height = static_cast<uint32_t>(height);
+    header.warmup = 0;
+    header.frame_count = 0;
+    header.profile = 0;
+    header.preset = 0;
+    header.style = static_cast<uint32_t>(style);
+    header.auto_mask = mask ? 1u : 0u;
+    header.ui_correction = ui ? 1u : 0u;
+    header.intensity = intensity;
+    header.local_tone = tone;
+    header.local_structure = structure;
+    header.skin_structure = skin;
+    header.full_w = static_cast<uint32_t>(width);
+    header.full_h = static_cast<uint32_t>(height);
+    if (!WriteAll(&header, sizeof(header), detail)) {
+        Stop();
+        return false;
+    }
+    if (!WaitForMagic(kCreateAckMagic, nullptr, detail)) {
+        Stop();
+        return false;
+    }
+
+    const uint64_t color_bytes = static_cast<uint64_t>(width) * height * 4ull;
+    const uint64_t motion_bytes = 2560ull * 1440ull * 4ull;
+    in_size_ = static_cast<size_t>(color_bytes + motion_bytes);
+    const std::wstring in_name =
+        L"NeuralScreen_" + std::to_wstring(::GetCurrentProcessId()) + L"_" +
+        std::to_wstring(::GetTickCount64());
+    in_map_ = ::CreateFileMappingW(INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE,
+                                   static_cast<DWORD>(in_size_ >> 32),
+                                   static_cast<DWORD>(in_size_ & 0xFFFFFFFF), in_name.c_str());
+    if (!in_map_) {
+        detail = "cannot create NR input mapping";
+        Stop();
+        return false;
+    }
+    in_view_ = static_cast<uint8_t*>(::MapViewOfFile(in_map_, FILE_MAP_ALL_ACCESS, 0, 0, in_size_));
+    if (!in_view_) {
+        detail = "cannot map NR input";
+        Stop();
+        return false;
+    }
+    std::memset(in_view_, 0, in_size_);
+
+    ShmCommand shm{};
+    shm.magic = kShmMagic;
+    shm.color_bytes = static_cast<uint32_t>(color_bytes);
+    shm.motion_bytes = static_cast<uint32_t>(motion_bytes);
+    std::snprintf(shm.name, sizeof(shm.name), "%ls", in_name.c_str());
+    if (!WriteAll(&shm, sizeof(shm), detail) ||
+        !WaitForMagic(kShmAckMagic, nullptr, detail)) {
+        Stop();
+        return false;
+    }
+
+    out_size_ = static_cast<size_t>(color_bytes + 8);
+    const std::wstring out_name =
+        L"NeuralScreenOut_" + std::to_wstring(::GetCurrentProcessId()) + L"_" +
+        std::to_wstring(::GetTickCount64() + 1);
+    out_map_ = ::CreateFileMappingW(INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE,
+                                    static_cast<DWORD>(out_size_ >> 32),
+                                    static_cast<DWORD>(out_size_ & 0xFFFFFFFF),
+                                    out_name.c_str());
+    if (!out_map_) {
+        detail = "cannot create NR output mapping";
+        Stop();
+        return false;
+    }
+    out_view_ =
+        static_cast<uint8_t*>(::MapViewOfFile(out_map_, FILE_MAP_ALL_ACCESS, 0, 0, out_size_));
+    if (!out_view_) {
+        detail = "cannot map NR output";
+        Stop();
+        return false;
+    }
+    std::memset(out_view_, 0, out_size_);
+
+    ShmCommand outs{};
+    outs.magic = kOutsMagic;
+    outs.color_bytes = static_cast<uint32_t>(width);
+    outs.motion_bytes = static_cast<uint32_t>(height);
+    std::snprintf(outs.name, sizeof(outs.name), "%ls", out_name.c_str());
+    if (!WriteAll(&outs, sizeof(outs), detail) ||
+        !WaitForMagic(kOutsAckMagic, nullptr, detail)) {
+        Stop();
+        return false;
+    }
+
+    width_ = width;
+    height_ = height;
+    frames_ = 0;
+    frame_index_ = 0;
+    ready_ = true;
+    status_ = "NR ready";
+    return true;
+}
+
+bool NvDlssnr::Process(const uint8_t* rgba, int width, int height, std::vector<uint8_t>& out,
+                       std::string& detail) {
+    if (!ready_ || !rgba || width != width_ || height != height_ || !in_view_ || !out_view_) {
+        detail = "NR is not initialized for this frame size";
+        return false;
+    }
+    const size_t color_bytes = static_cast<size_t>(width) * height * 4;
+    const double started = NowMs();
+    std::memcpy(in_view_, rgba, color_bytes);
+
+    FrameCommand frame{};
+    frame.magic = kFrameMagic;
+    frame.index = frame_index_;
+    frame.reset = frame_index_ == 0 ? 1u : 0u;
+    frame.flags = kFrameFlagShm | kFrameFlagWantPixels;
+    frame.pts = static_cast<int64_t>(frame_index_);
+    if (!WriteAll(&frame, sizeof(frame), detail)) {
+        ready_ = false;
+        return false;
+    }
+
+    uint32_t magic = 0;
+    if (!ReadExact(&magic, sizeof(magic), 30000, detail)) {
+        ready_ = false;
+        return false;
+    }
+    if (magic != kOutMagic) {
+        detail = "NR worker unexpected frame reply " + Hex(magic);
+        ready_ = false;
+        return false;
+    }
+    OutHeader reply{};
+    if (!ReadExact(reinterpret_cast<uint8_t*>(&reply) + 4, sizeof(reply) - 4, 30000, detail)) {
+        ready_ = false;
+        return false;
+    }
+    reply.magic = magic;
+    if (reply.ok == 0) {
+        detail = "NR worker failed frame (ngx " + Hex(reply.ngx_result) + ")";
+        ready_ = false;
+        return false;
+    }
+
+    out.resize(color_bytes);
+    bool copied = false;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        uint64_t seq1 = 0;
+        std::memcpy(&seq1, out_view_, sizeof(seq1));
+        if (seq1 & 1) {
+            ::Sleep(1);
+            continue;
+        }
+        std::memcpy(out.data(), out_view_ + 8, color_bytes);
+        uint64_t seq2 = 0;
+        std::memcpy(&seq2, out_view_, sizeof(seq2));
+        if (seq1 == seq2) {
+            copied = true;
+            break;
+        }
+    }
+    if (!copied) {
+        detail = "NR output seqlock remained unstable";
+        ready_ = false;
+        return false;
+    }
+
+    last_ms_ = NowMs() - started;
+    ++frame_index_;
+    ++frames_;
+    status_ = "NR running";
+    return true;
+}
+
+}  // namespace brp::media

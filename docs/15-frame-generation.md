@@ -108,7 +108,7 @@ burst) takes ~18.6 ms, over the 16.7 ms source budget in the synchronous design.
 
 ## Settings and behaviour
 
-- `Settings -> Display -> Frame generation`: **Off** / **NVIDIA VFG 2x (120 fps)**.
+- `Settings -> Performance -> Frame generation`: **Off** / **NVIDIA VFG 2x (120 fps)**.
 - `Tab` during a stream opens the settings overlay; the FG change is live.
 - Status line shows `NVIDIA VFG active - 60 -> 120 fps - last X ms`.
 - Streaming HUD: `VFG 2x gen N` and `Decoder: <backend>`.
@@ -199,7 +199,7 @@ Problem markers:
 VFG and RTX VSR are mutually exclusive in the current pipeline: VFG needs 1080p
 input/output pairs, while VSR produces a 1440p/2160p output and cannot be run on
 every generated frame within a 60 fps budget. Selecting one in
-`Settings > Display` turns the other off. See `docs/17-neural-rendering.md`.
+`Settings > Upscaling` / `Performance` turns the other off. See `docs/17-neural-rendering.md`.
 
 ---
 

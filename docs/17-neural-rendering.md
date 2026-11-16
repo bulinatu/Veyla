@@ -26,7 +26,7 @@ HEVC -> hw decode -> RGBA8 (BT.709/2020, limited range)
      -> present (presenter source_final = no second upscale)
 ```
 
-Quality levels exposed in `Settings > Display > Neural upscaling (RTX VSR)`:
+Quality levels exposed in `Settings > Upscaling > Neural upscaling (RTX VSR)`:
 
 | UI | NvVFX `QualityLevel` |
 |---|---|
@@ -72,7 +72,7 @@ The setting is persisted as `"vsr"` in `session.json`.
   `<exe>/../../third_party/nvidia-vfx/runtime`, `./third_party/nvidia-vfx/runtime`.
   Both `nvVFXVideoSuperRes.dll` and `nvngx_vsr.dll` must exist.
 - Init failure (missing DLLs, no NVIDIA GPU, target smaller than the stream) leaves
-  the regular upscaler active and shows the reason in Settings > Display.
+  the regular upscaler active and shows the reason in Settings > Upscaling.
 - A mid-session `Process` failure disables VSR, persists `vsr: 0` and immediately
   falls back to `SetSourceFrame` so the stream never freezes.
 

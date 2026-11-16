@@ -55,3 +55,7 @@ third_party/nvidia-vfx/
 # NVIDIA NGX feature runtimes (user-supplied, not redistributed)
 third_party/nvidia-ngx/runtime/
 
+
+# NeuralScreen NGX NR worker runtime (user-supplied, not redistributed)
+third_party/neuralscreen/
+

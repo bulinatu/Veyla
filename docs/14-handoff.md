@@ -22,7 +22,7 @@ Last updated: live streaming + full controller pipeline.
 | Frame generation | **WORKS** — NVIDIA VFG 2× at 120 fps (synchronous; async blocked) |
 | Input rate | 60–1000 Hz, dedicated thread + high-resolution timer |
 | Neural upscaling | **WORKS** — RTX VSR 1080p→1440p/2160p, 7–11 ms; exclusive with VFG |
-| DLSSNR (same-res neural) | Host **PROVEN in `dlssnr_probe`** (init + feature 18 + evaluate); residual composite not ported |
+| DLSSNR (same-res neural) | **WORKS via the NGX NR worker at 1080p** (settings + FSR1); live stream test and UI-thread offload pending (docs/18) |
 | Colour pipeline | **WORKS** — chroma bilinear/bicubic/Lanczos + PQ detect/pass-through/tone-map |
 
 ---
@@ -198,9 +198,10 @@ Verified: audio header 2ch/48kHz received during a live session; video 1080p60 a
    the Rumble test; firmware 0x0630 now uses the new rumble path.
 2. RTX VSR: user visual test at 1440p/2160p (AI High vs FSR1); optional 10-bit
    RGB10A2 path once the decoder keeps 10-bit surfaces (docs/17).
-3. DLSSNR neural rendering (same-resolution): the host is proven
-   (`tools/dlssnr_probe`); port Magpie's residual/color composite and temporal
-   stabilization, then apply it at 1080p before the upscaler (docs/17).
+3. DLSSNR: live stream test (NR worker is connected at 1080p; settings are
+   under Settings > Neural). Then move `NvDlssnr::Process` to its own thread so
+   a 20-25 ms worker spike does not stall the UI, and wire the 2/3/4-pass
+   command. See `docs/18-neural-nr-status.md`.
 4. Frame generation: worker-owned D3D11 device + shared textures (the same-device
    worker failed with a CUDA interop device-ordinal crash; see docs/15).
 5. DualSense haptic audio (USB only): decode the console haptics Opus stream and
@@ -284,7 +285,7 @@ Modes: 0 bilinear, 1 Catmull-Rom, 2 Catmull+unsharp, 3 Lanczos+RCAS, 4 FSR1 EASU
 
 ### Explicit 1080p / 1440p / 2160p render target
 
-`Settings -> Display -> Upscale target` picks the resolution the video chain
+`Settings -> Upscaling -> Upscale target` picks the resolution the video chain
 renders at, independently of the window/display:
 
 - **Window / display** — direct upscale into the swapchain (previous behaviour).
@@ -306,7 +307,7 @@ GPU time for a resolution-matched present (and clean high-res captures).
 
 ### Neural upscaling (RTX VSR)
 
-`Settings -> Display -> Neural upscaling (RTX VSR)` replaces the selected upscaler
+`Settings -> Upscaling -> Neural upscaling (RTX VSR)` replaces the selected upscaler
 with NVIDIA's AI video upscaler, which writes directly at the render target size
 (1440p/2160p). The presenter is told the source is already final so it does not
 resample or sharpen twice. Measured 7.5–11 ms depending on target/quality; see

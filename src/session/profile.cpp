@@ -381,6 +381,8 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"nr_tone\": " << profile.nr_tone << ",\n";
     json << "  \"nr_structure\": " << profile.nr_structure << ",\n";
     json << "  \"nr_skin\": " << profile.nr_skin << ",\n";
+    json << "  \"nr_mask\": " << profile.nr_mask << ",\n";
+    json << "  \"nr_intensity\": " << profile.nr_intensity << ",\n";
     json << "  \"nr_ui\": " << profile.nr_ui << ",\n";
     json << "  \"nr_hook\": " << profile.nr_hook << ",\n";
     json << "  \"nr_resolution\": " << profile.nr_resolution << ",\n";
@@ -461,6 +463,8 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     if (ExtractNumber(json, "nr_tone", number)) p.nr_tone = static_cast<int>(number);
     if (ExtractNumber(json, "nr_structure", number)) p.nr_structure = static_cast<int>(number);
     if (ExtractNumber(json, "nr_skin", number)) p.nr_skin = static_cast<int>(number);
+    if (ExtractNumber(json, "nr_mask", number)) p.nr_mask = static_cast<int>(number);
+    if (ExtractNumber(json, "nr_intensity", number)) p.nr_intensity = static_cast<int>(number);
     if (ExtractNumber(json, "nr_ui", number)) p.nr_ui = static_cast<int>(number);
     if (ExtractNumber(json, "nr_hook", number)) p.nr_hook = static_cast<int>(number);
     if (ExtractNumber(json, "nr_resolution", number)) p.nr_resolution = static_cast<int>(number);

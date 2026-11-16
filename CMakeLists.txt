@@ -15,6 +15,7 @@ add_library(brp_media STATIC
     src/media/nv_vfx.cpp
     src/media/nv_vsr.cpp
     src/media/nv_dlss_sr.cpp
+    src/media/nv_dlssnr.cpp
 )
 target_include_directories(brp_media PUBLIC src)
 target_include_directories(brp_media PRIVATE third_party/nvidia-ngx/include)
@@ -44,6 +45,9 @@ target_link_options(vfg_pace_probe PRIVATE /DEBUG)
 
 add_executable(dlss_sr_module_probe tools/dlss_sr_module_probe/main.cpp)
 target_link_libraries(dlss_sr_module_probe PRIVATE brp_media)
+
+add_executable(nr_module_probe tools/nr_module_probe/main.cpp)
+target_link_libraries(nr_module_probe PRIVATE brp_media)
 target_compile_options(dlss_sr_module_probe PRIVATE /Zi)
 target_link_options(dlss_sr_module_probe PRIVATE /DEBUG)
 
