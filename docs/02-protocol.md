@@ -59,6 +59,8 @@ Before any video, the client sends a session request that includes the stream pa
 
 **Consequence:** our quality ceiling is 1080p60 HEVC 10-bit at whatever bitrate the encoder will give us. That's a genuinely good picture — 1080p HEVC at 40 Mbps is far better than the official app — but it is not 4K and it is not 120 fps at the source.
 
+**Verified 2026-11-16 (PS5 `PS5-580`, firmware current):** requesting 2560×1440 in the launch spec makes the console abort the stream with `Nagare did not init! AvCap failed to initialize video: [InitResult:-6]`. Its advertised profile list contains a single entry, `1920x1080`. There is no 1440p/4K on the wire; both exist only as client-side upscaling (FSR1/Lanczos) of the 1080p stream. The app now clamps any larger request and logs why instead of failing the session.
+
 ---
 
 ## 5. Stream

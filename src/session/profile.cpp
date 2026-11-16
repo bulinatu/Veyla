@@ -363,6 +363,7 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"codec\": \"" << EscapeJson(profile.codec) << "\",\n";
     json << "  \"hdr\": " << (profile.hdr ? "true" : "false") << ",\n";
     json << "  \"upscaler\": " << profile.upscaler << ",\n";
+    json << "  \"render_target\": " << profile.render_target << ",\n";
     json << "  \"hud\": " << (profile.hud ? "true" : "false") << ",\n";
     json << "  \"audio_device_id\": \"" << EscapeJson(profile.audio_device_id) << "\",\n";
     json << "  \"audio_buffer_ms\": " << profile.audio_buffer_ms << ",\n";
@@ -428,6 +429,7 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     if (ExtractString(json, "codec", text)) p.codec = text;
     if (ExtractString(json, "audio_device_id", text)) p.audio_device_id = text;
     if (ExtractNumber(json, "upscaler", number)) p.upscaler = static_cast<int>(number);
+    if (ExtractNumber(json, "render_target", number)) p.render_target = static_cast<int>(number);
     if (ExtractNumber(json, "audio_buffer_ms", number)) p.audio_buffer_ms = static_cast<int>(number);
     if (ExtractNumber(json, "input_source", number)) p.input_source = static_cast<int>(number);
     if (ExtractNumber(json, "frame_buffer", number)) p.frame_buffer = static_cast<int>(number);

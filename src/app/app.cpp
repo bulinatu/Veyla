@@ -61,6 +61,7 @@ enum WidgetId {
     W_ConsoleRumble = 49,
     W_ConsoleTriggers = 50,
     W_Motion = 51,
+    W_RenderTarget = 52,
     W_PairHome = 42,
 };
 
@@ -224,6 +225,8 @@ bool App::Init(Win32Window* window) {
     if (!presenter_.Init(window->hwnd(), cfg)) {
         return false;
     }
+    render_target_ = std::clamp(profile_.render_target, 0, 3);
+    ApplyRenderTarget();
     if (!ui_.Init(presenter_.device())) {
         return false;
     }
@@ -464,6 +467,12 @@ void App::ApplyDropdown(int id, int index) {
             profile_.upscaler = upscale_;
             SaveProfile();
             break;
+        case W_RenderTarget:
+            render_target_ = std::clamp(index, 0, 3);
+            profile_.render_target = render_target_;
+            ApplyRenderTarget();
+            SaveProfile();
+            break;
         case W_Hud:
             hud_ = index == 1;
             profile_.hud = hud_;
@@ -606,6 +615,12 @@ void App::OpenAudioDevice() {
 void App::TriggerRumble() {
     rumble_until_ = clock_ + 0.45;
     output_dirty_ = true;
+}
+
+void App::ApplyRenderTarget() {
+    static const int kTargets[4][2] = {{0, 0}, {1920, 1080}, {2560, 1440}, {3840, 2160}};
+    const int index = std::clamp(render_target_, 0, 3);
+    presenter_.SetUpscaleTarget(kTargets[index][0], kTargets[index][1]);
 }
 
 App::~App() {
@@ -1398,6 +1413,10 @@ void App::RenderSettings(double t) {
             DrawDropdown(L"Upscaler",
                          {L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen", L"Lanczos + RCAS", L"FSR1 (EASU)"}, upscale_, y,
                          W_Upscaler);
+            y += kRowH;
+            DrawDropdown(L"Upscale target",
+                         {L"Window / display", L"1080p", L"1440p", L"2160p"}, render_target_, y,
+                         W_RenderTarget);
             y += kRowH;
             DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
             y += kRowH;

@@ -17,6 +17,12 @@ struct PresenterConfig {
     int output_height = 1440;
     int source_width = 1920;
     int source_height = 1080;
+    // 0 = render directly at the output (window/display) size. Otherwise the
+    // video chain upscales to this target and a final pass fits it to the
+    // output. 2560x1440 / 3840x2160 enable 1440p/2160p rendering, including in
+    // a smaller window and in screenshots.
+    int render_width = 0;
+    int render_height = 0;
     bool vsync = false;
     bool allow_tearing = true;
     bool hdr = false;
@@ -51,6 +57,16 @@ public:
 
     void SetUpscaleMode(int mode);
     int upscale_mode() const { return cfg_.upscale_mode; }
+
+    // 0,0 = render at the output size. 1920x1080 / 2560x1440 / 3840x2160 pick
+    // an explicit render target; the result is fitted to the window/display.
+    bool SetUpscaleTarget(int width, int height);
+    int render_width() const {
+        return cfg_.render_width > 0 ? cfg_.render_width : cfg_.output_width;
+    }
+    int render_height() const {
+        return cfg_.render_height > 0 ? cfg_.render_height : cfg_.output_height;
+    }
 
     // Accessors so the app can composite Direct2D UI over the same surface.
     ID3D11Device* device() const { return device_.Get(); }
@@ -91,6 +107,7 @@ private:
 
     bool CreateSwapchain();
     bool CreateBackbufferViews();
+    bool CreateTargetViews();
     bool CreateSourceTexture();
     bool CreateShaders();
     bool CreateTimingQueries();
@@ -112,6 +129,11 @@ private:
     Microsoft::WRL::ComPtr<IDXGISwapChain1> swapchain_;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> backbuffer_;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv_;
+
+    // Offscreen render target for an explicit 1080p/1440p/2160p upscale target.
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> target_tex_;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> target_rtv_;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> target_srv_;
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> source_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> source_srv_;

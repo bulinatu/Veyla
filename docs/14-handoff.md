@@ -143,6 +143,10 @@ Key chiaki APIs: `chiaki_session_init`, `chiaki_session_set_video_sample_cb`,
 - Vsync does not throttle on virtual/remote displays; the loop paces itself.
 - XInput never sees a DualSense; Sony pads need raw HID.
 - Account id is little-endian (see above) — this cost a full debugging session.
+- **1440p is rejected by the console, not by us.** Asking for 2560x1440 in the
+  launch spec kills the stream with `AvCap failed to initialize video:
+  [InitResult:-6]`; the advertised profile list is only `1920x1080`. `Start()`
+  clamps larger requests. 1440p/4K is client-side upscaling only.
 
 ---
 
@@ -220,5 +224,27 @@ Verified: audio header 2ch/48kHz received during a live session; video 1080p60 a
 
 Mode 4 is FSR1 EASU (12-tap, ported from AMD's MIT reference). Measured 0.18 ms p50 at 1440p.
 Modes: 0 bilinear, 1 Catmull-Rom, 2 Catmull+unsharp, 3 Lanczos+RCAS, 4 FSR1 EASU.
+
+### Explicit 1080p / 1440p / 2160p render target
+
+`Settings -> Display -> Upscale target` picks the resolution the video chain
+renders at, independently of the window/display:
+
+- **Window / display** — direct upscale into the swapchain (previous behaviour).
+- **1080p / 1440p / 2160p** — the upscaler writes an offscreen target of that
+  size, then a Catmull-Rom resolve fits it to the window/display with black bars
+  instead of stretching. The pass is skipped when the target equals the output
+  (e.g. 1440p target on a 1440p fullscreen monitor), so there is no extra cost.
+- F12 captures the render target, not the window: 2160p target gives a clean
+  3840x2160 BMP even from a 1600x900 window.
+
+Measured with EASU on this machine (GTX-class, 1080p source): windowed
+1600x900 with a 2160p target, `gpu p50 0.50 ms / p95 0.17 ms`, 59.9 fps; in
+1440p fullscreen with the same 2160p target, `p95 0.19 ms`. Both passes are
+negligible next to decode.
+
+The 1440p/2160p options are **client-side supersampling/upscaling of the 1080p
+stream**. They cannot add detail the console did not send; they trade a little
+GPU time for a resolution-matched present (and clean high-res captures).
 Frame generation: no in-app model yet; recommended path is NVIDIA Smooth Motion (driver, applies to our DX11 swapchain).
 

@@ -26,7 +26,7 @@ A better PlayStation 5 → PC Remote Play client.
 |---|---|
 | Home | `Left`/`Right` select · `Enter` stream · `S` settings · `Esc` quit |
 | Settings | `Tab` / `Left` / `Right` switch category · `Esc` close dropdown / back |
-| Stream | `Esc` back · `H` HUD · `1`/`2`/`3` upscaler · `F12` screenshot |
+| Stream | `Esc` back · `H` HUD · `1`/`2`/`3` upscaler · `F12` screenshot (at the upscale target) |
 | Mouse | Click categories, dropdowns, items and buttons; wheel moves the rail |
 
 ---

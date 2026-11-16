@@ -126,6 +126,16 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
     chiaki_connect_video_profile_preset(&info_.video_profile,
                                         CHIAKI_VIDEO_RESOLUTION_PRESET_1080p,
                                         CHIAKI_VIDEO_FPS_PRESET_60);
+    if (width > 1920 || height > 1080) {
+        // The console's Remote Play encoder advertises 1920x1080 as its only
+        // profile and aborts the stream ("AvCap failed to initialize video")
+        // for anything larger. 1440p/4K is a client-side upscale, not a stream.
+        std::fprintf(stderr,
+                     "[stream] %dx%d requested; Remote Play caps at 1920x1080, clamping\n",
+                     width, height);
+        width = 1920;
+        height = 1080;
+    }
     if (width > 0 && height > 0) {
         info_.video_profile.width = static_cast<unsigned>(width);
         info_.video_profile.height = static_cast<unsigned>(height);

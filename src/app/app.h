@@ -100,6 +100,7 @@ private:
 
     void HandlePad();
     void ApplyDropdown(int id, int index);
+    void ApplyRenderTarget();
     void OpenAudioDevice();
     void ApplyControllerOutput(bool force);
     void TriggerRumble();
@@ -125,6 +126,7 @@ private:
     bool hdr_ = false;
     int stream_buffer_ = 1;
     int pad_rate_hz_ = 250;
+    int render_target_ = 0;
     std::thread pad_thread_;
     std::atomic<bool> pad_run_{false};
     int upscale_ = 1;

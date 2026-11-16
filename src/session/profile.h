@@ -46,6 +46,7 @@ struct Profile {
 
     // UI settings
     int upscaler = 1;
+    int render_target = 0;  // 0 window/display, 1 1080p, 2 1440p, 3 2160p
     bool hud = true;
     std::string audio_device_id;
     int audio_buffer_ms = 20;

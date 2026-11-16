@@ -65,8 +65,28 @@ Verification screenshot ([full size](images/bench-mode2-1440p.png)): checker det
 
 ---
 
-## Controller loop pacing (2026-11-16)
+## Upscale target 1440p / 2160p (2026-11-16)
 
+Two-pass path: 1080p source → EASU to the chosen target → Catmull-Rom resolve
+to the window/display (aspect-preserving, no stretch). When the target equals
+the output size the second pass is skipped.
+
+Live numbers (PS5 stream, EASU mode 4, `BRP_PAD_PROBE=1`, HUD):
+
+| Output | Render target | GPU p50 | GPU p95 | FPS |
+|---|---|---|---|---|
+| 1600x900 window | 3840x2160 | 0.50 ms | 0.17 ms | 59.9 |
+| 2560x1440 fullscreen | 3840x2160 | 0.15 ms | 0.19 ms | 59.9 |
+| 1600x900 window | 2560x1440 | 0.09 ms | 0.10 ms | 59.9 |
+
+(Percentiles invert when the sample count in the window is tiny; treat both as
+"well under 1 ms".) The 4K target costs less than a millisecond, so it is safe to
+leave on even on integrated GPUs — but it does not create detail; the source is
+still 1080p. F12 captures the target resolution.
+
+---
+
+## Controller loop pacing (2026-11-16)
 `Sleep`/`sleep_for` on Windows quantises to the 15.6 ms system tick, so a
 "250 Hz" loop would really run at ~64 Hz. The pad thread now uses
 `CreateWaitableTimerExW(CREATE_WAITABLE_TIMER_HIGH_RESOLUTION)` and MMCSS
