@@ -95,6 +95,15 @@ add_executable(brp
 )
 target_link_libraries(brp PRIVATE brp_ui brp_decode brp_session hid setupapi xinput ole32 avrt uuid ws2_32)
 
+# The NGX feature DLL must sit next to the executable for Magpie-style NGX
+# feature discovery. The runtime is user-supplied and gitignored.
+if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/nvidia-ngx/runtime/nvngx_dlss.dll")
+    add_custom_command(TARGET brp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/third_party/nvidia-ngx/runtime/nvngx_dlss.dll"
+            "$<TARGET_FILE_DIR:brp>/nvngx_dlss.dll")
+endif()
+
 # Diagnostic only: isolates D2D/D3D11 interop problems from app code.
 add_executable(d2d_probe tools/d2d_probe/main.cpp)
 target_link_libraries(d2d_probe PRIVATE d2d1 d3d11 dxgi)

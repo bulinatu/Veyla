@@ -74,6 +74,24 @@ const wchar_t* VsrQualityLabel(int quality) {
     }
 }
 
+const std::vector<std::wstring>& PercentLabels() {
+    static const std::vector<std::wstring> labels = {
+        L"0.00", L"0.25", L"0.50", L"0.75", L"1.00",
+        L"1.25", L"1.50", L"1.75", L"2.00"};
+    return labels;
+}
+
+int PercentIndex(int value) {
+    return std::clamp(value, 0, 200) / 25;
+}
+
+const std::vector<std::wstring>& UpscalerLabels() {
+    static const std::vector<std::wstring> labels = {
+        L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen", L"Lanczos + RCAS",
+        L"FSR1 (EASU)", L"DLSS Super Resolution (D3D12)"};
+    return labels;
+}
+
 enum WidgetId {
     W_Upscaler = 1,
     W_Hud,
@@ -111,6 +129,15 @@ enum WidgetId {
     W_DlssQuality = 64,
     W_NeuralOverlay = 65,
     W_NeuralOverlayBack = 66,
+    W_NeuralNr = 67,
+    W_NrPasses = 68,
+    W_NrStyle = 69,
+    W_NrTone = 70,
+    W_NrStructure = 71,
+    W_NrSkin = 72,
+    W_NrUi = 73,
+    W_NrHook = 74,
+    W_NrResolution = 75,
     W_ResumeOverlay = 60,
 };
 
@@ -487,10 +514,10 @@ void App::HandleKey(int vk) {
             } else if (vk == 'S') {
                 screen_ = Screen::Home;
             } else if (vk == VK_TAB || vk == VK_RIGHT) {
-                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 1) % 6);
+                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 1) % 7);
                 open_dropdown_ = -1;
             } else if (vk == VK_LEFT) {
-                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 5) % 6);
+                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 6) % 7);
                 open_dropdown_ = -1;
             }
             break;
@@ -596,9 +623,26 @@ void App::HandlePad() {
 void App::ApplyDropdown(int id, int index) {
     switch (id) {
         case W_Upscaler:
+            if (index == 5) {
+                if (!DlssAvailable()) {
+                    stream_note_ = "DLSS SR unavailable: nvngx_dlss.dll not found.";
+                    break;
+                }
+                profile_.neural_sr = 1;
+                ApplyNeuralSettings();
+                stream_note_ = profile_.neural_sr
+                                   ? "DLSS Super Resolution selected (D3D12)."
+                                   : "DLSS SR unavailable; using the regular upscaler.";
+                break;
+            }
             upscale_ = std::clamp(index, 0, 4);
             presenter_.SetUpscaleMode(upscale_);
             profile_.upscaler = upscale_;
+            if (profile_.neural_sr > 0) {
+                profile_.neural_sr = 0;
+                dlss_ready_ = false;
+                dlss_sr_.Shutdown();
+            }
             SaveProfile();
             break;
         case W_RenderTarget:
@@ -741,6 +785,45 @@ void App::ApplyDropdown(int id, int index) {
             }
             break;
         }
+        case W_NeuralNr:
+            profile_.neural_nr = index == 1 ? 1 : 0;
+            stream_note_ = profile_.neural_nr
+                               ? "DLSSNR settings saved; the multi-pass engine is not connected in this build."
+                               : "DLSSNR off.";
+            SaveProfile();
+            break;
+        case W_NrPasses:
+            profile_.nr_passes = std::clamp(index, 0, 3) + 1;
+            SaveProfile();
+            break;
+        case W_NrStyle:
+            profile_.nr_style = std::clamp(index, 0, 2);
+            SaveProfile();
+            break;
+        case W_NrTone:
+            profile_.nr_tone = std::clamp(index, 0, 8) * 25;
+            SaveProfile();
+            break;
+        case W_NrStructure:
+            profile_.nr_structure = std::clamp(index, 0, 8) * 25;
+            SaveProfile();
+            break;
+        case W_NrSkin:
+            profile_.nr_skin = std::clamp(index, 0, 8) * 25;
+            SaveProfile();
+            break;
+        case W_NrUi:
+            profile_.nr_ui = index == 1 ? 1 : 0;
+            SaveProfile();
+            break;
+        case W_NrHook:
+            profile_.nr_hook = std::clamp(index, 0, 2);
+            SaveProfile();
+            break;
+        case W_NrResolution:
+            profile_.nr_resolution = 0;
+            SaveProfile();
+            break;
         case W_NeuralOverlay:
             overlay_neural_ = true;
             open_dropdown_ = -1;
@@ -2209,8 +2292,8 @@ void App::RenderSettings(double t) {
                  th::Rgba(th::kMuted));
     }
 
-    const wchar_t* tab_names[] = {L"Display", L"Neural", L"Audio", L"Controller", L"Connection", L"About"};
-    for (int i = 0; i < 6; ++i) {
+    const wchar_t* tab_names[] = {L"Display", L"Upscaling", L"Neural", L"Audio", L"Controller", L"Connection", L"About"};
+    for (int i = 0; i < 7; ++i) {
         const D2D1_RECT_F tab{48.0f, 148.0f + i * 54.0f, 300.0f, 148.0f + i * 54.0f + 44.0f};
         const bool selected = static_cast<int>(tab_) == i;
         const bool hovered = hover_ == Hit::Tab && hover_index_ == i;
@@ -2233,17 +2316,6 @@ void App::RenderSettings(double t) {
 
     switch (tab_) {
         case Tab::Display: {
-            DrawDropdown(L"Upscaler",
-                         {L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen", L"Lanczos + RCAS", L"FSR1 (EASU)"}, upscale_, y,
-                         W_Upscaler);
-            y += kRowH;
-            DrawDropdown(L"Upscale target",
-                         {L"Window / display", L"1080p", L"1440p", L"2160p"}, render_target_, y,
-                         W_RenderTarget);
-            y += kRowH;
-            DrawDropdown(L"Neural upscaling (RTX VSR)", VsrLabels(), VsrIndex(vsr_quality_), y,
-                         W_Vsr, VsrAvailable());
-            y += kRowH;
             DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
             y += kRowH;
             {
@@ -2276,30 +2348,6 @@ void App::RenderSettings(double t) {
                          std::clamp(profile_.chroma, 0, 2), y, W_Chroma);
             y += kRowH;
 
-            if (vsr_quality_ > 0 && vsr_ready_) {
-                wchar_t text[192];
-                swprintf_s(text, L"RTX VSR %s active  -  %dx%d  -  last %.1f ms",
-                           VsrQualityLabel(vsr_quality_), nv_vsr_.out_width(),
-                           nv_vsr_.out_height(), nv_vsr_.last_ms());
-                ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
-                         th::Rgba(th::kMuted));
-                y += 24.0f;
-            } else if (!VsrAvailable()) {
-                ui_.Text(
-                    L"RTX VSR runtime not found: nvVFXVideoSuperRes.dll + nvngx_vsr.dll in "
-                    L"third_party\\nvidia-vfx\\runtime",
-                    {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f, th::Rgba(th::kMuted));
-                y += 24.0f;
-            } else if (vsr_quality_ > 0 && !vsr_note_.empty()) {
-                ui_.Text(vsr_note_.c_str(), {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
-                         th::Rgba(th::kMuted));
-                y += 24.0f;
-            }
-
-            DrawButton(L"Neural Ultra preset (VSR Ultra + 2160p)",
-                       {kContentX, y + 6.0f, kContentX + 380.0f, y + 50.0f}, W_NeuralMax, false);
-            y += kRowH;
-
             if (frame_gen_ >= 2 && fg_ready_) {
                 wchar_t text[192];
                 swprintf_s(text, L"NVIDIA VFG active  -  60 -> %d fps  -  last %.1f ms",
@@ -2321,37 +2369,48 @@ void App::RenderSettings(double t) {
             break;
         }
 
-        case Tab::Neural: {
-            const bool available = DlssAvailable();
-            DrawDropdown(L"DLSS Super Resolution (D3D12)",
-                         {L"Off", L"On  -  neural upscale"}, profile_.neural_sr > 0 ? 1 : 0, y,
-                         W_NeuralSr, available);
-            y += kRowH;
-            DrawDropdown(L"Upscale target",
-                         {L"Window / display", L"1080p", L"1440p", L"2160p"}, render_target_, y,
-                         W_RenderTarget);
+        case Tab::Upscaling: {
+            const bool dlss = DlssAvailable();
+            DrawDropdown(L"Upscaler", UpscalerLabels(),
+                         profile_.neural_sr > 0 ? 5 : upscale_, y, W_Upscaler);
             y += kRowH;
             DrawDropdown(L"DLSS model preset",
                          {L"K (Transformer 1, stable)", L"L (Transformer 2, best)",
                           L"M (Transformer 2, sharp)"},
                          profile_.dlss_preset == 12 ? 1 : (profile_.dlss_preset == 13 ? 2 : 0),
-                         y, W_DlssPreset, available);
+                         y, W_DlssPreset, dlss);
             y += kRowH;
             DrawDropdown(L"DLSS quality", {L"Balanced", L"Max Quality"},
-                         std::clamp(profile_.dlss_quality, 0, 1), y, W_DlssQuality, available);
+                         std::clamp(profile_.dlss_quality, 0, 1), y, W_DlssQuality, dlss);
+            y += kRowH;
+            DrawDropdown(L"Upscale target",
+                         {L"Window / display", L"1080p", L"1440p", L"2160p"}, render_target_, y,
+                         W_RenderTarget);
+            y += kRowH;
+            DrawDropdown(L"Neural upscaling (RTX VSR)", VsrLabels(), VsrIndex(vsr_quality_), y,
+                         W_Vsr, VsrAvailable());
             y += kRowH;
 
             if (profile_.neural_sr > 0 && dlss_ready_) {
                 wchar_t text[192];
-                swprintf_s(text, L"DLSS SR active  -  %dx%d  -  last %.1f ms",
+                swprintf_s(text, L"DLSS SR preset %s active  -  %dx%d  -  last %.1f ms",
+                           profile_.dlss_preset == 12 ? L"L" : (profile_.dlss_preset == 13 ? L"M" : L"K"),
                            dlss_sr_.out_width(), dlss_sr_.out_height(), dlss_sr_.last_ms());
                 ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
                          th::Rgba(th::kMuted));
                 y += 24.0f;
-            } else if (!available) {
-                ui_.Text(
-                    L"DLSS runtime missing: nvngx_dlss.dll in third_party\\nvidia-ngx\\runtime",
-                    {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f, th::Rgba(th::kMuted));
+            } else if (vsr_quality_ > 0 && vsr_ready_) {
+                wchar_t text[192];
+                swprintf_s(text, L"RTX VSR %s active  -  %dx%d  -  last %.1f ms",
+                           VsrQualityLabel(vsr_quality_), nv_vsr_.out_width(),
+                           nv_vsr_.out_height(), nv_vsr_.last_ms());
+                ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
+                y += 24.0f;
+            } else if (!dlss && !VsrAvailable()) {
+                ui_.Text(L"Neural runtimes missing: nvngx_dlss.dll and the VSR runtime",
+                         {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
                 y += 24.0f;
             } else if (!dlss_note_.empty()) {
                 ui_.Text(dlss_note_.c_str(), {kContentX, y + 2.0f, w - 64.0f, y + 26.0f},
@@ -2359,12 +2418,58 @@ void App::RenderSettings(double t) {
                 y += 24.0f;
             }
 
-            ui_.Text(
-                L"Depth: zero contract (Magpie captured-colour)   -   Motion: zero, history reset per frame",
-                {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 11.5f, th::Rgba(th::kMuted));
+            DrawButton(L"Neural Ultra preset (VSR Ultra + 2160p)",
+                       {kContentX, y + 6.0f, kContentX + 380.0f, y + 50.0f}, W_NeuralMax, false);
+            y += kRowH;
+            break;
+        }
+
+        case Tab::Neural: {
+            ui_.Text(L"DLSS Neural Rendering (same resolution)",
+                     {kContentX, y, w - 64.0f, y + 30.0f}, 16.0f, th::Rgba(th::kInk),
+                     DWRITE_FONT_WEIGHT_SEMI_BOLD);
+            y += 36.0f;
+
+            DrawDropdown(L"Neural Rendering", {L"Off", L"On"}, profile_.neural_nr > 0 ? 1 : 0, y,
+                         W_NeuralNr);
+            y += kRowH;
+            DrawDropdown(L"Stack passes", {L"1", L"2 (recommended)", L"3", L"4"},
+                         std::clamp(profile_.nr_passes - 1, 0, 3), y, W_NrPasses);
+            y += kRowH;
+            DrawDropdown(L"Hook point", {L"Upscaled", L"Render", L"Present"},
+                         std::clamp(profile_.nr_hook, 0, 2), y, W_NrHook);
+            y += kRowH;
+            DrawDropdown(L"Resolution", {L"Match game"}, 0, y, W_NrResolution);
+            y += kRowH;
+            DrawDropdown(L"Style", {L"Default", L"Natural", L"Cinematic"},
+                         std::clamp(profile_.nr_style, 0, 2), y, W_NrStyle);
+            y += kRowH;
+            DrawDropdown(L"Local tone", PercentLabels(), PercentIndex(profile_.nr_tone), y,
+                         W_NrTone);
+            y += kRowH;
+            DrawDropdown(L"Structure", PercentLabels(), PercentIndex(profile_.nr_structure), y,
+                         W_NrStructure);
+            y += kRowH;
+            DrawDropdown(L"Character / skin", PercentLabels(), PercentIndex(profile_.nr_skin), y,
+                         W_NrSkin);
+            y += kRowH;
+            DrawDropdown(L"UI correction", {L"Off", L"On"}, profile_.nr_ui > 0 ? 1 : 0, y,
+                         W_NrUi);
+            y += kRowH;
+
+            if (profile_.neural_nr > 0) {
+                ui_.Text(
+                    L"DLSSNR settings saved. Engine: Magpie multi-pass + optical flow is not "
+                    L"connected in this build.",
+                    {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f, th::Rgba(th::kMuted));
+            } else {
+                ui_.Text(L"DLSSNR off. DLSS Super Resolution is under Upscaling.",
+                         {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
+            }
             y += 26.0f;
             ui_.Text(
-                L"Presets L/M need a 580+ driver; K is the safe default. Changes apply live.",
+                L"Depth: zero contract (Magpie captured-colour)   -   Motion: optical flow (Magpie)",
                 {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 11.5f, th::Rgba(th::kMuted));
             break;
         }
@@ -2693,47 +2798,40 @@ void App::RenderStreamSettings(double t) {
         DrawButton(L"Stream settings", {w - 300.0f, 92.0f, w - 64.0f, 130.0f},
                    W_NeuralOverlayBack, false);
         float y = 150.0f;
-        const bool available = DlssAvailable();
-        DrawDropdown(L"DLSS Super Resolution (D3D12)",
-                     {L"Off", L"On  -  neural upscale"}, profile_.neural_sr > 0 ? 1 : 0, y,
-                     W_NeuralSr, available);
+        DrawDropdown(L"Neural Rendering", {L"Off", L"On"}, profile_.neural_nr > 0 ? 1 : 0, y,
+                     W_NeuralNr);
         y += 56.0f;
-        DrawDropdown(L"DLSS model preset",
-                     {L"K (Transformer 1, stable)", L"L (Transformer 2, best)",
-                      L"M (Transformer 2, sharp)"},
-                     profile_.dlss_preset == 12 ? 1 : (profile_.dlss_preset == 13 ? 2 : 0), y,
-                     W_DlssPreset, available);
+        DrawDropdown(L"Stack passes", {L"1", L"2 (recommended)", L"3", L"4"},
+                     std::clamp(profile_.nr_passes - 1, 0, 3), y, W_NrPasses);
         y += 56.0f;
-        DrawDropdown(L"DLSS quality", {L"Balanced", L"Max Quality"},
-                     std::clamp(profile_.dlss_quality, 0, 1), y, W_DlssQuality, available);
+        DrawDropdown(L"Style", {L"Default", L"Natural", L"Cinematic"},
+                     std::clamp(profile_.nr_style, 0, 2), y, W_NrStyle);
         y += 56.0f;
-        DrawDropdown(L"Neural upscaling (RTX VSR)", VsrLabels(), VsrIndex(vsr_quality_), y,
-                     W_Vsr, VsrAvailable());
+        DrawDropdown(L"Local tone", PercentLabels(), PercentIndex(profile_.nr_tone), y,
+                     W_NrTone);
         y += 56.0f;
-        DrawDropdown(L"Upscale target",
-                     {L"Window / display", L"1080p", L"1440p", L"2160p"}, render_target_, y,
-                     W_RenderTarget);
+        DrawDropdown(L"Structure", PercentLabels(), PercentIndex(profile_.nr_structure), y,
+                     W_NrStructure);
+        y += 56.0f;
+        DrawDropdown(L"Character / skin", PercentLabels(), PercentIndex(profile_.nr_skin), y,
+                     W_NrSkin);
+        y += 56.0f;
+        DrawDropdown(L"UI correction", {L"Off", L"On"}, profile_.nr_ui > 0 ? 1 : 0, y, W_NrUi);
         y += 56.0f;
 
-        if (profile_.neural_sr > 0 && dlss_ready_) {
-            wchar_t text[192];
-            swprintf_s(text, L"DLSS SR active  -  %dx%d  -  last %.1f ms",
-                       dlss_sr_.out_width(), dlss_sr_.out_height(), dlss_sr_.last_ms());
-            ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
-                     th::Rgba(th::kMuted));
-        } else if (!available) {
-            ui_.Text(L"DLSS runtime missing: nvngx_dlss.dll in third_party\\nvidia-ngx\\runtime",
+        if (profile_.neural_nr > 0) {
+            ui_.Text(L"DLSSNR settings saved; multi-pass engine not connected in this build.",
                      {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
                      th::Rgba(th::kMuted));
         } else {
-            ui_.Text(L"Depth: zero contract  -  motion zero, history reset each frame",
+            ui_.Text(L"DLSSNR off. DLSS Super Resolution is in the Upscaler list.",
                      {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
                      th::Rgba(th::kMuted));
         }
         y += 30.0f;
         DrawButton(L"Resume", {kContentX, y + 6.0f, kContentX + 200.0f, y + 50.0f},
                    W_ResumeOverlay, true);
-        DrawHints(L"Tab / Esc   resume      Neural changes apply live", 1.0f);
+        DrawHints(L"Tab / Esc   resume      Neural settings persist", 1.0f);
         DrawPopup();
         return;
     }
@@ -2742,10 +2840,8 @@ void App::RenderStreamSettings(double t) {
                false);
 
     float y = 150.0f;
-    DrawDropdown(L"Upscaler",
-                 {L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen", L"Lanczos + RCAS",
-                  L"FSR1 (EASU)"},
-                 upscale_, y, W_Upscaler);
+    DrawDropdown(L"Upscaler", UpscalerLabels(),
+                 profile_.neural_sr > 0 ? 5 : upscale_, y, W_Upscaler);
     y += 56.0f;
     DrawDropdown(L"Upscale target", {L"Window / display", L"1080p", L"1440p", L"2160p"},
                  render_target_, y, W_RenderTarget);
@@ -2783,7 +2879,11 @@ void App::RenderStreamSettings(double t) {
     y += 62.0f;
 
     std::wstring note = L"Changes apply live  -  decoder and bitrate need a new session";
-    if (vsr_quality_ > 0 && vsr_ready_) {
+    if (profile_.neural_sr > 0 && dlss_ready_) {
+        wchar_t dlss_text[128];
+        swprintf_s(dlss_text, L"  -  DLSS SR %.1f ms", dlss_sr_.last_ms());
+        note += dlss_text;
+    } else if (vsr_quality_ > 0 && vsr_ready_) {
         wchar_t vsr_text[128];
         swprintf_s(vsr_text, L"  -  RTX VSR %.1f ms", nv_vsr_.last_ms());
         note += vsr_text;

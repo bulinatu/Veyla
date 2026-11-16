@@ -384,8 +384,11 @@ int main(int argc, char** argv) {
     // 1. Load the NGX core before any D3D12 device exists (Magpie import-links
     //    it, so it is mapped at process start).
     std::wstring core_path = core_dir + L"\\_nvngx.dll";
-    if (::GetFileAttributesW(core_path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+    if (core_dir.empty() || ::GetFileAttributesW(core_path.c_str()) == INVALID_FILE_ATTRIBUTES) {
         core_path = core_dir + L"\\nvngx.dll";
+    }
+    if (argc > 8) {
+        core_path = std::wstring(argv[8], argv[8] + std::strlen(argv[8]));
     }
     std::printf("loading NGX core %ls\n", core_path.c_str());
     HMODULE core = ::LoadLibraryExW(core_path.c_str(), nullptr, 0);
@@ -618,6 +621,8 @@ int main(int argc, char** argv) {
     ComPtr<ID3D12Resource> input12;
     ComPtr<ID3D11Texture2D> output11;
     ComPtr<ID3D12Resource> output12;
+    ComPtr<ID3D11Texture2D> mid11;
+    ComPtr<ID3D12Resource> mid12;
     ComPtr<ID3D11Texture2D> motion11;
     ComPtr<ID3D12Resource> motion12;
     ComPtr<ID3D11Texture2D> depth11;
@@ -670,6 +675,7 @@ int main(int argc, char** argv) {
     const auto input_pixels = frame_a;
     if (!create_shared_rgba(input11, input12, input_pixels.data(), kWidth * 4) ||
         !create_shared_rgba(output11, output12, magenta.data(), kWidth * 4) ||
+        !create_shared_rgba(mid11, mid12, magenta.data(), kWidth * 4) ||
         !create_guide(DXGI_FORMAT_R16G16_FLOAT, motion11, motion12,
                       guide_motion ? motion_pattern : zero_motion_pattern,
                       sizeof(motion_pattern)) ||
@@ -758,17 +764,33 @@ int main(int argc, char** argv) {
         list->Reset(allocator.Get(), nullptr);
         barrier(input12.Get(), D3D12_RESOURCE_STATE_COMMON,
                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        barrier(mid12.Get(), D3D12_RESOURCE_STATE_COMMON,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         barrier(motion12.Get(), D3D12_RESOURCE_STATE_COMMON,
                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         barrier(depth12.Get(), D3D12_RESOURCE_STATE_COMMON,
                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        parameters->Set("DLSSNR.Color", input12.Get());
+        parameters->Set("DLSSNR.Output", mid12.Get());
+        parameters->Set("DLSSNR.Reset", run == 0 ? 1 : 0);
+        NVSDK_NGX_Result evaluated =
+            snippet_evaluate(list.Get(), feature, parameters, nullptr);
+        PrintResult("EvaluateFeature(18) pass1", evaluated);
+        if (!NVSDK_NGX_SUCCEED(evaluated)) {
+            return 14;
+        }
+        barrier(input12.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_COMMON);
+        barrier(mid12.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         barrier(output12.Get(), D3D12_RESOURCE_STATE_COMMON,
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        parameters->Set("DLSSNR.Reset", run == 0 ? 1 : 0);
-        const NVSDK_NGX_Result evaluated =
-            snippet_evaluate(list.Get(), feature, parameters, nullptr);
-        PrintResult("EvaluateFeature(18)", evaluated);
-        barrier(input12.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+        parameters->Set("DLSSNR.Color", mid12.Get());
+        parameters->Set("DLSSNR.Output", output12.Get());
+        parameters->Set("DLSSNR.Reset", 0);
+        evaluated = snippet_evaluate(list.Get(), feature, parameters, nullptr);
+        PrintResult("EvaluateFeature(18) pass2", evaluated);
+        barrier(mid12.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                 D3D12_RESOURCE_STATE_COMMON);
         barrier(motion12.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                 D3D12_RESOURCE_STATE_COMMON);

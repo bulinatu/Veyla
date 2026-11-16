@@ -54,7 +54,7 @@ public:
 
 private:
     enum class Screen { Home, Settings, Stream, StreamSettings };
-    enum class Tab { Display, Neural, Audio, Controller, Connection, About };
+    enum class Tab { Display, Upscaling, Neural, Audio, Controller, Connection, About };
 
     enum class Hit {
         None,
