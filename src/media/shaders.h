@@ -112,6 +112,41 @@ float3 CatmullRom(float2 uv)
     return acc;
 }
 
+float LanczosWeight(float x)
+{
+    x = abs(x);
+    if (x < 1e-4)
+        return 1.0;
+    if (x >= 3.0)
+        return 0.0;
+    const float pi = 3.14159265;
+    float px = pi * x;
+    return (3.0 * sin(px) * sin(px / 3.0)) / (px * px);
+}
+
+float3 Lanczos3(float2 uv)
+{
+    float2 sp = uv * gSrcSize - 0.5;
+    float2 base = floor(sp);
+    float3 acc = 0.0;
+    float wsum = 0.0;
+
+    [unroll]
+    for (int j = -2; j <= 3; ++j)
+    {
+        [unroll]
+        for (int i = -2; i <= 3; ++i)
+        {
+            float2 texel = base + float2(i, j) + 0.5;
+            float2 d = abs(texel - (sp + 0.5));
+            float w = LanczosWeight(d.x) * LanczosWeight(d.y);
+            acc += gSrc.SampleLevel(gSmp, texel / gSrcSize, 0).rgb * w;
+            wsum += w;
+        }
+    }
+    return acc / max(wsum, 1e-4);
+}
+
 float4 PSMain(VSOut i) : SV_TARGET
 {
     float3 col;
@@ -120,20 +155,39 @@ float4 PSMain(VSOut i) : SV_TARGET
     {
         col = gSrc.SampleLevel(gSmp, i.uv, 0).rgb;
     }
-    else
+    else if (gMode < 1.5)
+    {
+        col = CatmullRom(i.uv);
+    }
+    else if (gMode < 2.5)
     {
         col = CatmullRom(i.uv);
 
-        if (gMode > 1.5)
-        {
-            float2 o = 1.0 / gSrcSize;
-            float3 blur =
-                (gSrc.SampleLevel(gSmp, i.uv + float2(o.x, 0), 0).rgb +
-                 gSrc.SampleLevel(gSmp, i.uv - float2(o.x, 0), 0).rgb +
-                 gSrc.SampleLevel(gSmp, i.uv + float2(0, o.y), 0).rgb +
-                 gSrc.SampleLevel(gSmp, i.uv - float2(0, o.y), 0).rgb) * 0.25;
-            col += (col - blur) * gSharp;
-        }
+        float2 o = 1.0 / gSrcSize;
+        float3 blur =
+            (gSrc.SampleLevel(gSmp, i.uv + float2(o.x, 0), 0).rgb +
+             gSrc.SampleLevel(gSmp, i.uv - float2(o.x, 0), 0).rgb +
+             gSrc.SampleLevel(gSmp, i.uv + float2(0, o.y), 0).rgb +
+             gSrc.SampleLevel(gSmp, i.uv - float2(0, o.y), 0).rgb) * 0.25;
+        col += (col - blur) * gSharp;
+    }
+    else
+    {
+        // Lanczos3 + contrast-adaptive sharpening, clamped to the local
+        // neighbourhood so dark detail is not crushed into black.
+        col = Lanczos3(i.uv);
+
+        float2 o = 1.0 / gSrcSize;
+        float3 n = gSrc.SampleLevel(gSmp, i.uv + float2(o.x, 0), 0).rgb;
+        float3 s = gSrc.SampleLevel(gSmp, i.uv - float2(o.x, 0), 0).rgb;
+        float3 e = gSrc.SampleLevel(gSmp, i.uv + float2(0, o.y), 0).rgb;
+        float3 w = gSrc.SampleLevel(gSmp, i.uv - float2(0, o.y), 0).rgb;
+
+        float3 blur = (n + s + e + w) * 0.25;
+        float3 mn = min(min(min(n, s), min(e, w)), col);
+        float3 mx = max(max(max(n, s), max(e, w)), col);
+        float3 sharpened = col + (col - blur) * gSharp;
+        col = clamp(sharpened, mn, mx);
     }
 
     return float4(saturate(col), 1.0);

@@ -408,7 +408,7 @@ void App::HandlePad() {
 void App::ApplyDropdown(int id, int index) {
     switch (id) {
         case W_Upscaler:
-            upscale_ = std::clamp(index, 0, 2);
+            upscale_ = std::clamp(index, 0, 3);
             presenter_.SetUpscaleMode(upscale_);
             break;
         case W_Hud:
@@ -1018,7 +1018,7 @@ void App::RenderSettings(double t) {
     switch (tab_) {
         case Tab::Display: {
             DrawDropdown(L"Upscaler",
-                         {L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen"}, upscale_, y,
+                         {L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen", L"Lanczos + RCAS"}, upscale_, y,
                          W_Upscaler);
             y += kRowH;
             DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);

@@ -252,7 +252,7 @@ bool Presenter::Resize(int width, int height) {
 }
 
 void Presenter::SetUpscaleMode(int mode) {
-    cfg_.upscale_mode = std::clamp(mode, 0, 2);
+    cfg_.upscale_mode = std::clamp(mode, 0, 3);
 }
 
 void Presenter::BeginTiming() {
@@ -335,7 +335,7 @@ void Presenter::Render(double time_seconds) {
 
     // 2. Upscale + optional sharpen into the backbuffer.
     PsParams ps{};
-    ps.sharpen = 0.35f;
+    ps.sharpen = (cfg_.upscale_mode == 3) ? 0.45f : 0.35f;
     ps.mode = static_cast<float>(cfg_.upscale_mode);
     ps.src_w = static_cast<float>(cfg_.source_width);
     ps.src_h = static_cast<float>(cfg_.source_height);
