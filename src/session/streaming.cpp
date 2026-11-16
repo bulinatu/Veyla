@@ -298,11 +298,6 @@ void Streaming::OnAudio(uint8_t* buf, size_t size) {
     }
     std::memcpy(packet->data, buf, size);
 
-    static int logged = 0;
-    if (logged++ < 3) {
-        std::fprintf(stderr, "[stream] opus packet %zu bytes\n", size);
-    }
-
     const int sent = avcodec_send_packet(static_cast<AVCodecContext*>(opus_ctx_), packet);
     static int s_log = 0;
     if (s_log++ < 3) { std::fprintf(stderr, "[stream] send rc=%d size=%zu\n", sent, size); }
@@ -331,11 +326,6 @@ void Streaming::OnAudio(uint8_t* buf, size_t size) {
         static int c_log = 0;
         if (c_log++ < 3) { std::fprintf(stderr, "[stream] converted=%d nb=%d rate=%d\n", converted, frame->nb_samples, frame->sample_rate); }
                 audio_->Push(pcm.data(), converted);
-                static int a_cnt = 0;
-                if (++a_cnt % 100 == 0) {
-                    std::fprintf(stderr, "[stream] audio pushed=%d peak=%.3f underruns=%d\n",
-                                 audio_frames_.load(), audio_->peak(), audio_->underruns());
-                }
                 audio_frames_.fetch_add(converted);
             }
         }

@@ -231,12 +231,10 @@ void App::AddHit(Hit hit, int index, const D2D1_RECT_F& rect) {
 }
 
 void App::DispatchClick() {
-    std::fprintf(stderr, "[click] %d,%d\n", pointer_.x, pointer_.y);
     for (auto it = hits_.rbegin(); it != hits_.rend(); ++it) {
         if (!Contains(it->rect, pointer_.x, pointer_.y)) {
             continue;
         }
-        std::fprintf(stderr, "[hit] %d %d\n", static_cast<int>(it->hit), it->index);
 
         if (open_dropdown_ >= 0 && it->hit != Hit::DropdownItem) {
             if (it->hit == Hit::Dropdown) {
@@ -554,8 +552,6 @@ void App::ConnectConsole() {
 if (!audio_.is_open()) {
         OpenAudioDevice();
     }
-    std::fprintf(stderr, "[app] audio open=%d failed=%d device=%s\n", audio_.is_open() ? 1 : 0,
-                 audio_failed_ ? 1 : 0, audio_.device_name().c_str());
     streaming_.SetAudio(&audio_);
 
     std::string error;
