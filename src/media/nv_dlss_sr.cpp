@@ -549,11 +549,24 @@ bool NvDlssSr::Readback(std::vector<uint8_t>& out, std::string& detail) {
         last_output_slot_ = pending_slot_;
         have_output_ = true;
     }
-    if (!initialized_ || !output11_[last_output_slot_] || !context_ || !device_) {
+    return ReadbackSlot(last_output_slot_, out, detail);
+}
+
+bool NvDlssSr::ReadbackLast(std::vector<uint8_t>& out, std::string& detail) {
+    if (!have_output_) {
+        detail = "DLSS SR has no completed output yet";
+        return false;
+    }
+    return ReadbackSlot(last_output_slot_, out, detail);
+}
+
+bool NvDlssSr::ReadbackSlot(int slot, std::vector<uint8_t>& out, std::string& detail) {
+    if (!initialized_ || slot < 0 || slot >= kOutputSlots || !output11_[slot] || !context_ ||
+        !device_) {
         detail = "DLSS SR has no output to read back";
         return false;
     }
-    ID3D11Texture2D* source = output11_[last_output_slot_].Get();
+    ID3D11Texture2D* source = output11_[slot].Get();
     D3D11_TEXTURE2D_DESC desc{};
     source->GetDesc(&desc);
     if (!output_staging_) {

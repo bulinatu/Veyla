@@ -7,18 +7,23 @@ packaged. The neural paths are now:
 ```
 stream (1080p RGBA)
   -> DLSS Super Resolution / DLAA (D3D12, optional)
-  -> DLSS Neural Rendering (NGX worker, optional)
-  -> presenter (1440p/2160p target, or the window)
+  -> [CPU readback of the SR output, when FG is enabled]
+  -> DLSS Frame Generation worker (2x-6x, presents its own window)
+  -> display
 ```
 
-`DLSS Frame Generation` is a separate output path: the NeuralScreen worker owns
-the presented window and generates 2x-6x frames. It takes the same RGBA stream
-and can also run DLSS NR internally (`SetNeuralBypass` is off when NR is
-enabled). DLSS SR/DLAA and DLSS FG cannot be the final stage at the same time:
-selecting DLSS SR turns FG off, and selecting FG turns SR off. The Performance
-tab shows the worker's **actual** displayed rate; on the reference 4090 it is
-about 120 fps at 2x, and 3x-6x land between refreshes (see
-`docs/22-performance.md`).
+Without frame generation the SR output goes straight to the parent presenter.
+With frame generation the SR output (render resolution, e.g. 2560x1440) is read
+back and fed to the NeuralScreen worker, exactly like a game feeding DLSS-G at
+its render resolution. The worker generates and presents the final frames; the
+parent's window is covered while it does. Measured with SR Ultra Quality +
+FG 2x at 2560x1440: **120 fps displayed**, source cadence 4 refreshes. The
+parent's source tick costs ~5-6 ms (upload + SR submit + readback + worker
+submit) but the worker is on its own thread and is not blocked by it.
+
+DLSS NR can still run inside the worker (`SetNeuralBypass` is off when NR is
+enabled). NR + FG 2x costs roughly 7-18 fps of output (120 -> 102-113 measured);
+NR off is the default for a stable 120.
 
 ## DLSS Super Resolution / DLAA
 

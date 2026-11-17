@@ -1554,6 +1554,11 @@ void App::ApplyRenderTarget() {
             ApplyNrSettings();
         }
     }
+    // SR output size changed while FG is active: the worker's shared memory is
+    // sized once, so rebuild it for the new stage.
+    if (profile_.dlss_fg >= 2 && dlss_ready_) {
+        ApplyDlssFrameGen();
+    }
 }
 
 int App::present_hz() const {
@@ -1859,14 +1864,6 @@ void App::ApplyNeuralSettings() {
             SaveProfile();
             return;
         }
-        // The FG worker owns the output and takes the raw stream frame, so the
-        // two cannot both be the final stage. Selecting DLSS SR/DLAA switches
-        // the output back to the parent presenter.
-        if (profile_.dlss_fg >= 2) {
-            profile_.dlss_fg = 0;
-            ApplyDlssFrameGen();
-            stream_note_ = "DLSS Frame Generation off; DLSS SR is the active output.";
-        }
         frame_gen_ = 0;
         profile_.frame_gen = 0;
         fg_queue_.clear();
@@ -1874,12 +1871,21 @@ void App::ApplyNeuralSettings() {
         dlss_ready_ = EnsureDlssSrForTarget();
         if (!dlss_ready_) {
             dlss_sr_.Shutdown();
+        } else if (profile_.dlss_fg >= 2) {
+            // SR feeds the FG worker. Recreate it at the new output size.
+            ApplyDlssFrameGen();
+            stream_note_ = "DLSS SR + Frame Generation active.";
         }
     } else {
         dlss_ready_ = false;
         dlss_in_w_ = 0;
         dlss_in_h_ = 0;
         dlss_sr_.Shutdown();
+        // The FG worker was sized to the SR output. Put it back on the raw
+        // stream size instead of feeding it a 1080p frame it cannot accept.
+        if (profile_.dlss_fg >= 2) {
+            ApplyDlssFrameGen();
+        }
     }
     SaveProfile();
 }
@@ -1922,9 +1928,16 @@ bool App::NrAvailable() const {
 
 void App::NrStageSize(int* width, int* height) const {
     if (profile_.dlss_fg >= 2) {
-        // Frame Generation presents the worker window at the stream size.
-        *width = profile_.width;
-        *height = profile_.height;
+        // The FG worker consumes the DLSS SR output when both are enabled, so
+        // it must run at the SR output size, exactly like a game's render
+        // resolution feeding DLSS-G.
+        if (profile_.neural_sr > 0 && dlss_ready_ && dlss_sr_.out_width() > 0) {
+            *width = dlss_sr_.out_width();
+            *height = dlss_sr_.out_height();
+        } else {
+            *width = profile_.width;
+            *height = profile_.height;
+        }
     } else {
     const bool sr_stage =
         profile_.neural_sr > 0 && profile_.dlss_mode != 5 && DlssAvailable();
@@ -2006,6 +2019,48 @@ bool App::EnsureDlssSrForTarget() {
     return EnsureDlssSr(in_w, in_h);
 }
 
+bool App::RunDlssSr(const media::DecodedFrame& frame, media::NvDlssSr::Frame& out) {
+    if (profile_.neural_sr <= 0 || frame.rgba.empty()) {
+        return false;
+    }
+    const bool dlaa = profile_.dlss_mode == 5;
+    int in_w = frame.width;
+    int in_h = frame.height;
+    const uint8_t* input = frame.rgba.data();
+    if (!dlaa) {
+        DlssInputSize(frame.width, frame.height, &in_w, &in_h);
+        if (in_w != frame.width || in_h != frame.height) {
+            sr_scaled_.resize(static_cast<size_t>(in_w) * in_h * 4);
+            media::DownscaleRgba(frame.rgba.data(), frame.width, frame.height, sr_scaled_.data(),
+                                 in_w, in_h, scale_tmp_);
+            input = sr_scaled_.data();
+        }
+    }
+
+    std::string detail;
+    if (dlaa) {
+        if (!dlss_ready_ || !dlss_dlaa_ || dlss_in_w_ != frame.width ||
+            dlss_in_h_ != frame.height) {
+            dlss_ready_ = EnsureDlssDlaa(frame.width, frame.height);
+        }
+        if (dlss_ready_ && dlss_sr_.Process(input, frame.width, frame.height, out, detail)) {
+            return true;
+        }
+    } else {
+        if (!dlss_ready_ || dlss_dlaa_ || dlss_in_w_ != in_w || dlss_in_h_ != in_h) {
+            dlss_ready_ = EnsureDlssSr(in_w, in_h);
+        }
+        if (dlss_ready_ && dlss_sr_.Process(input, in_w, in_h, out, detail)) {
+            return true;
+        }
+    }
+
+    dlss_note_ = L"DLSS: " + Widen(detail);
+    dlss_ready_ = false;
+    dlss_sr_.Shutdown();
+    return false;
+}
+
 void App::DetachFgWindow() {
     if (fg_window_) {
         ::ShowWindow(fg_window_, SW_HIDE);
@@ -2071,10 +2126,29 @@ void App::ApplyDlssFrameGen() {
         profile_.frame_gen = 0;
         fg_queue_.clear();
         fg_last_ = {};
+        // DLSS SR can feed the FG worker, exactly like a game's render
+        // resolution feeding DLSS-G. Make sure the SR feature exists first so
+        // the worker can be sized to its output.
         if (profile_.neural_sr > 0) {
-            profile_.neural_sr = 0;
-            dlss_ready_ = false;
-            dlss_sr_.Shutdown();
+            if (!EnsureDlssSrForTarget()) {
+                const std::wstring note = dlss_note_;
+                profile_.neural_sr = 0;
+                dlss_ready_ = false;
+                dlss_sr_.Shutdown();
+                dlss_note_ = note;
+                SaveProfile();
+            }
+        }
+        int fw = 0;
+        int fh = 0;
+        NrStageSize(&fw, &fh);
+        if (nr_.ready() && (nr_in_w_ != fw || nr_in_h_ != fh)) {
+            // The shared memory is sized once; a new SR output size needs a
+            // fresh worker.
+            StopNrThread();
+            nr_.Stop();
+            nr_ready_ = false;
+            DetachFgWindow();
         }
         if (!EnsureNr()) {
             profile_.dlss_fg = 0;
@@ -2083,9 +2157,7 @@ void App::ApplyDlssFrameGen() {
         }
         nr_.SetFrameGeneration(profile_.dlss_fg);
         nr_.SetNeuralBypass(profile_.neural_nr == 0);
-        if (!nr_.present_mode() &&
-            !nr_.EnablePresent(profile_.width > 0 ? profile_.width : 1920,
-                               profile_.height > 0 ? profile_.height : 1080, detail)) {
+        if (!nr_.present_mode() && !nr_.EnablePresent(fw, fh, detail)) {
             stream_note_ = "DLSS Frame Generation: " + detail;
             nr_.SetFrameGeneration(0);
             profile_.dlss_fg = 0;
@@ -3240,13 +3312,45 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                    streaming_.TakeFrame(stream_frame_, stream_buffer_, video_paced)) {
             NoteSourceFrame();
             if (profile_.dlss_fg >= 2 && nr_ready_ && nr_.present_mode()) {
-                // DLSS Frame Generation: the worker presents NR + generated
-                // frames in its own window; we only feed it. Keep a copy in the
-                // parent presenter as well so revealing the chrome shows the
-                // last real frame instead of the synthetic pattern.
-                presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
-                                          stream_frame_.height, stream_frame_.pq);
-                SubmitNrFrame(stream_frame_);
+                // DLSS Frame Generation: the worker presents generated frames
+                // in its own window. When SR is also enabled it receives the
+                // SR output (render-resolution -> FG, as in a game); otherwise
+                // it receives the raw stream.
+                bool fed = false;
+                if (profile_.neural_sr > 0 && dlss_ready_) {
+                    media::NvDlssSr::Frame sr_frame;
+                    if (RunDlssSr(stream_frame_, sr_frame)) {
+                        const int sr_w = dlss_sr_.out_width();
+                        const int sr_h = dlss_sr_.out_height();
+                        presenter_.SetSourceView(sr_frame.srv.Get(), sr_w, sr_h,
+                                                 stream_frame_.pq);
+                        presenter_.SetSourceFinal(false);
+                        std::string rb_detail;
+                        if (dlss_sr_.ReadbackLast(sr_readback_, rb_detail) &&
+                            sr_readback_.size() ==
+                                static_cast<size_t>(sr_w) * sr_h * 4) {
+                            SubmitNrFrameData(std::move(sr_readback_), sr_w, sr_h,
+                                              stream_frame_.pq);
+                            fed = true;
+                        } else {
+                            dlss_note_ = L"FG readback: " + Widen(rb_detail);
+                            std::fprintf(stderr, "[app] SR->FG readback failed: %s\n",
+                                         rb_detail.c_str());
+                        }
+                    } else {
+                        std::fprintf(stderr, "[app] SR->FG stopped: %ls\n",
+                                     dlss_note_.c_str());
+                        profile_.neural_sr = 0;
+                        SaveProfile();
+                        ApplyDlssFrameGen();
+                        stream_note_ = "DLSS SR failed; frame generation uses the raw stream.";
+                    }
+                }
+                if (!fed) {
+                    presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
+                                              stream_frame_.height, stream_frame_.pq);
+                    SubmitNrFrame(stream_frame_);
+                }
                 std::string fg_error;
                 if (NrFailed(fg_error)) {
                     nr_note_ = L"DLSS FG: " + Widen(fg_error);
@@ -5213,7 +5317,8 @@ void App::RenderStream(double t) {
                                profile_.dlss_mode == 5 ? L"DLAA %.1f ms   " : L"DLSS %.1f ms   ",
                                dlss_sr_.last_ms());
                     chain += part;
-                } else if (frame_gen_ >= 2 && fg_ready_) {
+                }
+                if (frame_gen_ >= 2 && fg_ready_) {
                     wchar_t part[96];
                     swprintf_s(part, L"VFG %dx   ", frame_gen_);
                     chain += part;

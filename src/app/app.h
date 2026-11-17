@@ -181,6 +181,7 @@ private:
 
     bool DlssAvailable() const;
     bool EnsureDlssSr(int in_width, int in_height);
+    bool RunDlssSr(const media::DecodedFrame& frame, media::NvDlssSr::Frame& out);
     bool EnsureDlssSrForTarget();
     bool EnsureDlssDlaa(int width, int height);
     std::wstring FindDlssRuntime() const;

@@ -98,9 +98,8 @@ HEVC 1080p -> decode -> RGBA 1080p
 - **Exclusivity that remains.** RTX VSR replaces the whole upscale stage (it
   is a different video-effects runtime), and NVIDIA VFG replaces the frame
   cadence; both still turn NR off, as before. DLSS SR does not.
-- **NR resolution.** The worker caps NGX NR at 2560x1440 and feature 18 goes
-  silent at 4K, so NR always runs at the stream size (1080p) and the upscaler
-  produces the target resolution.
+- **NR resolution.** The worker caps NGX NR at 2560x1440, so NR runs at the
+  stream size or on the DLSS SR output when the NVIDIA order is selected.
 
 ## Performance notes from this machine (RTX 4090, 2560x1440)
 
@@ -110,7 +109,7 @@ HEVC 1080p -> decode -> RGBA 1080p
 | NR, Boost 70% + 2 passes | ~12 ms | cascade, same cost as full 1 pass |
 | DLSS SR, 1080p -> 1440p | 2.8 ms probe, 3.8-4.2 ms live | was ~15 ms before the fence-wait fix |
 | NR -> DLSS SR chain | ~13.2 ms probe / ~14-15 ms live | 75.7 fps ceiling; holds 60 fps live |
-| RTX VSR, AI High, 1080p -> 1440p | 8-10 ms | alternative upscaler |
+| DLSS SR + FG 2x, 1440p | SR async + 14 MB readback | 120 fps displayed; parent source tick ~5-6 ms |
 | FSR1 (EASU) + bicubic chroma | ~2 ms | cheapest path |
 
 The ~15 ms SR number that earlier builds reported was not the network: the
@@ -123,8 +122,9 @@ in the NR pipe reader.
 - It does not provide DLSS 5's 3D guides (albedo, normals, real motion
   vectors); a video stream has none. NR here is the vendor runtime in its
   video/2D mode.
-- It does not run Multi Frame Generation; NVIDIA VFG 2x is a separate,
-  mutually exclusive path.
+- It does not run Multi Frame Generation beyond what the NeuralScreen worker
+  sustains; DLSS Frame Generation 2x is the stable path, and DLSS SR can feed
+  it at the render resolution. NVIDIA VFG 2x is a separate, legacy path.
 - It does not ship NVIDIA's DLLs. `nvngx_dlss.dll` and `nvngx_dlssnr.dll` are
   user-supplied; `scripts/install-ngx-runtime.ps1` and
   `scripts/install-nr-runtime.ps1` copy them into place.
