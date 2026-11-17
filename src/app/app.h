@@ -167,6 +167,7 @@ private:
     void ConnectConsole();
     void StartStream();
     void TickPendingConnect();
+    void TickSession();
     bool VideoPaced() const;
     void SaveProfile();
     void StartPadThread();
@@ -232,6 +233,8 @@ private:
     std::atomic<bool> pad_run_{false};
     int upscale_ = 1;
     bool quit_ = false;
+    bool device_lost_handled_ = false;
+    void RecoverFromDeviceLoss();
     bool capture_requested_ = false;
     double last_time_ = -1.0;
     double clock_ = 0.0;
@@ -324,6 +327,12 @@ private:
     session::Streaming streaming_;
     media::DecodedFrame stream_frame_;
     bool stream_active_ = false;
+    bool stream_connecting_ = false;
+    std::thread session_thread_;
+    std::atomic<bool> session_started_{false};
+    std::atomic<bool> session_ok_{false};
+    std::mutex session_mutex_;
+    std::string session_error_;
     session::Streaming::StreamStats stream_stats_{};
 
     // frame generation (NVIDIA VFG)

@@ -1731,6 +1731,38 @@ bool App::WaitForPresent(int timeout_ms) {
     return presenter_.WaitForFrame(static_cast<DWORD>(timeout_ms));
 }
 
+void App::RecoverFromDeviceLoss() {
+    std::fprintf(stderr, "[app] graphics device lost; restarting the client\n");
+    SaveProfile();
+
+    wchar_t exe_path[MAX_PATH] = {};
+    if (::GetModuleFileNameW(nullptr, exe_path, MAX_PATH) == 0) {
+        quit_ = true;
+        return;
+    }
+
+    wchar_t already[8] = {};
+    const bool retried = ::GetEnvironmentVariableW(L"BRP_RESTARTED", already, 8) > 0;
+    if (!retried) {
+        ::SetEnvironmentVariableW(L"BRP_RESTARTED", L"1");
+        std::wstring command = L"\"" + std::wstring(exe_path) + L"\"";
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        if (::CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, 0, nullptr,
+                             nullptr, &si, &pi)) {
+            ::CloseHandle(pi.hThread);
+            ::CloseHandle(pi.hProcess);
+            std::fprintf(stderr, "[app] restarted as pid %lu\n", pi.dwProcessId);
+            quit_ = true;
+            return;
+        }
+    }
+
+    stream_note_ = "The graphics device was lost. Restart BetterRemotePlay.";
+    quit_ = true;
+}
+
 void App::NoteSourceFrame() {
     source_updated_ = true;
     if (last_source_at_ > 0.0) {
@@ -2596,6 +2628,9 @@ App::~App() {
     if (address_thread_.joinable()) {
         address_thread_.join();
     }
+    if (session_thread_.joinable()) {
+        session_thread_.join();
+    }
     StopNrThread();
     StopPadThread();
 }
@@ -2786,32 +2821,85 @@ void App::StartStream() {
     fg_last_ = {};
     fg_generated_ = 0;
 
-    std::string error;
-    if (streaming_.Start(profile_, profile_.width, profile_.height, profile_.bitrate_kbps, error)) {
-        stream_active_ = true;
-        video_holds_.fill(0);
-        video_hold_pos_ = 0;
-        video_hold_fill_ = 0;
-        screen_holds_.fill(0);
-        screen_hold_pos_ = 0;
-        screen_hold_fill_ = 0;
-        video_phase_ = 0.0;
-        next_source_at_ = 0.0;
-        source_updated_ = false;
-        last_source_refresh_ = 0;
-        last_source_at_ = -1.0;
-        video_probe_at_ = clock_;
-        last_present_misses_ = presenter_.present_misses();
-        StartPadThread();
-        mouse_active_at_ = clock_;
-        cursor_hidden_ = false;
-        window_->SetCursorHidden(false);
-        screen_ = Screen::Stream;
-        std::fprintf(stderr, "[app] streaming started\n");
-    } else {
-        stream_note_ = "Could not start the session: " + error;
-        std::fprintf(stderr, "[app] start failed: %s\n", error.c_str());
+    // The chiaki session setup does network I/O and can take hundreds of
+    // milliseconds. Keep the presentation thread free: show a connecting
+    // screen and let TickSession pick up the result.
+    if (session_thread_.joinable()) {
+        session_thread_.join();
     }
+    stream_connecting_ = true;
+    stream_active_ = false;
+    session_started_.store(false);
+    session_ok_.store(false);
+    {
+        std::lock_guard<std::mutex> lock(session_mutex_);
+        session_error_.clear();
+    }
+    screen_ = Screen::Stream;
+    stream_note_ = "Connecting to " + profile_.host + " ...";
+
+    const session::Profile profile_copy = profile_;
+    const int width = profile_copy.width;
+    const int height = profile_copy.height;
+    const int bitrate = profile_copy.bitrate_kbps;
+    session_thread_ = std::thread([this, profile_copy, width, height, bitrate] {
+        std::string error;
+        const bool ok = streaming_.Start(profile_copy, width, height, bitrate, error);
+        {
+            std::lock_guard<std::mutex> lock(session_mutex_);
+            session_error_ = error;
+        }
+        session_ok_.store(ok);
+        session_started_.store(true);
+    });
+}
+
+void App::TickSession() {
+    if (!stream_connecting_ || !session_started_.load()) {
+        return;
+    }
+    if (session_thread_.joinable()) {
+        session_thread_.join();
+    }
+    stream_connecting_ = false;
+
+    const bool ok = session_ok_.load();
+    std::string error;
+    {
+        std::lock_guard<std::mutex> lock(session_mutex_);
+        error = session_error_;
+    }
+    if (!ok) {
+        stream_active_ = false;
+        screen_ = Screen::Home;
+        stream_note_ = error.empty() ? "Could not start the session." : error;
+        std::fprintf(stderr, "[app] start failed: %s\n", error.c_str());
+        return;
+    }
+
+    stream_active_ = true;
+    video_holds_.fill(0);
+    video_hold_pos_ = 0;
+    video_hold_fill_ = 0;
+    screen_holds_.fill(0);
+    screen_hold_pos_ = 0;
+    screen_hold_fill_ = 0;
+    video_phase_ = 0.0;
+    next_source_at_ = 0.0;
+    source_updated_ = false;
+    last_source_refresh_ = 0;
+    last_source_at_ = -1.0;
+    video_probe_at_ = clock_;
+    last_present_misses_ = presenter_.present_misses();
+    StartPadThread();
+    mouse_active_at_ = clock_;
+    cursor_hidden_ = false;
+    if (window_) {
+        window_->SetCursorHidden(false);
+    }
+    screen_ = Screen::Stream;
+    stream_note_.clear();
+    std::fprintf(stderr, "[app] streaming started\n");
 }
 
 void App::TickPendingConnect() {
@@ -2923,6 +3011,10 @@ void App::ToggleFullscreen() {
     ::SetForegroundWindow(hwnd);
 }
 void App::DisconnectStream() {
+    if (session_thread_.joinable()) {
+        session_thread_.join();
+    }
+    stream_connecting_ = false;
     // Mark the session dead before stopping it: the pad thread keeps running
     // (it owns HID polling for the whole app) and must not send into a session
     // that is being torn down.
@@ -2991,6 +3083,12 @@ void App::ApplyControllerOutput() {
 
 void App::Frame(double time_seconds, const PointerState& pointer) {
     const auto frame_started = std::chrono::steady_clock::now();
+
+    if (presenter_.device_lost() && !device_lost_handled_) {
+        device_lost_handled_ = true;
+        RecoverFromDeviceLoss();
+        return;
+    }
 
     // Ask Win32 for the client size every frame: the cached value can lag a
     // borderless transition by a frame, and that frame would lay the whole UI
@@ -3159,6 +3257,7 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     TickPsnLogin();
     TickAddress();
     SampleFgWorker();
+    TickSession();
 
     pairing_.Poll();
     if (pairing_.state() == session::PairState::Success) {
@@ -5303,6 +5402,35 @@ void App::RenderSettings(double t) {
 void App::RenderStream(double t) {
     (void)t;
     const float w = ui_w_;
+
+    if (stream_connecting_) {
+        ui_.FillRect({0.0f, 0.0f, w, ui_h_}, th::Rgba(0x05030A, 0.88f));
+        const float panel_w = 560.0f;
+        const float panel_h = 176.0f;
+        const D2D1_RECT_F panel{(w - panel_w) * 0.5f, (ui_h_ - panel_h) * 0.5f,
+                                (w + panel_w) * 0.5f, (ui_h_ + panel_h) * 0.5f};
+        ui_.FillRounded(panel, 18.0f, th::Rgba(0x120A20, 0.97f));
+        ui_.StrokeRounded(panel, 18.0f, th::Rgba(th::kAccent, 0.35f), 1.0f);
+
+        ui_.StrokeArc(panel.left + 56.0f, panel.top + 76.0f, 16.0f,
+                      static_cast<float>(clock_ * 5.0), 4.7f,
+                      th::Rgba(th::kAccent, 0.95f), 2.6f);
+        ui_.Text(L"Connecting",
+                 {panel.left + 92.0f, panel.top + 40.0f, panel.right - 28.0f,
+                  panel.top + 76.0f},
+                 24.0f, th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        ui_.Text(Widen("Opening a Remote Play session on " + profile_.display_name() + ".")
+                     .c_str(),
+                 {panel.left + 92.0f, panel.top + 80.0f, panel.right - 28.0f,
+                  panel.top + 112.0f},
+                 12.5f, th::Rgba(th::kInkDim));
+        ui_.Text(L"The presentation loop stays live; no frame is dropped while the "
+                 L"session negotiates.",
+                 {panel.left + 28.0f, panel.top + 124.0f, panel.right - 28.0f,
+                  panel.top + 152.0f},
+                 11.5f, th::Rgba(th::kMuted));
+        return;
+    }
 
     // The DLSS Frame Generation worker covers the client with its own child
     // window. When it is hidden to reveal the chrome, dim the stale parent

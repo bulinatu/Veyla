@@ -284,6 +284,10 @@ bool Presenter::Resize(int width, int height) {
     std::fprintf(stderr, "[presenter] resize %dx%d -> %dx%d hr=0x%08lX\n", cfg_.output_width,
                  cfg_.output_height, width, height, static_cast<unsigned long>(hr));
     if (FAILED(hr)) {
+        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+            device_lost_ = true;
+            return false;
+        }
         // Some drivers reject the waitable flag in ResizeBuffers even though
         // they accepted it at creation. Recreate the swapchain instead of
         // leaving the window stuck at the old size.
@@ -644,7 +648,13 @@ void Presenter::PresentNow(bool vsync) {
     }
     const UINT present_flags =
         (tearing_ && cfg_.allow_tearing && !vsync) ? DXGI_PRESENT_ALLOW_TEARING : 0;
-    swapchain_->Present(vsync ? 1 : 0, present_flags);
+    const HRESULT present_hr = swapchain_->Present(vsync ? 1 : 0, present_flags);
+    if (present_hr == DXGI_ERROR_DEVICE_REMOVED || present_hr == DXGI_ERROR_DEVICE_RESET) {
+        device_lost_ = true;
+        std::fprintf(stderr, "[presenter] device lost (0x%08lX)\n",
+                     static_cast<unsigned long>(present_hr));
+        return;
+    }
 
     // Ground truth for scanout: if the refresh counter advances faster than
     // the present counter, the display repeated a frame even though the CPU

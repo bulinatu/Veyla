@@ -69,6 +69,7 @@ public:
     // by more than the present count: i.e. the scanout repeated a frame.
     unsigned long long present_misses() const { return present_misses_; }
     bool present_stats_available() const { return have_present_stats_; }
+    bool device_lost() const { return device_lost_; }
     // Refresh counter from the last Present. Consecutive new-source presents
     // differ by the exact number of vblanks the previous source frame stayed
     // on screen.
@@ -159,6 +160,7 @@ private:
     bool present_stats_logged_ = false;
     unsigned long long present_misses_ = 0;
     UINT last_present_refresh_ = 0;
+    bool device_lost_ = false;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> backbuffer_;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv_;
 
