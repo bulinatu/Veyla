@@ -69,6 +69,10 @@ public:
     // presented so startup never flashes an uninitialised white surface.
     void Show();
 
+    // Test hook: keep the window off-screen and invisible. Used by the frame
+    // probe so a performance run never steals focus from the desktop.
+    bool hidden_test() const { return hidden_test_; }
+
     // Hides/shows the OS cursor over the client area (stream idle mode).
     void SetCursorHidden(bool hidden);
 
@@ -95,6 +99,7 @@ private:
     int caption_client_width_ = 0;
     bool fullscreen_chrome_ = false;
     bool dwm_corners_ = false;
+    bool hidden_test_ = false;
     HMONITOR monitor_ = nullptr;
     int refresh_hz_ = 60;
 };

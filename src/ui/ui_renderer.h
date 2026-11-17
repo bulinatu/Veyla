@@ -66,10 +66,44 @@ public:
     void PushRoundedClip(const D2D1_RECT_F& rect, float radius);
     void PopClip();
 
+    // Drops the cached text layouts. DirectWrite layouts are cheap to rebuild;
+    // this is called when the cache grows past its budget or the DPI changes.
+    void ClearTextCache();
+
 private:
     IDWriteTextFormat* Format(float size, DWRITE_FONT_WEIGHT weight,
                               DWRITE_TEXT_ALIGNMENT align,
                               DWRITE_PARAGRAPH_ALIGNMENT valign);
+
+    // A DirectWrite layout is immutable and independent of the target, so the
+    // same label (almost every static string in the UI) can be drawn every
+    // frame without rebuilding it. At 240 Hz this is the difference between
+    // ~40 layout constructions per frame and a handful per second.
+    struct TextEntry {
+        std::wstring text;
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+    };
+    IDWriteTextLayout* Layout(const wchar_t* text, float size, DWRITE_FONT_WEIGHT weight,
+                              DWRITE_TEXT_ALIGNMENT align, DWRITE_PARAGRAPH_ALIGNMENT valign,
+                              float width, float height, bool ellipsis);
+
+    struct LinearGradientEntry {
+        D2D1_COLOR_F top{};
+        D2D1_COLOR_F bottom{};
+        Microsoft::WRL::ComPtr<ID2D1GradientStopCollection1> stops;
+        Microsoft::WRL::ComPtr<ID2D1LinearGradientBrush> brush;
+    };
+    struct RadialGradientEntry {
+        D2D1_COLOR_F inner{};
+        D2D1_COLOR_F outer{};
+        Microsoft::WRL::ComPtr<ID2D1GradientStopCollection1> stops;
+        Microsoft::WRL::ComPtr<ID2D1RadialGradientBrush> brush;
+    };
+    struct ClipEntry {
+        D2D1_RECT_F rect{};
+        float radius = 0.0f;
+        Microsoft::WRL::ComPtr<ID2D1RoundedRectangleGeometry> geometry;
+    };
 
     Microsoft::WRL::ComPtr<ID2D1Factory1> factory_;
     Microsoft::WRL::ComPtr<ID2D1Device> device_;
@@ -83,6 +117,11 @@ private:
         Microsoft::WRL::ComPtr<ID2D1RoundedRectangleGeometry> geometry;
     };
     std::vector<LayerEntry> layers_;
+
+    std::unordered_map<uint64_t, std::vector<TextEntry>> text_cache_;
+    std::unordered_map<uint64_t, LinearGradientEntry> linear_cache_;
+    std::unordered_map<uint64_t, RadialGradientEntry> radial_cache_;
+    std::unordered_map<uint64_t, std::vector<ClipEntry>> clip_cache_;
 
     std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<IDWriteTextFormat>> formats_;
     Microsoft::WRL::ComPtr<IDWriteFontCollection> font_collection_;

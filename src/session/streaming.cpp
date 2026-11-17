@@ -199,6 +199,8 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
     buffer_target_.store(1);
     buffer_drops_.store(0);
     primed_ = false;
+    next_emit_ = 0.0;
+    pace_started_ = false;
     last_drought_ = -100.0;
     last_recovery_ = 0.0;
     last_queue_ = 0;
@@ -213,19 +215,42 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
         frames_.clear();
     }
     {
+        std::lock_guard<std::mutex> lock(video_mutex_);
+        video_run_ = true;
+        video_queue_.clear();
+        video_queue_drops_.store(0);
+    }
+    session_live_.store(true);
+    {
         std::lock_guard<std::mutex> lock(mutex_);
         message_ = "Connecting to " + profile.host;
     }
     state_.store(StreamState::Connecting);
+    // Spawn last: the decode thread updates state_/message_ when the first
+    // frame is ready, so the Connecting state must already be in place.
+    decode_thread_ = std::thread(&Streaming::DecodeThreadMain, this);
     return true;
 }
 
 void Streaming::Stop() {
+    session_live_.store(false);
     if (initialised_) {
+        // Tell the decode thread to stop requesting IDRs, then tear down the
+        // session. chiaki_session_join() guarantees VideoCallback is done, so
+        // the queue is stable before it is drained below.
         chiaki_session_stop(&session_);
         chiaki_session_join(&session_);
         chiaki_session_fini(&session_);
         initialised_ = false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(video_mutex_);
+        video_run_ = false;
+        video_queue_.clear();
+    }
+    video_cv_.notify_all();
+    if (decode_thread_.joinable()) {
+        decode_thread_.join();
     }
     decoder_.Close();
 
@@ -266,42 +291,87 @@ bool Streaming::VideoCallback(uint8_t* buf, size_t size, int32_t frames_lost, bo
 }
 
 void Streaming::OnVideo(uint8_t* buf, size_t size, int32_t frames_lost) {
-    const auto decode_start = std::chrono::steady_clock::now();
     stats_lost_.fetch_add(frames_lost > 0 ? frames_lost : 0);
     stats_bytes_.fetch_add(static_cast<long long>(size));
-    if (!decoder_.Feed(buf, size)) {
-        chiaki_session_request_idr(&session_);
+    if (!buf || size == 0) {
         return;
     }
 
-    media::DecodedFrame frame;
-    int decoded = 0;
-    while (decoder_.Receive(frame)) {
-        {
-            std::lock_guard<std::mutex> lock(frame_mutex_);
-            frames_.push_back(std::move(frame));
-            while (frames_.size() > 8) {
-                frames_.pop_front();
+    // Keep this callback short: it runs on chiaki's RTP receive thread. The
+    // decode (hw transfer + swscale) happens on DecodeThreadMain.
+    {
+        std::lock_guard<std::mutex> lock(video_mutex_);
+        if (!video_run_) {
+            return;
+        }
+        // Bound latency: if the decoder falls behind, drop the oldest encoded
+        // unit instead of building an ever-growing backlog. Dropping compressed
+        // data breaks the reference chain, so ask the console for a fresh IDR.
+        if (video_queue_.size() >= 6) {
+            video_queue_.pop_front();
+            video_queue_drops_.fetch_add(1);
+            if (session_live_.load()) {
+                chiaki_session_request_idr(&session_);
             }
         }
-        ++decoded;
+        EncodedUnit unit;
+        unit.bytes.assign(buf, buf + size);
+        video_queue_.push_back(std::move(unit));
     }
-    const long long decode_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                                    std::chrono::steady_clock::now() - decode_start)
-                                    .count();
-    stats_decode_us_.fetch_add(decode_us);
-    stats_decode_count_.fetch_add(1);
-    long long previous_max = stats_decode_max_us_.load();
-    while (decode_us > previous_max &&
-           !stats_decode_max_us_.compare_exchange_weak(previous_max, decode_us)) {
-    }
-    if (decoded > 0) {
-        frame_count_.fetch_add(decoded);
-        stats_frames_.fetch_add(decoded);
-        if (state_.load() != StreamState::Streaming) {
-            state_.store(StreamState::Streaming);
-            std::lock_guard<std::mutex> lock(mutex_);
-            message_ = "Streaming 1080p60";
+    video_cv_.notify_one();
+}
+
+void Streaming::DecodeThreadMain() {
+    for (;;) {
+        EncodedUnit unit;
+        {
+            std::unique_lock<std::mutex> lock(video_mutex_);
+            video_cv_.wait(lock, [this] { return !video_run_ || !video_queue_.empty(); });
+            if (!video_run_ && video_queue_.empty()) {
+                return;
+            }
+            unit = std::move(video_queue_.front());
+            video_queue_.pop_front();
+        }
+
+        const auto decode_start = std::chrono::steady_clock::now();
+        if (!decoder_.Feed(unit.bytes.data(), unit.bytes.size())) {
+            if (session_live_.load()) {
+                chiaki_session_request_idr(&session_);
+            }
+            continue;
+        }
+
+        media::DecodedFrame frame;
+        int decoded = 0;
+        while (decoder_.Receive(frame)) {
+            {
+                std::lock_guard<std::mutex> lock(frame_mutex_);
+                frames_.push_back(std::move(frame));
+                while (frames_.size() > 8) {
+                    frames_.pop_front();
+                }
+            }
+            ++decoded;
+        }
+
+        const long long decode_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                        std::chrono::steady_clock::now() - decode_start)
+                                        .count();
+        stats_decode_us_.fetch_add(decode_us);
+        stats_decode_count_.fetch_add(1);
+        long long previous_max = stats_decode_max_us_.load();
+        while (decode_us > previous_max &&
+               !stats_decode_max_us_.compare_exchange_weak(previous_max, decode_us)) {
+        }
+        if (decoded > 0) {
+            frame_count_.fetch_add(decoded);
+            stats_frames_.fetch_add(decoded);
+            if (state_.load() != StreamState::Streaming) {
+                state_.store(StreamState::Streaming);
+                std::lock_guard<std::mutex> lock(mutex_);
+                message_ = "Streaming 1080p60";
+            }
         }
     }
 }
@@ -452,26 +522,41 @@ void Streaming::OnAudio(uint8_t* buf, size_t size) {
 
     auto* frame = static_cast<AVFrame*>(opus_frame_);
     while (avcodec_receive_frame(static_cast<AVCodecContext*>(opus_ctx_), frame) == 0) {
-        AVChannelLayout out_layout{};
-        av_channel_layout_default(&out_layout, 2);
-
+        // Opus is always 48 kHz stereo, so the resampler is a one-time setup:
+        // rebuilding and reinitialising it for every 10 ms packet was pure
+        // churn on chiaki's audio thread.
         auto** swr = reinterpret_cast<SwrContext**>(&swr_);
-        if (swr_alloc_set_opts2(swr, &out_layout, AV_SAMPLE_FMT_FLT, 48000, &frame->ch_layout,
-                                static_cast<AVSampleFormat>(frame->format), frame->sample_rate, 0,
-                                nullptr) >= 0 &&
-            swr_init(*swr) >= 0) {
+        if (!swr_) {
+            AVChannelLayout out_layout{};
+            av_channel_layout_default(&out_layout, 2);
+            SwrContext* created = nullptr;
+            if (swr_alloc_set_opts2(&created, &out_layout, AV_SAMPLE_FMT_FLT, 48000,
+                                    &frame->ch_layout,
+                                    static_cast<AVSampleFormat>(frame->format),
+                                    frame->sample_rate, 0, nullptr) >= 0 &&
+                swr_init(created) >= 0) {
+                swr_ = created;
+            } else if (created) {
+                swr_free(&created);
+            }
+            av_channel_layout_uninit(&out_layout);
+        }
+
+        if (swr_) {
             const int max_out = swr_get_out_samples(*swr, frame->nb_samples);
-            std::vector<float> pcm(static_cast<size_t>(max_out) * 2);
-            uint8_t* dst[1] = {reinterpret_cast<uint8_t*>(pcm.data())};
-            const int converted = swr_convert(*swr, dst, max_out,
-                                              const_cast<const uint8_t**>(frame->extended_data),
-                                              frame->nb_samples);
-            if (converted > 0) {
-                audio_->Push(pcm.data(), converted);
-                audio_frames_.fetch_add(converted);
+            if (max_out > 0) {
+                pcm_scratch_.resize(static_cast<size_t>(max_out) * 2);
+                uint8_t* dst[1] = {reinterpret_cast<uint8_t*>(pcm_scratch_.data())};
+                const int converted =
+                    swr_convert(*swr, dst, max_out,
+                                const_cast<const uint8_t**>(frame->extended_data),
+                                frame->nb_samples);
+                if (converted > 0) {
+                    audio_->Push(pcm_scratch_.data(), converted);
+                    audio_frames_.fetch_add(converted);
+                }
             }
         }
-        av_channel_layout_uninit(&out_layout);
         av_frame_unref(frame);
     }
 }
@@ -481,7 +566,7 @@ std::string Streaming::message() const {
     return message_;
 }
 
-bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer) {
+bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, double pace_interval) {
     std::lock_guard<std::mutex> lock(frame_mutex_);
     const auto now = std::chrono::steady_clock::now();
     const double seconds =
@@ -504,6 +589,32 @@ bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer) {
             last_recovery_ = seconds;
         }
         return false;
+    }
+
+    if (pace_interval > 0.0) {
+        // Fixed grid: 60 fps on a 240 Hz panel becomes exactly four refreshes
+        // per frame instead of 3/4/5 depending on when the decoder finished.
+        // The newest frame wins if the queue built up, so pacing never adds
+        // more than one interval of latency.
+        if (!pace_started_) {
+            pace_started_ = true;
+            next_emit_ = 0.0;
+        }
+        if (next_emit_ > 0.0 && seconds < next_emit_ - pace_interval * 0.20) {
+            return false;
+        }
+        while (frames_.size() > 1) {
+            frames_.pop_front();
+            buffer_drops_.fetch_add(1);
+        }
+        out = std::move(frames_.front());
+        frames_.pop_front();
+        last_queue_ = static_cast<int>(frames_.size());
+        if (next_emit_ <= 0.0 || seconds - next_emit_ > pace_interval) {
+            next_emit_ = seconds;
+        }
+        next_emit_ += pace_interval;
+        return true;
     }
 
     // Stable for five seconds: give latency back, one frame at a time.

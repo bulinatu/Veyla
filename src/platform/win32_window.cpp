@@ -4,6 +4,7 @@
 #include <windowsx.h>
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace brp {
 namespace {
@@ -74,6 +75,12 @@ bool Win32Window::Create(const wchar_t* title, int width, int height) {
         return false;
     }
 
+    hidden_test_ = std::getenv("BRP_HIDDEN_TEST") != nullptr;
+    if (hidden_test_) {
+        ::SetWindowPos(hwnd_, nullptr, -32000, -32000, width, height,
+                       SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
     ApplyWindowAppearance();
     // Force the first WM_NCCALCSIZE before reading the client size; without
     // this, Windows reports the framed client (1584x861) for one frame.
@@ -93,7 +100,7 @@ bool Win32Window::Create(const wchar_t* title, int width, int height) {
 }
 
 void Win32Window::Show() {
-    if (!hwnd_) {
+    if (!hwnd_ || hidden_test_) {
         return;
     }
     ShowWindow(hwnd_, SW_SHOW);

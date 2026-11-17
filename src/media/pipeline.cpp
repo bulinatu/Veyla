@@ -67,6 +67,13 @@ double Percentile(const std::vector<double>& values, double p) {
 
 }  // namespace
 
+Presenter::~Presenter() {
+    if (frame_waitable_) {
+        ::CloseHandle(frame_waitable_);
+        frame_waitable_ = nullptr;
+    }
+}
+
 bool Presenter::Init(HWND hwnd, const PresenterConfig& cfg) {
     hwnd_ = hwnd;
     cfg_ = cfg;
@@ -121,9 +128,10 @@ bool Presenter::Init(HWND hwnd, const PresenterConfig& cfg) {
     }
 
     start_time_ = std::chrono::steady_clock::now();
-    std::printf("presenter: %dx%d <- %dx%d, tearing=%s, vsync=%s\n", cfg_.output_width,
-                cfg_.output_height, cfg_.source_width, cfg_.source_height,
-                tearing_ ? "on" : "off", cfg_.vsync ? "on" : "off");
+    std::printf("presenter: %dx%d <- %dx%d, tearing=%s, vsync=%s, waitable=%s\n",
+                cfg_.output_width, cfg_.output_height, cfg_.source_width, cfg_.source_height,
+                tearing_ ? "on" : "off", cfg_.vsync ? "on" : "off",
+                waitable_ ? "on" : "off");
     return true;
 }
 
@@ -403,15 +411,43 @@ bool Presenter::CreateSwapchainForFormat() {
     desc.Scaling = DXGI_SCALING_STRETCH;
     desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
-    desc.Flags = (tearing_ && cfg_.allow_tearing) ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+    const UINT tearing_flags = (tearing_ && cfg_.allow_tearing) ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 
+    if (frame_waitable_) {
+        ::CloseHandle(frame_waitable_);
+        frame_waitable_ = nullptr;
+    }
+    swapchain2_.Reset();
     swapchain_.Reset();
-    const HRESULT hr = factory_->CreateSwapChainForHwnd(device_.Get(), hwnd_, &desc, nullptr,
-                                                        nullptr, &swapchain_);
+
+    // Waitable object: the loop blocks on the swapchain before building the
+    // next frame, so rendering is phase-locked to the display instead of
+    // competing with a software timer. Without it the two clocks drift apart
+    // and every few seconds a frame misses its vblank even though the CPU and
+    // GPU had plenty of time.
+    desc.Flags = tearing_flags | DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+    HRESULT hr = factory_->CreateSwapChainForHwnd(device_.Get(), hwnd_, &desc, nullptr,
+                                                  nullptr, &swapchain_);
+    if (FAILED(hr)) {
+        // Older drivers can reject the waitable flag; a normal flip swapchain
+        // still works and the caller falls back to timer pacing.
+        desc.Flags = tearing_flags;
+        hr = factory_->CreateSwapChainForHwnd(device_.Get(), hwnd_, &desc, nullptr, nullptr,
+                                              &swapchain_);
+    }
     if (FAILED(hr)) {
         std::fprintf(stderr, "CreateSwapChainForHwnd failed: 0x%08lX\n",
                      static_cast<unsigned long>(hr));
         return false;
+    }
+
+    if (SUCCEEDED(swapchain_.As(&swapchain2_))) {
+        // One queued frame: lowest latency, and the waitable handle signals
+        // once per refresh.
+        if (SUCCEEDED(swapchain2_->SetMaximumFrameLatency(1))) {
+            frame_waitable_ = swapchain2_->GetFrameLatencyWaitableObject();
+            waitable_ = frame_waitable_ != nullptr;
+        }
     }
 
     if (cfg_.hdr) {
@@ -421,6 +457,13 @@ bool Presenter::CreateSwapchainForFormat() {
         }
     }
     return true;
+}
+
+bool Presenter::WaitForFrame(DWORD timeout_ms) {
+    if (!frame_waitable_) {
+        return true;
+    }
+    return ::WaitForSingleObject(frame_waitable_, timeout_ms) == WAIT_OBJECT_0;
 }
 
 void Presenter::Render(double time_seconds) {
@@ -579,6 +622,9 @@ void Presenter::Clear(const float rgba[4]) {
 }
 
 void Presenter::PresentNow(bool vsync) {
+    if (!swapchain_) {
+        return;
+    }
     const UINT present_flags =
         (tearing_ && cfg_.allow_tearing && !vsync) ? DXGI_PRESENT_ALLOW_TEARING : 0;
     swapchain_->Present(vsync ? 1 : 0, present_flags);

@@ -2,10 +2,13 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <mutex>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include <chiaki/controller.h>
 #include <chiaki/orientation.h>
@@ -45,9 +48,13 @@ public:
     // Adaptive jitter buffer: `buffer` is the maximum number of decoded frames
     // to hold. The target starts at one frame (low latency), rises on an empty
     // queue while streaming, and falls back after a stable period.
-    bool TakeFrame(media::DecodedFrame& out, int buffer);
+    // `pace_interval` > 0 delivers frames on a fixed grid (1/fps) so a 60 fps
+    // stream lands on a steady number of display refreshes instead of showing
+    // each frame as soon as it happens to decode.
+    bool TakeFrame(media::DecodedFrame& out, int buffer, double pace_interval = 0.0);
     int buffer_target() const { return buffer_target_.load(); }
     int buffer_drops() const { return buffer_drops_.load(); }
+    int video_queue_drops() const { return video_queue_drops_.load(); }
 
     struct StreamStats {
         int frames = 0;
@@ -87,6 +94,12 @@ private:
     void OnEvent(ChiakiEvent* event);
     void OnAudio(uint8_t* buf, size_t size);
 
+    // Compressed access units are copied off chiaki's receive thread and
+    // decoded here. Hardware-to-system transfer plus swscale costs several
+    // milliseconds per frame; doing that inline delayed RTP reads and turned
+    // decoder spikes into packet loss.
+    void DecodeThreadMain();
+
     bool OpenAudioDecoder(std::string& error);
 
     ChiakiSession session_{};
@@ -102,6 +115,18 @@ private:
     std::mutex frame_mutex_;
     std::deque<media::DecodedFrame> frames_;
 
+    // Decode pipeline: encoded units in, decoded frames out.
+    struct EncodedUnit {
+        std::vector<uint8_t> bytes;
+    };
+    std::thread decode_thread_;
+    std::mutex video_mutex_;
+    std::condition_variable video_cv_;
+    std::deque<EncodedUnit> video_queue_;
+    bool video_run_ = false;
+    std::atomic<bool> session_live_{false};
+    std::atomic<int> video_queue_drops_{0};
+
     // adaptive jitter buffer
     std::atomic<int> buffer_target_{1};
     std::atomic<int> buffer_drops_{0};
@@ -109,6 +134,8 @@ private:
     int last_queue_ = 0;
     double last_drought_ = -100.0;
     double last_recovery_ = 0.0;
+    double next_emit_ = 0.0;
+    bool pace_started_ = false;
 
     // per-interval video telemetry
     std::atomic<int> stats_frames_{0};
@@ -143,6 +170,7 @@ private:
     void* opus_ctx_ = nullptr;    // AVCodecContext*
     void* opus_frame_ = nullptr;  // AVFrame*
     void* swr_ = nullptr;         // SwrContext*
+    std::vector<float> pcm_scratch_;
     std::atomic<int> audio_frames_{0};
 };
 

@@ -23,6 +23,33 @@ ComPtr<ID2D1GradientStopCollection1> MakeStops(ID2D1DeviceContext* dc,
     return collection;
 }
 
+uint64_t MixHash(uint64_t hash, uint64_t value) {
+    hash ^= value + 0x9E3779B97F4A7C15ull + (hash << 6) + (hash >> 2);
+    return hash;
+}
+
+uint64_t HashFloat(uint64_t hash, float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return MixHash(hash, bits);
+}
+
+uint64_t HashColor(uint64_t hash, D2D1_COLOR_F color) {
+    hash = HashFloat(hash, color.r);
+    hash = HashFloat(hash, color.g);
+    hash = HashFloat(hash, color.b);
+    hash = HashFloat(hash, color.a);
+    return hash;
+}
+
+bool SameColor(const D2D1_COLOR_F& a, const D2D1_COLOR_F& b) {
+    return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+}
+
+constexpr size_t kTextCacheBudget = 1024;
+constexpr size_t kGradientCacheBudget = 48;
+constexpr size_t kClipCacheBudget = 96;
+
 }  // namespace
 
 bool Renderer::Init(ID3D11Device* device) {
@@ -297,6 +324,22 @@ void Renderer::FillTriangle(D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_POINT_2F c,
 }
 
 void Renderer::FillLinearV(const D2D1_RECT_F& rect, D2D1_COLOR_F top, D2D1_COLOR_F bottom) {
+    // The UI paints the same two-stop gradients every frame. Rebuilding the
+    // stop collection and brush per call is pure resource churn; keep one
+    // brush per colour pair and just move its endpoints.
+    const uint64_t key = HashColor(HashColor(0x84222325ull, top), bottom);
+    auto it = linear_cache_.find(key);
+    if (it != linear_cache_.end() && SameColor(it->second.top, top) &&
+        SameColor(it->second.bottom, bottom)) {
+        ID2D1LinearGradientBrush* brush = it->second.brush.Get();
+        if (brush) {
+            brush->SetStartPoint(D2D1::Point2F(rect.left, rect.top));
+            brush->SetEndPoint(D2D1::Point2F(rect.left, rect.bottom));
+            dc_->FillRectangle(rect, brush);
+            return;
+        }
+    }
+
     const D2D1_GRADIENT_STOP stops[2] = {{0.0f, top}, {1.0f, bottom}};
     ComPtr<ID2D1GradientStopCollection1> collection = MakeStops(dc_.Get(), stops);
     if (!collection) {
@@ -310,10 +353,36 @@ void Renderer::FillLinearV(const D2D1_RECT_F& rect, D2D1_COLOR_F top, D2D1_COLOR
         return;
     }
     dc_->FillRectangle(rect, brush.Get());
+
+    if (linear_cache_.size() >= kGradientCacheBudget) {
+        linear_cache_.clear();
+    }
+    LinearGradientEntry entry;
+    entry.top = top;
+    entry.bottom = bottom;
+    entry.stops = std::move(collection);
+    entry.brush = std::move(brush);
+    linear_cache_.emplace(key, std::move(entry));
 }
 
 void Renderer::FillRadial(float cx, float cy, float radius, D2D1_COLOR_F inner,
                           D2D1_COLOR_F outer) {
+    const uint64_t key = HashColor(HashColor(0x5BD1E995ull, inner), outer);
+    auto it = radial_cache_.find(key);
+    if (it != radial_cache_.end() && SameColor(it->second.inner, inner) &&
+        SameColor(it->second.outer, outer)) {
+        ID2D1RadialGradientBrush* brush = it->second.brush.Get();
+        if (brush) {
+            brush->SetCenter(D2D1::Point2F(cx, cy));
+            brush->SetGradientOriginOffset(D2D1::Point2F(0.0f, 0.0f));
+            brush->SetRadiusX(radius);
+            brush->SetRadiusY(radius);
+            const D2D1_RECT_F area{cx - radius, cy - radius, cx + radius, cy + radius};
+            dc_->FillRectangle(area, brush);
+            return;
+        }
+    }
+
     const D2D1_GRADIENT_STOP stops[2] = {{0.0f, inner}, {1.0f, outer}};
     ComPtr<ID2D1GradientStopCollection1> collection = MakeStops(dc_.Get(), stops);
     if (!collection) {
@@ -333,6 +402,16 @@ void Renderer::FillRadial(float cx, float cy, float radius, D2D1_COLOR_F inner,
 
     const D2D1_RECT_F area{cx - radius, cy - radius, cx + radius, cy + radius};
     dc_->FillRectangle(area, brush.Get());
+
+    if (radial_cache_.size() >= kGradientCacheBudget) {
+        radial_cache_.clear();
+    }
+    RadialGradientEntry entry;
+    entry.inner = inner;
+    entry.outer = outer;
+    entry.stops = std::move(collection);
+    entry.brush = std::move(brush);
+    radial_cache_.emplace(key, std::move(entry));
 }
 
 IDWriteTextFormat* Renderer::Format(float size, DWRITE_FONT_WEIGHT weight,
@@ -362,56 +441,103 @@ IDWriteTextFormat* Renderer::Format(float size, DWRITE_FONT_WEIGHT weight,
     return pos->second.Get();
 }
 
+void Renderer::ClearTextCache() {
+    text_cache_.clear();
+}
+
+IDWriteTextLayout* Renderer::Layout(const wchar_t* text, float size,
+                                    DWRITE_FONT_WEIGHT weight, DWRITE_TEXT_ALIGNMENT align,
+                                    DWRITE_PARAGRAPH_ALIGNMENT valign, float width, float height,
+                                    bool ellipsis) {
+    IDWriteTextFormat* format = Format(size, weight, align, valign);
+    if (!format || !text) {
+        return nullptr;
+    }
+
+    const size_t length = std::wcslen(text);
+    uint64_t key = 1469598103934665603ull;
+    for (size_t i = 0; i < length; ++i) {
+        key = (key ^ static_cast<uint64_t>(text[i])) * 1099511628211ull;
+    }
+    key = MixHash(key, static_cast<uint64_t>(std::lround(size * 2.0f)));
+    key = MixHash(key, static_cast<uint64_t>(weight) << 32 | static_cast<uint64_t>(align) << 16 |
+                           static_cast<uint64_t>(valign));
+    key = HashFloat(key, width);
+    key = HashFloat(key, height);
+    key = MixHash(key, ellipsis ? 0xABCDEFull : 0x123456ull);
+
+    auto it = text_cache_.find(key);
+    if (it != text_cache_.end()) {
+        for (TextEntry& entry : it->second) {
+            if (entry.layout && entry.text.size() == length &&
+                std::wmemcmp(entry.text.c_str(), text, length) == 0) {
+                return entry.layout.Get();
+            }
+        }
+    }
+
+    ComPtr<IDWriteTextLayout> layout;
+    if (FAILED(dwrite_->CreateTextLayout(text, static_cast<UINT32>(length), format, width,
+                                         height, &layout))) {
+        return nullptr;
+    }
+
+    if (ellipsis) {
+        DWRITE_TRIMMING trimming{};
+        trimming.granularity = DWRITE_TRIMMING_GRANULARITY_CHARACTER;
+        ComPtr<IDWriteInlineObject> sign;
+        if (SUCCEEDED(dwrite_->CreateEllipsisTrimmingSign(layout.Get(), &sign))) {
+            layout->SetTrimming(&trimming, sign.Get());
+        }
+    }
+
+    if (text_cache_.size() >= kTextCacheBudget) {
+        text_cache_.clear();
+    }
+
+    TextEntry& stored = text_cache_[key].emplace_back();
+    stored.text.assign(text, length);
+    stored.layout = std::move(layout);
+    return stored.layout.Get();
+}
+
 void Renderer::Text(const wchar_t* text, const D2D1_RECT_F& rect, float size, D2D1_COLOR_F color,
                     DWRITE_FONT_WEIGHT weight, DWRITE_TEXT_ALIGNMENT align,
                     DWRITE_PARAGRAPH_ALIGNMENT valign) {
-    IDWriteTextFormat* format = Format(size, weight, align, valign);
-    if (!format || !text) {
+    IDWriteTextLayout* layout =
+        Layout(text, size, weight, align, valign, rect.right - rect.left,
+               rect.bottom - rect.top, false);
+    if (!layout) {
         return;
     }
     brush_->SetColor(color);
-    dc_->DrawTextW(text, static_cast<UINT32>(std::wcslen(text)), format, rect, brush_.Get(),
-                   D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
+    dc_->DrawTextLayout(D2D1::Point2F(rect.left, rect.top), layout, brush_.Get(),
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP);
 }
 
 void Renderer::TextEllipsis(const wchar_t* text, const D2D1_RECT_F& rect, float size,
                             D2D1_COLOR_F color, DWRITE_FONT_WEIGHT weight,
                             DWRITE_TEXT_ALIGNMENT align) {
-    IDWriteTextFormat* format = Format(size, weight, align, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-    if (!format || !text) {
+    IDWriteTextLayout* layout =
+        Layout(text, size, weight, align, DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+               rect.right - rect.left, rect.bottom - rect.top, true);
+    if (!layout) {
         return;
-    }
-
-    ComPtr<IDWriteTextLayout> layout;
-    if (FAILED(dwrite_->CreateTextLayout(text, static_cast<UINT32>(std::wcslen(text)), format,
-                                         rect.right - rect.left, rect.bottom - rect.top,
-                                         &layout))) {
-        return;
-    }
-
-    DWRITE_TRIMMING trimming{};
-    trimming.granularity = DWRITE_TRIMMING_GRANULARITY_CHARACTER;
-    ComPtr<IDWriteInlineObject> ellipsis;
-    if (SUCCEEDED(dwrite_->CreateEllipsisTrimmingSign(layout.Get(), &ellipsis))) {
-        layout->SetTrimming(&trimming, ellipsis.Get());
     }
 
     brush_->SetColor(color);
-    dc_->DrawTextLayout(D2D1::Point2F(rect.left, rect.top), layout.Get(), brush_.Get(),
+    dc_->DrawTextLayout(D2D1::Point2F(rect.left, rect.top), layout, brush_.Get(),
                         D2D1_DRAW_TEXT_OPTIONS_CLIP);
 }
 
-float Renderer::TextWidth(const wchar_t* text, float size, DWRITE_FONT_WEIGHT weight) {    IDWriteTextFormat* format = Format(size, weight, DWRITE_TEXT_ALIGNMENT_LEADING,
-                                       DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-    if (!format || !text) {
+float Renderer::TextWidth(const wchar_t* text, float size, DWRITE_FONT_WEIGHT weight) {
+    IDWriteTextLayout* layout = Layout(text, size, weight, DWRITE_TEXT_ALIGNMENT_LEADING,
+                                       DWRITE_PARAGRAPH_ALIGNMENT_CENTER, 4096.0f, 4096.0f,
+                                       false);
+    if (!layout) {
         return 0.0f;
     }
 
-    ComPtr<IDWriteTextLayout> layout;
-    if (FAILED(dwrite_->CreateTextLayout(text, static_cast<UINT32>(std::wcslen(text)), format,
-                                         4096.0f, 4096.0f, &layout))) {
-        return 0.0f;
-    }
     DWRITE_TEXT_METRICS metrics{};
     if (FAILED(layout->GetMetrics(&metrics))) {
         return 0.0f;
@@ -420,10 +546,34 @@ float Renderer::TextWidth(const wchar_t* text, float size, DWRITE_FONT_WEIGHT we
 }
 
 void Renderer::PushRoundedClip(const D2D1_RECT_F& rect, float radius) {
+    const uint64_t key = HashFloat(
+        HashFloat(HashFloat(HashFloat(HashFloat(0xC2B2AE35ull, rect.left), rect.top), rect.right),
+                  rect.bottom),
+        radius);
     ComPtr<ID2D1RoundedRectangleGeometry> geometry;
-    if (FAILED(factory_->CreateRoundedRectangleGeometry(D2D1::RoundedRect(rect, radius, radius),
-                                                        &geometry))) {
-        return;
+    auto found = clip_cache_.find(key);
+    if (found != clip_cache_.end()) {
+        for (ClipEntry& entry : found->second) {
+            if (entry.radius == radius && entry.rect.left == rect.left &&
+                entry.rect.top == rect.top && entry.rect.right == rect.right &&
+                entry.rect.bottom == rect.bottom && entry.geometry) {
+                geometry = entry.geometry;
+                break;
+            }
+        }
+    }
+    if (!geometry) {
+        if (FAILED(factory_->CreateRoundedRectangleGeometry(
+                D2D1::RoundedRect(rect, radius, radius), &geometry))) {
+            return;
+        }
+        if (clip_cache_.size() >= kClipCacheBudget) {
+            clip_cache_.clear();
+        }
+        ClipEntry& stored = clip_cache_[key].emplace_back();
+        stored.rect = rect;
+        stored.radius = radius;
+        stored.geometry = geometry;
     }
 
     ComPtr<ID2D1Layer> layer;
@@ -432,7 +582,11 @@ void Renderer::PushRoundedClip(const D2D1_RECT_F& rect, float radius) {
     }
 
     D2D1_LAYER_PARAMETERS1 params{};
-    params.contentBounds = D2D1::InfiniteRect();
+    // Constrain the layer to the clipped widget. With InfiniteRect() Direct2D
+    // sizes the intermediate surface to the whole 1440p/2160p backbuffer for
+    // every tile, which is both a fill-rate and memory hit at 240 Hz.
+    params.contentBounds = {rect.left - 2.0f, rect.top - 2.0f, rect.right + 2.0f,
+                            rect.bottom + 2.0f};
     params.geometricMask = geometry.Get();
     params.maskAntialiasMode = D2D1_ANTIALIAS_MODE_PER_PRIMITIVE;
     params.maskTransform = D2D1::Matrix3x2F::Identity();

@@ -41,7 +41,7 @@ struct PresenterConfig {
 class Presenter {
 public:
     Presenter() = default;
-    ~Presenter() = default;
+    ~Presenter();
 
     Presenter(const Presenter&) = delete;
     Presenter& operator=(const Presenter&) = delete;
@@ -56,6 +56,14 @@ public:
 
     // Presents the submitted frame and harvests completed GPU timings.
     void Present();
+
+    // Frame-latency waitable (DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT).
+    // Waiting on it before building a frame retires the previous present and
+    // gives the loop a vblank-aligned cadence instead of racing a software
+    // timer against the display. Null when the platform/driver did not give us
+    // one; callers then fall back to their own pacing.
+    HANDLE frame_waitable() const { return frame_waitable_; }
+    bool WaitForFrame(DWORD timeout_ms);
 
     void SetUpscaleMode(int mode);
     int upscale_mode() const { return cfg_.upscale_mode; }
@@ -133,6 +141,9 @@ private:
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
     Microsoft::WRL::ComPtr<IDXGIFactory2> factory_;
     Microsoft::WRL::ComPtr<IDXGISwapChain1> swapchain_;
+    Microsoft::WRL::ComPtr<IDXGISwapChain2> swapchain2_;
+    HANDLE frame_waitable_ = nullptr;
+    bool waitable_ = false;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> backbuffer_;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv_;
 

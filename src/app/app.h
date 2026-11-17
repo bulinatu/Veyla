@@ -60,6 +60,14 @@ public:
     // Presentation cadence: the monitor's refresh rate.
     int present_hz() const;
 
+    // vblank-aligned frame clock exposed by the swapchain. Null means the
+    // caller must pace the loop itself.
+    HANDLE present_waitable() const;
+    bool WaitForPresent(int timeout_ms);
+
+    // CPU time spent building the last frame, excluding the blocking Present.
+    double frame_work_ms() const { return frame_work_ms_; }
+
 private:
     enum class Screen { Home, Settings, Stream, StreamSettings };
     enum class Tab { Display, Upscaling, Performance, Neural, Legacy, Audio, Controller, Connection, Debug, About };
@@ -157,6 +165,7 @@ private:
     void ConnectConsole();
     void StartStream();
     void TickPendingConnect();
+    double VideoPace() const;
     void SaveProfile();
     void StartPadThread();
     void StopPadThread();
@@ -382,6 +391,7 @@ private:
     bool reflex_loaded_ = false;
     int overlay_tab_ = 0;
     HWND fg_window_ = nullptr;
+    bool fg_visible_ = false;
     int fg_w_ = 0;
     int fg_h_ = 0;
     bool borderless_ = false;
@@ -395,7 +405,23 @@ private:
     float stat_p95_ = 0.0f;
     float stat_p99_ = 0.0f;
     float stat_max_ = 0.0f;
+    float stat_fps_ = 0.0f;
+    int stat_late_ = 0;
+    int stat_stalls_ = 0;
     double stat_at_ = -1.0;
+    double frame_work_ms_ = 0.0;
+
+    // The stream HUD used to reformat five strings (and lay them out) on every
+    // 240 Hz frame. The numbers are unreadable above ~10 Hz, so the text is
+    // rebuilt on that cadence and the cached layouts are simply drawn.
+    struct HudLine {
+        std::wstring text;
+        float alpha = 0.9f;
+    };
+    std::vector<HudLine> hud_lines_;
+    double hud_lines_at_ = -1.0;
+    int hud_lines_mask_ = -1;
+    bool hud_lines_stream_ = false;
     bool rumble_was_testing_ = false;
 
     // Connect flow: check the control port, wake the console if it is asleep,

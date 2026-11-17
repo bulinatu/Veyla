@@ -1713,6 +1713,25 @@ int App::present_hz() const {
     return std::clamp(refresh_hz_, 24, 500);
 }
 
+HANDLE App::present_waitable() const {
+    return presenter_.frame_waitable();
+}
+
+bool App::WaitForPresent(int timeout_ms) {
+    return presenter_.WaitForFrame(static_cast<DWORD>(timeout_ms));
+}
+
+double App::VideoPace() const {
+    // Buffer 0 is the explicit "lowest latency" choice: show a frame the
+    // moment it decodes. Otherwise deliver on the console's 60 Hz grid so the
+    // image holds for an even number of refreshes. Frame generation produces
+    // its own cadence and must never be starved by this grid.
+    if (stream_buffer_ <= 0 || profile_.dlss_fg >= 2 || frame_gen_ >= 2) {
+        return 0.0;
+    }
+    return 1.0 / static_cast<double>(std::clamp(profile_.fps, 24, 120));
+}
+
 std::wstring App::FindFrameGenRuntime() const {
     namespace fs = std::filesystem;
     std::error_code ec;
@@ -2068,6 +2087,7 @@ void App::DetachFgWindow() {
         ::SetParent(fg_window_, nullptr);
         fg_window_ = nullptr;
     }
+    fg_visible_ = false;
 }
 
 bool App::AttachFgWindow() {
@@ -2113,6 +2133,7 @@ bool App::AttachFgWindowNow() {
     ::SetWindowPos(find.hwnd, HWND_TOP, 0, 0, static_cast<int>(ui_w_),
                    static_cast<int>(ui_h_), SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED);
     fg_window_ = find.hwnd;
+    fg_visible_ = true;
     return true;
 }
 
@@ -2831,6 +2852,8 @@ void App::ApplyControllerOutput() {
 }
 
 void App::Frame(double time_seconds, const PointerState& pointer) {
+    const auto frame_started = std::chrono::steady_clock::now();
+
     // Ask Win32 for the client size every frame: the cached value can lag a
     // borderless transition by a frame, and that frame would lay the whole UI
     // out at the old scale (the "half-scaled" fullscreen look).
@@ -2892,6 +2915,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         if (!skip) {
             RenderIntro(elapsed);
             window_->SetCursorHidden(false);
+            frame_work_ms_ = std::chrono::duration<double, std::milli>(
+                                 std::chrono::steady_clock::now() - frame_started)
+                                 .count();
             presenter_.PresentNow(true);
             if (!window_shown_) {
                 window_->Show();
@@ -2919,6 +2945,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         if (pointer_.clicked) {
             DispatchClick();
         }
+        frame_work_ms_ = std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - frame_started)
+                             .count();
         presenter_.PresentNow(true);
         if (!window_shown_) {
             window_->Show();
@@ -3056,7 +3085,13 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         const bool reveal =
             screen_ == Screen::Stream && inside && (in_chrome || clock_ < fg_reveal_until_);
         fg_covering = screen_ == Screen::Stream && !reveal;
-        ::ShowWindow(fg_window_, fg_covering ? SW_SHOW : SW_HIDE);
+        // ShowWindow is a synchronous window-manager call; doing it every
+        // 240 Hz tick made the worker window re-enter composition for no
+        // reason. Only touch it on an actual visibility change.
+        if (fg_visible_ != fg_covering) {
+            ::ShowWindow(fg_window_, fg_covering ? SW_SHOW : SW_HIDE);
+            fg_visible_ = fg_covering;
+        }
     }
 
     if (!fg_covering) {
@@ -3064,10 +3099,12 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
             // Reflex low-latency sleep, right before the frame is submitted.
             reflex_.Sleep(presenter_.device());
             presenter_.Render(time_seconds);
-        } else {
+        } else if (screen_ != Screen::Home && screen_ != Screen::Settings) {
             const float bg[4] = {0.010f, 0.016f, 0.028f, 1.0f};
             presenter_.Clear(bg);
         }
+        // Home and Settings paint an opaque full-window gradient themselves;
+        // clearing the backbuffer first would be a second full-screen write.
 
         ui_.BeginFrame();
         switch (screen_) {
@@ -3145,7 +3182,7 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                                               stream_frame_.height, stream_frame_.pq);
                 }
             }
-        } else if (streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
+        } else if (streaming_.TakeFrame(stream_frame_, stream_buffer_, VideoPace())) {
             if (profile_.dlss_fg >= 2 && nr_ready_ && nr_.present_mode()) {
                 // DLSS Frame Generation: the worker presents NR + generated
                 // frames in its own window; we only feed it. Keep a copy in the
@@ -3448,6 +3485,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         }
     }
 
+    frame_work_ms_ = std::chrono::duration<double, std::milli>(
+                         std::chrono::steady_clock::now() - frame_started)
+                         .count();
     presenter_.PresentNow(true);
     if (!window_shown_) {
         window_->Show();
@@ -5008,92 +5048,120 @@ void App::RenderStream(double t) {
             stat_p95_ = pick(0.95f);
             stat_p99_ = pick(0.99f);
             stat_max_ = sorted.back();
+
+            const float budget_ms = 1000.0f / static_cast<float>(present_hz());
+            float total_ms = 0.0f;
+            int late = 0;
+            int stalls = 0;
+            for (float sample : frame_ms_) {
+                total_ms += sample;
+                if (sample > budget_ms * 1.5f) {
+                    ++late;
+                }
+                if (sample > budget_ms * 2.5f) {
+                    ++stalls;
+                }
+            }
+            stat_fps_ = total_ms > 0.0f
+                            ? static_cast<float>(frame_ms_.size()) * 1000.0f / total_ms
+                            : 0.0f;
+            stat_late_ = late;
+            stat_stalls_ = stalls;
             stat_at_ = clock_;
         }
-        const float p50 = stat_p50_;
-        const float p95 = stat_p95_;
-        const float p99 = stat_p99_;
-        const float worst = stat_max_;
 
-        const PadState hud_pad = pad_.snapshot();
-        const bool show_pad = (mask & 0x4) != 0 && hud_pad.connected;
-        const bool show_gpu = (mask & 0x2) != 0;
-        const bool show_stream = (mask & 0x8) != 0 && stream_active_;
-        const bool show_net = (mask & 0x10) != 0 && stream_active_;
-        int rows = 0;
-        rows += (mask & 0x1) ? 1 : 0;
-        rows += show_gpu ? 1 : 0;
-        rows += show_pad ? 1 : 0;
-        rows += show_stream ? 1 : 0;
-        rows += show_net ? 1 : 0;
+        // Numbers change far slower than the display refreshes. Rebuild the
+        // strings and their DirectWrite layouts at 10 Hz, draw the cached
+        // layouts every frame.
+        if (clock_ - hud_lines_at_ >= 0.10 || hud_lines_mask_ != mask ||
+            hud_lines_stream_ != stream_active_) {
+            hud_lines_at_ = clock_;
+            hud_lines_mask_ = mask;
+            hud_lines_stream_ = stream_active_;
+            hud_lines_.clear();
+
+            auto add_line = [this](std::wstring text, float alpha) {
+                hud_lines_.push_back({std::move(text), alpha});
+            };
+
+            if (mask & 0x1) {
+                wchar_t header[256];
+                swprintf_s(header,
+                           L"%.1f fps    frame  p50 %.1f   p95 %.1f   p99 %.1f   max %.1f ms    "
+                           L"late %d   stalls %d",
+                           stat_fps_, stat_p50_, stat_p95_, stat_p99_, stat_max_, stat_late_,
+                           stat_stalls_);
+                add_line(header, 0.95f);
+            }
+
+            if (mask & 0x2) {
+                add_line(Widen(presenter_.Summary()), 0.88f);
+            }
+
+            if (mask & 0x4) {
+                const PadState hud_pad = pad_.snapshot();
+                if (hud_pad.connected) {
+                    add_line(PadStatus(hud_pad), 0.88f);
+                }
+            }
+
+            if ((mask & 0x8) && stream_active_) {
+                std::wstring chain;
+                if (profile_.neural_nr > 0 && nr_ready_) {
+                    wchar_t part[96];
+                    swprintf_s(part, L"NR %.1f ms   ", nr_last_ms_);
+                    chain += part;
+                }
+                if (profile_.neural_sr > 0 && dlss_ready_) {
+                    wchar_t part[96];
+                    swprintf_s(part,
+                               profile_.dlss_mode == 5 ? L"DLAA %.1f ms   " : L"DLSS %.1f ms   ",
+                               dlss_sr_.last_ms());
+                    chain += part;
+                } else if (vsr_quality_ > 0 && vsr_ready_) {
+                    wchar_t part[96];
+                    swprintf_s(part, L"VSR %.1f ms   ", nv_vsr_.last_ms());
+                    chain += part;
+                } else if (frame_gen_ >= 2 && fg_ready_) {
+                    wchar_t part[96];
+                    swprintf_s(part, L"VFG %dx   ", frame_gen_);
+                    chain += part;
+                }
+                wchar_t stream_line[320];
+                swprintf_s(stream_line, L"PS5 %.1f fps   %s audio peak %.2f   %s",
+                           streaming_.fps(), chain.c_str(), audio_.peak(),
+                           Widen(streaming_.message()).c_str());
+                add_line(stream_line, 0.88f);
+            }
+
+            if ((mask & 0x10) && stream_active_) {
+                std::wstring decoder = Widen(streaming_.decoder_name());
+                if (decoder.empty()) {
+                    decoder = L"-";
+                }
+                wchar_t tail[256];
+                swprintf_s(tail,
+                           L"decoder %s   buf %d   drops %d   vq %d   lost %d   %.0f kbps",
+                           decoder.c_str(), stream_stats_.buffer, stream_stats_.buffer_drops,
+                           streaming_.video_queue_drops(), stream_stats_.lost,
+                           stream_stats_.kbps);
+                add_line(tail, 0.82f);
+            }
+        }
 
         const float hud_y = borderless_ ? 24.0f : kTitleBarH + 12.0f;
-        const D2D1_RECT_F panel{24.0f, hud_y, 24.0f + 700.0f,
-                                 hud_y + 20.0f + static_cast<float>(rows) * 22.0f};
+        const D2D1_RECT_F panel{
+            24.0f, hud_y, 24.0f + 700.0f,
+            hud_y + 20.0f + static_cast<float>(hud_lines_.size()) * 22.0f};
         ui_.FillRounded(panel, 12.0f, th::Rgba(0x08040F, 0.72f));
         ui_.StrokeRounded(panel, 12.0f, th::Rgba(th::kAccent, 0.28f), 1.0f);
 
         float row_y = panel.top + 10.0f;
-        auto line = [&](const std::wstring& text, float alpha) {
-            ui_.Text(text.c_str(), {panel.left + 14.0f, row_y, panel.right - 14.0f,
-                                    row_y + 22.0f},
-                     11.5f, th::Rgba(th::kInk, alpha));
+        for (const HudLine& line : hud_lines_) {
+            ui_.Text(line.text.c_str(),
+                     {panel.left + 14.0f, row_y, panel.right - 14.0f, row_y + 22.0f}, 11.5f,
+                     th::Rgba(th::kInk, line.alpha));
             row_y += 22.0f;
-        };
-
-        if (mask & 0x1) {
-            const float last_ms = frame_ms_.empty() ? 0.0f : frame_ms_.back();
-            wchar_t header[256];
-            swprintf_s(header,
-                       L"%.1f fps    frame  p50 %.1f   p95 %.1f   p99 %.1f   max %.1f ms    stutters %d",
-                       last_ms > 0.0f ? 1000.0f / last_ms : 0.0f, p50, p95, p99, worst,
-                       frame_stutters_);
-            line(header, 0.95f);
-        }
-        if (show_gpu) {
-            line(Widen(presenter_.Summary()), 0.88f);
-        }
-        if (show_pad) {
-            line(PadStatus(hud_pad), 0.88f);
-        }
-        if (show_stream) {
-            std::wstring chain;
-            if (profile_.neural_nr > 0 && nr_ready_) {
-                wchar_t part[96];
-                swprintf_s(part, L"NR %.1f ms   ", nr_last_ms_);
-                chain += part;
-            }
-            if (profile_.neural_sr > 0 && dlss_ready_) {
-                wchar_t part[96];
-                swprintf_s(part,
-                           profile_.dlss_mode == 5 ? L"DLAA %.1f ms   " : L"DLSS %.1f ms   ",
-                           dlss_sr_.last_ms());
-                chain += part;
-            } else if (vsr_quality_ > 0 && vsr_ready_) {
-                wchar_t part[96];
-                swprintf_s(part, L"VSR %.1f ms   ", nv_vsr_.last_ms());
-                chain += part;
-            } else if (frame_gen_ >= 2 && fg_ready_) {
-                wchar_t part[96];
-                swprintf_s(part, L"VFG %dx   ", frame_gen_);
-                chain += part;
-            }
-            wchar_t stream_line[320];
-            swprintf_s(stream_line, L"PS5 %.1f fps   %s audio peak %.2f   %s",
-                       streaming_.fps(), chain.c_str(), audio_.peak(),
-                       Widen(streaming_.message()).c_str());
-            line(stream_line, 0.88f);
-        }
-        if (show_net) {
-            std::wstring decoder = Widen(streaming_.decoder_name());
-            wchar_t tail[256];
-            if (decoder.empty()) {
-                decoder = L"-";
-            }
-            swprintf_s(tail, L"decoder %s   buf %d   drops %d   lost %d   %.0f kbps",
-                       decoder.c_str(), stream_stats_.buffer, stream_stats_.buffer_drops,
-                       stream_stats_.lost, stream_stats_.kbps);
-            line(tail, 0.82f);
         }
     }
 
