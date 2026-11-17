@@ -220,6 +220,7 @@ private:
     PadConsoleFeedback console_;
     bool output_dirty_ = true;
     double last_output_ = 0.0;
+    uint8_t bt_sequence_ = 0;  // Bluetooth output report 0x31 sequence nibble
 };
 
 }  // namespace brp

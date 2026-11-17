@@ -54,7 +54,7 @@ public:
     void HandleKey(int vk);
     bool quit_requested() const { return quit_; }
 
-    // Presentation cadence; 120/180/240 while NVIDIA VFG is active.
+    // Presentation cadence: the monitor's refresh rate.
     int present_hz() const;
 
 private:
@@ -75,6 +75,9 @@ private:
         OverlayTab,
         Button,
         PinField,
+        Minimize,
+        Maximize,
+        Close,
     };
 
     struct HitRegion {
@@ -97,6 +100,7 @@ private:
     void RenderIntro(double t);
 
     void RenderTopBar();
+    void RenderWindowChrome();
     void DrawConsoleCard();
     void DrawTile(const D2D1_RECT_F& rect, const GameEntry& game, float alpha, bool selected,
                   bool hovered);
@@ -120,7 +124,7 @@ private:
     void ApplyDropdown(int id, int index);
     void ApplyRenderTarget();
     void OpenAudioDevice();
-    void ApplyControllerOutput(bool force);
+    void ApplyControllerOutput();
     void TriggerRumble();
     void StartProbe();
     void ConnectConsole();
@@ -324,8 +328,15 @@ private:
     RECT windowed_rect_{};
     LONG_PTR windowed_style_ = 0;
     LONG_PTR windowed_ex_style_ = 0;
+    int refresh_hz_ = 60;
     std::deque<float> frame_ms_;
     int frame_stutters_ = 0;
+    float stat_p50_ = 0.0f;
+    float stat_p95_ = 0.0f;
+    float stat_p99_ = 0.0f;
+    float stat_max_ = 0.0f;
+    double stat_at_ = -1.0;
+    bool rumble_was_testing_ = false;
 
     // Connect flow: check the control port, wake the console if it is asleep,
     // then start the session.

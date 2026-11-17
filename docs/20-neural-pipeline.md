@@ -114,13 +114,20 @@ works together with Frame Generation. On this machine the driver accepts it
   audio) and the decoder/network line.
 - **Fullscreen is borderless** (F11): the window becomes WS_POPUP sized to the
   monitor, the swap chain follows WM_SIZE, and the DLSS FG child window is
-  re-fitted on every size change. No exclusive mode switch.
+  re-fitted on every size change. No exclusive mode switch. The windowed frame
+  uses a custom title bar with DWM rounded corners; maximized and fullscreen are
+  square. The main loop follows the monitor refresh rate (240 Hz here), and with
+  DLSS FG active the FG child hides when the pointer reaches the top strip so the
+  chrome/HUD can be used.
 
 ### Where the stutters came from (measured)
 
 With the new HUD counter, a 20-second stream in the NVIDIA order shows
 `p50 16.7, p95 17.1, p99 17.4, max 17.4 ms, stutters 1` - i.e. a locked 60 fps
-with no steady-state jitter. The spikes that were visible earlier line up with:
+with no steady-state jitter. (Those numbers were measured while the UI loop was
+still 60 Hz; the loop now follows the monitor refresh, so the same HUD reads
+~4.2 ms at 240 Hz while the decoded stream remains 60 fps.) The spikes that were
+visible earlier line up with:
 
 1. window/swap-chain transitions (connect, render-target change, fullscreen):
    one 60-70 ms frame, unavoidable while buffers are rebuilt;

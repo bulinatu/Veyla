@@ -239,7 +239,7 @@ bool Gamepad::TryOpenSony() {
         product_id_ = attributes.ProductID;
         is_edge_ = is_dualsense && attributes.ProductID == 0x0DF2;
         bluetooth_ = caps.InputReportByteLength != 64;
-        output_report_len_ = 0;
+        output_report_len_ = caps.OutputReportByteLength;
         buffer_.assign(std::max<uint32_t>(caps.InputReportByteLength, 78), 0);
         event_ = ::CreateEventW(nullptr, true, false, nullptr);
         write_event_ = ::CreateEventW(nullptr, true, false, nullptr);
@@ -660,6 +660,23 @@ bool Gamepad::WriteReport(const uint8_t* data, size_t size) {
         return false;
     }
 
+    // Windows HID requires a write whose length matches the device's output
+    // report length. The DualSense Bluetooth interface reports 547 bytes while
+    // the actual 0x31 report is 78, so the rest has to be zero padding.
+    std::vector<uint8_t> padded;
+    if (output_report_len_ > size) {
+        padded.assign(output_report_len_, 0);
+        std::memcpy(padded.data(), data, size);
+        static bool logged_padding = false;
+        if (!logged_padding) {
+            std::fprintf(stderr, "[hid] output report %zu -> %u bytes (padded)\n", size,
+                         output_report_len_);
+            logged_padding = true;
+        }
+        data = padded.data();
+        size = output_report_len_;
+    }
+
     ::ZeroMemory(&write_overlapped_, sizeof(write_overlapped_));
     write_overlapped_.hEvent = write_event_;
     ::ResetEvent(write_event_);
@@ -834,13 +851,20 @@ bool Gamepad::SendOutput(const PadOutput& output) {
         return WriteReport(report.data(), report.size());
     }
 
-    // Bluetooth output report 0x31: same payload shifted by one, CRC32(0xA2).
-    // Bluetooth output report 0x31: 77 payload bytes + id.
+    // Bluetooth output report 0x31:
+    //   [0] report id, [1] sequence/tag, [2] 0x10 magic tag,
+    //   [3..] the same 47-byte effects payload as USB report[1..], CRC32(0xA2)
+    //   over the first 74 bytes.
+    // The old code copied the payload at [2] and used 0x02 as the magic byte,
+    // which lost valid_flag0 entirely, so rumble/LED effects did nothing over
+    // Bluetooth.
     const size_t bt_length = 78;
     std::vector<uint8_t> bt(bt_length, 0);
     bt[0] = 0x31;
-    bt[1] = 0x02;
-    std::memcpy(&bt[2], &report[1], std::min<size_t>(47, report.size() - 1));
+    bt[1] = static_cast<uint8_t>((bt_sequence_ & 0x0F) << 4);
+    bt[2] = 0x10;  // DS_OUTPUT_TAG
+    std::memcpy(&bt[3], &report[1], report.size() - 1);
+    bt_sequence_ = static_cast<uint8_t>((bt_sequence_ + 1) & 0x0F);
     const uint32_t crc = Crc32Seed(0xA2, bt.data(), 74);
     bt[74] = static_cast<uint8_t>(crc & 0xFF);
     bt[75] = static_cast<uint8_t>((crc >> 8) & 0xFF);

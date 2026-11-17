@@ -59,7 +59,7 @@ HID takes priority. Sony pads are found by VID/PID (`054C:0CE6`, `054C:05C4`, `0
 | Connection | Input report | Output report |
 |---|---|---|
 | USB | `0x01`, 64 bytes | `0x02`, 48 bytes |
-| Bluetooth | `0x31`, 78 bytes (`0x01` 10-byte simple mode also parsed) | `0x31`, 78 bytes + CRC32 seeded `0xA2` |
+| Bluetooth | `0x31`, 78 bytes (`0x01` 10-byte simple mode also parsed) | `0x31`, 78-byte report, zero-padded to `OutputReportByteLength` (547 on Windows) |
 
 Detection is by `HIDP_CAPS.InputReportByteLength`: 64 = USB, 78 = Bluetooth extended, ≤11 = Bluetooth simple.
 
@@ -86,7 +86,7 @@ Detection is by `HIDP_CAPS.InputReportByteLength`: 64 = USB, 78 = Bluetooth exte
 | Trigger effect calibration | ⚪ | firmware-provided ranges not applied |
 | Haptic voice-coil stream | ⚪ | needs the audio-haptic path over USB (see below) |
 | Speaker / headset audio | ⚪ | separate USB audio interface |
-| Gyro calibration | ⚪ | feature report 0x05 not read; raw scale assumed |
+| Gyro calibration | OK | feature report 0x05 parsed, SDL/DS5 math; raw scale fallback |
 | Console-driven effects | ✅ | rumble, trigger effects, lightbar, player LEDs, intensities |
 
 ### Rumble on newer DualSense firmware (fixed 2026-11-16)
@@ -103,7 +103,15 @@ report now reads firmware feature report `0x20` at open and selects:
 Verified live before shipping: `hid: DualSense (Bluetooth) ... firmware=0x0630` and
 `[hid] rumble weak=200 strong=240 fw=0x0630 edge=0 path=new` during the Rumble test.
 The controller physically rumbles with the test; in-game console rumble uses the same
-report. `BRP_PAD_PROBE=1` logs each console rumble event and each HID rumble report.
+report. `BRP_PAD_PROBE=1` logs each console rumble event, each HID rumble report and
+the live calibrated gyro/accel values.
+
+On Windows the Bluetooth interface advertises `OutputReportByteLength = 547`. The
+78-byte `0x31` report must be zero-padded to that length (see gotcha 2), so the log
+also shows `[hid] output report 78 -> 547 bytes (padded)` once per open. The older
+78-byte write failed with `ERROR_INVALID_PARAMETER (87)`, which is why rumble, LED
+and trigger effects did nothing over Bluetooth even though the report bytes were
+otherwise correct.
 
 ### Gyro calibration
 
@@ -111,7 +119,10 @@ Feature report `0x05` is parsed at open (same layout as SDL/DS5): per-axis bias 
 sensitivity for gyro and accelerometer. `PadState` now carries calibrated
 `gyro_dps`/`accel_g`; the Madgwick orientation tracker consumes those. If the report
 is unavailable or out of range, the standard 1024 counts/deg/s and 8192 counts/g
-scales are used. The Controller tab shows `gyro calibrated` or `gyro default`.
+scales are used. The Controller tab shows `gyro calibrated` or `gyro default`, plus
+live `Gyro x / y / z dps` and `Accel x / y / z g` values so the motion path can be
+checked without starting a stream. `BRP_PAD_PROBE=1` logs the same values once per
+second.
 
 ### DualSense Edge
 
@@ -156,16 +167,17 @@ Settings → Controller (the Controller category).
 
 ![Controller settings](images/app-settings-controller.png)
 
-Verified on this machine: DualSense over **Bluetooth**, input 78 bytes, output writes accepted (78-byte `0x31` + CRC).
+Verified on this machine: DualSense over **Bluetooth**, input 78 bytes. Output reports are built as 78-byte `0x31` + CRC, then padded to the 547-byte HID output length; the Controller tab shows `output OK` and the rumble test reaches the motors. Gyro is live in the same tab (`gyro calibrated`, values in dps/g).
 
 ---
 
 ## Gotchas that cost time
 
 1. **A HID handle opened with `FILE_FLAG_OVERLAPPED` cannot be written with a null `OVERLAPPED`.** `WriteFile` returns `ERROR_INVALID_PARAMETER` (87). Output needs its own event + `GetOverlappedResult`.
-2. **`HIDP_CAPS.OutputReportByteLength` is the largest output report, not the one you are sending.** For the DualSense it reports 547 (report `0x39`), while the state report is 78. Using the cap as buffer size fails. Each report ID has its own length.
-3. **Bluetooth input is 78 bytes, not 10.** The 10-byte `0x01` simple mode is a fallback; the pad on this machine sends `0x31` at 78 bytes. Detecting by "≤11 means Bluetooth" was wrong — compare against 64 (USB) instead.
+2. **Windows requires the write length to match `HIDP_CAPS.OutputReportByteLength`.** The DualSense Bluetooth interface reports 547 while the actual `0x31` state report is 78. Build the 78-byte report, then zero-pad it to the cap before `WriteFile`; sending 78 bytes directly fails with `ERROR_INVALID_PARAMETER` (87). Verified: `[hid] output report 78 -> 547 bytes (padded)` and `output OK`.
+3. **Bluetooth input is 78 bytes, not 10.** The 10-byte `0x01` simple mode is a fallback; the pad on this machine sends `0x31` at 78 bytes. Detecting by "!= 64 means Bluetooth" was wrong - compare against 64 (USB) instead.
 4. **XInput never sees a DualSense.** `XINPUT_GAMEPAD_GUIDE` is also not in the public header (value `0x0400`). Sony pads need HID.
+5. **Bluetooth output has a 3-byte header.** Byte 0 is `0x31`, byte 1 is the sequence/tag nibble, byte 2 must be `0x10` (magic tag), and the common 47-byte payload starts at byte 3. Copying the USB payload at byte 2 loses `valid_flag0`, so rumble/trigger/LED flags are never set even when the CRC and length are correct.
 
 ---
 

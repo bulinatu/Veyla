@@ -423,22 +423,6 @@ bool Presenter::CreateSwapchainForFormat() {
     return true;
 }
 
-bool Presenter::SetHdr(bool enabled) {
-    if (cfg_.hdr == enabled) {
-        return true;
-    }
-    rtv_.Reset();
-    backbuffer_.Reset();
-    swapchain_.Reset();
-    cfg_.hdr = enabled;
-    if (!CreateSwapchainForFormat()) {
-        return false;
-    }
-    if (!CreateBackbufferViews()) {
-        return false;
-    }
-    return CreateTargetViews();
-}
 void Presenter::Render(double time_seconds) {
     const auto cpu_start = std::chrono::steady_clock::now();
     BeginTiming();
@@ -607,31 +591,6 @@ void Presenter::Present() {
     PresentNow(cfg_.vsync);
 }
 
-bool Presenter::SetFullscreen(bool enabled) {
-    if (fullscreen_ == enabled) {
-        return true;
-    }
-    ID3D11RenderTargetView* null_rtv = nullptr;
-    context_->OMSetRenderTargets(1, &null_rtv, nullptr);
-    rtv_.Reset();
-    backbuffer_.Reset();
-
-    if (FAILED(swapchain_->SetFullscreenState(enabled ? TRUE : FALSE, nullptr))) {
-        return false;
-    }
-    fullscreen_ = enabled;
-
-    DXGI_SWAP_CHAIN_DESC1 desc{};
-    if (SUCCEEDED(swapchain_->GetDesc1(&desc))) {
-        cfg_.output_width = static_cast<int>(desc.Width);
-        cfg_.output_height = static_cast<int>(desc.Height);
-    }
-    if (!CreateBackbufferViews()) {
-        return false;
-    }
-    return CreateTargetViews();
-}
-
 bool Presenter::CaptureToBmp(const char* path) {
     // Prefer the explicit render target so F12 produces a 1440p/2160p frame
     // even when the window is smaller.
@@ -710,15 +669,21 @@ bool Presenter::CaptureToBmp(const char* path) {
     return true;
 }
 
-std::string Presenter::Summary() const {    const double p50 = Percentile(gpu_ms_, 0.50);
+std::string Presenter::Summary() const {
+    const auto now = std::chrono::steady_clock::now();
+    if (summary_frames_ == frames_ &&
+        now - summary_at_ < std::chrono::milliseconds(250)) {
+        return summary_cache_;
+    }
+
+    const double p50 = Percentile(gpu_ms_, 0.50);
     const double p95 = Percentile(gpu_ms_, 0.95);
     const double cpu = cpu_ms_.empty() ? 0.0 : cpu_ms_.back();
 
     double fps = 0.0;
     if (frames_ > 1) {
-        const double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() -
-                                                        start_time_)
-                              .count();
+        const double dt =
+            std::chrono::duration<double>(now - start_time_).count();
         if (dt > 0.0) {
             fps = static_cast<double>(frames_ - 1) / dt;
         }
@@ -738,7 +703,11 @@ std::string Presenter::Summary() const {    const double p50 = Percentile(gpu_ms
                       p50, p95, cpu, fps, cfg_.output_width, cfg_.output_height,
                       cfg_.source_width, cfg_.source_height, cfg_.upscale_mode);
     }
-    return buf;
+
+    summary_cache_ = buf;
+    summary_at_ = now;
+    summary_frames_ = frames_;
+    return summary_cache_;
 }
 
 void Presenter::PrintFinalSummary() const {

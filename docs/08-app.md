@@ -57,6 +57,26 @@ While a session is live, 3 s without mouse movement hides the `Back` and
 them back immediately; the fade takes 0.35 s. The stats HUD is independent and
 stays on if enabled.
 
+### Window chrome and pacing
+
+- The OS title bar is gone (`WM_NCCALCSIZE` returns 0). The app draws its own
+  bar with the brand and minimize / maximize-restore / close buttons, including
+  hover states.
+- DWM gives the windowed frame a small rounding (`DWMWCP_ROUNDSMALL`).
+  Maximized and F11 borderless fullscreen use `DWMWCP_DONOTROUND`, so the stream
+  reaches the display edges.
+- The caption drags the window (`HTCAPTION`), the outer 6 DIP is a native resize
+  border, and double-clicking the caption toggles maximize. `WS_OVERLAPPEDWINDOW`
+  is retained, so snap, minimize, restore and the taskbar keep working.
+- The main loop is paced at the monitor's refresh rate (240 Hz on this machine),
+  read from `MONITORINFOEX` + `EnumDisplaySettings` and refreshed on display
+  changes and monitor moves. Frame generation presents on its own thread, so it
+  no longer dictates the UI cadence.
+- With DLSS Frame Generation active the worker's child presenter covers the
+  client. Moving the pointer into the top strip temporarily hides that child, so
+  the title bar, `Back`/`Disconnect` and HUD are visible and clickable; moving
+  away restores the clean stream.
+
 ### Display scaling
 
 The UI is drawn in a virtual 1600x900 space and scaled by
@@ -89,7 +109,7 @@ Controller navigation still works on Home (d-pad/stick, Cross, Circle, Options).
 ## Code map
 
 ```
-src/main_app.cpp              message loop, 60 Hz pacing
+src/main_app.cpp              message loop, monitor-refresh pacing
 src/app/app.{h,cpp}           screens, hit regions, dropdowns, layout, animation
 src/ui/ui_renderer.*          Direct2D + DirectWrite (rects, rounded clips,
                               gradients, text cache, ellipsis trimming)

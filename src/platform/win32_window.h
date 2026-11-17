@@ -47,6 +47,24 @@ public:
     // Hand cursor while hovering something clickable.
     void set_hand_cursor(bool enabled) { hand_cursor_ = enabled; }
 
+    // The app draws its own title bar. These are the logical sizes converted to
+    // physical pixels: the draggable caption height and the width on the right
+    // that stays clickable (window buttons, dropdowns, back/settings buttons).
+    void SetFrameMetrics(int caption_height, int caption_client_width);
+
+    // Removes the DWM rounding and caption hit test while the app is in
+    // borderless fullscreen. Re-enables them when leaving fullscreen.
+    void SetFullscreenChrome(bool fullscreen);
+
+    // Window commands used by the app's own title bar.
+    void Minimize();
+    void ToggleMaximize();
+    void Close();
+    bool maximized() const;
+
+    // Current monitor refresh rate (24..500 Hz, 60 when unknown).
+    int refresh_hz() const { return refresh_hz_; }
+
     // The window starts hidden; the app shows it after the first frame is
     // presented so startup never flashes an uninitialised white surface.
     void Show();
@@ -57,6 +75,10 @@ public:
 private:
     static LRESULT CALLBACK WndProcThunk(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
     LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
+
+    void ApplyWindowAppearance();
+    void UpdateRefreshRate();
+    void UpdateMonitor();
 
     HWND hwnd_ = nullptr;
     int width_ = 0;
@@ -69,6 +91,12 @@ private:
     bool hand_cursor_ = false;
     bool cursor_hidden_ = false;
     bool tracking_leave_ = false;
+    int caption_height_ = 0;
+    int caption_client_width_ = 0;
+    bool fullscreen_chrome_ = false;
+    bool dwm_corners_ = false;
+    HMONITOR monitor_ = nullptr;
+    int refresh_hz_ = 60;
 };
 
 }  // namespace brp

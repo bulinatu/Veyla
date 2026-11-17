@@ -94,12 +94,6 @@ public:
     void Clear(const float rgba[4]);
     void PresentNow(bool vsync);
 
-    // Exclusive/borderless fullscreen toggle for exact output resolution.
-    bool SetFullscreen(bool enabled);
-    bool is_fullscreen() const { return fullscreen_; }
-    bool SetHdr(bool enabled);
-    bool hdr() const { return cfg_.hdr; }
-
     // Copies the current backbuffer to a 32-bit BMP. Must be called between
     // Render() and Present(): the backbuffer is only readable there.
     bool CaptureToBmp(const char* path);
@@ -132,7 +126,6 @@ private:
     HWND hwnd_ = nullptr;
     PresenterConfig cfg_{};
     bool tearing_ = false;
-    bool fullscreen_ = false;
     bool external_source_ = false;
     bool CreateSwapchainForFormat();
 
@@ -169,6 +162,12 @@ private:
     std::vector<double> cpu_ms_;
     std::chrono::steady_clock::time_point start_time_{};
     unsigned long long frames_ = 0;
+
+    // The HUD asks for a summary every frame; sorting the timing history that
+    // often is pointless, so it is rebuilt a few times a second.
+    mutable std::string summary_cache_;
+    mutable std::chrono::steady_clock::time_point summary_at_{};
+    mutable unsigned long long summary_frames_ = 0;
 };
 
 }  // namespace brp

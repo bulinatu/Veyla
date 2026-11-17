@@ -82,9 +82,10 @@ and the CUDA stream is synchronized after each export.
 
 The first source frame is shown as-is. Each later frame produces one generated frame
 (2x), presented first, followed by the real frame on the next presentation tick.
-Presentation runs at **120 Hz** while active: `App::present_hz()` feeds the main loop,
-which uses the high-resolution waitable timer (normal `sleep_for` would cap near
-64 Hz).
+`App::present_hz()` now follows the monitor refresh rate (240 Hz on this machine)
+and feeds the main loop, which uses the high-resolution waitable timer (normal
+`sleep_for` would cap near 64 Hz). The DLSS Frame Generation worker presents in its
+own child window and does not share this loop.
 
 ---
 

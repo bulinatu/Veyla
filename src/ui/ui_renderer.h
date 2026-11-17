@@ -31,7 +31,6 @@ public:
 
     void BeginFrame();
     void EndFrame();
-    void Clear(D2D1_COLOR_F color);
 
     // Global UI scale. All drawing is in a virtual 1600x900-ish space; on a
     // 1440p/4K backbuffer the transform keeps text and hit areas readable.
@@ -43,6 +42,7 @@ public:
     void StrokeRounded(const D2D1_RECT_F& rect, float radius, D2D1_COLOR_F color, float stroke);
     void FillCircle(float cx, float cy, float radius, D2D1_COLOR_F color);
     void FillTriangle(D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_POINT_2F c, D2D1_COLOR_F color);
+    void Line(D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_COLOR_F color, float stroke);
 
     void FillLinearV(const D2D1_RECT_F& rect, D2D1_COLOR_F top, D2D1_COLOR_F bottom);
     void FillRadial(float cx, float cy, float radius, D2D1_COLOR_F inner, D2D1_COLOR_F outer);
@@ -60,12 +60,8 @@ public:
     float TextWidth(const wchar_t* text, float size,
                     DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL);
 
-    void PushRectClip(const D2D1_RECT_F& rect);
     void PushRoundedClip(const D2D1_RECT_F& rect, float radius);
     void PopClip();
-
-    void SetTransform(D2D1_MATRIX_3X2_F transform);
-    void ResetTransform();
 
 private:
     IDWriteTextFormat* Format(float size, DWRITE_FONT_WEIGHT weight,
@@ -84,7 +80,6 @@ private:
         Microsoft::WRL::ComPtr<ID2D1RoundedRectangleGeometry> geometry;
     };
     std::vector<LayerEntry> layers_;
-    std::vector<bool> clip_stack_;  // true = rounded layer, false = axis-aligned
 
     std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<IDWriteTextFormat>> formats_;
     float scale_ = 1.0f;

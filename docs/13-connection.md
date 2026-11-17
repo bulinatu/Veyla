@@ -39,8 +39,8 @@ mechanism carries a wake command.
 - Diagnostics: `wake_probe [host]` loads `session.json` and sends one packet:
   `[wake] sent to 192.168.1.21 (credential 1c6b04b5, PS5)`.
 
-The probe/wake loop runs inside the normal 60 Hz frame, so the UI never blocks
-for the 30 s window.
+The probe/wake loop runs inside the normal UI frame (monitor refresh rate), so the
+UI never blocks for the 30 s window.
 
 ---
 

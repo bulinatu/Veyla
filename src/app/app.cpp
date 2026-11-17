@@ -171,6 +171,13 @@ enum WidgetId {
 constexpr float kContentX = 344.0f;
 constexpr float kRowH = 66.0f;
 
+// Custom window chrome (windowed mode only; fullscreen draws none).
+constexpr float kTitleBarH = 48.0f;
+constexpr float kTitleBarButtonW = 46.0f;
+// The app's own buttons stay clickable; everything left of this strip drags
+// the window through WM_NCHITTEST.
+constexpr float kTitleBarClientRight = 344.0f;
+
 const wchar_t* kTriggerNames[] = {L"Off",    L"Rigid",     L"Pulse", L"Feedback",
                                   L"Weapon", L"Vibration", L"Bow",   L"Galloping"};
 constexpr int kTriggerCount = static_cast<int>(std::size(kTriggerNames));
@@ -249,6 +256,10 @@ std::wstring PadStatus(const PadState& pad) {
 
 bool App::Init(Win32Window* window) {
     window_ = window;
+    if (window_) {
+        refresh_hz_ = window_->refresh_hz();
+        std::fprintf(stderr, "[app] display refresh %d Hz\n", refresh_hz_);
+    }
 
     games_ = {
         {L"Neon Drift", L"Racing  ·  4h played", 0x2E6BFF},
@@ -521,6 +532,21 @@ void App::DispatchClick() {
                 break;
             case Hit::PinField:
                 pin_focus_ = true;
+                break;
+            case Hit::Minimize:
+                if (window_) {
+                    window_->Minimize();
+                }
+                break;
+            case Hit::Maximize:
+                if (window_) {
+                    window_->ToggleMaximize();
+                }
+                break;
+            case Hit::Close:
+                if (window_) {
+                    window_->Close();
+                }
                 break;
             case Hit::None:
                 break;
@@ -876,6 +902,8 @@ void App::ApplyDropdown(int id, int index) {
         case W_HudReset:
             frame_ms_.clear();
             frame_stutters_ = 0;
+            stat_at_ = -1.0;
+            stat_p50_ = stat_p95_ = stat_p99_ = stat_max_ = 0.0f;
             break;
         case W_Reflex: {            profile_.reflex = std::clamp(index, 0, 2);
             ApplyReflex();
@@ -1131,7 +1159,10 @@ void App::ApplyRenderTarget() {
 }
 
 int App::present_hz() const {
-    return (stream_active_ && frame_gen_ >= 2 && fg_ready_) ? 60 * frame_gen_ : 60;
+    // The app itself runs at the monitor's refresh rate. Frame generation is
+    // presented by the NVIDIA worker/presenter on its own thread, so it no
+    // longer dictates the UI cadence.
+    return std::clamp(refresh_hz_, 24, 500);
 }
 
 std::wstring App::FindFrameGenRuntime() const {
@@ -1925,9 +1956,14 @@ void App::PadThreadMain() {
             if (probe_now - probe_at >= std::chrono::seconds(1)) {
                 const double seconds =
                     std::chrono::duration<double>(probe_now - probe_at).count();
+                const PadState state = pad_.snapshot();
                 std::fprintf(stderr, "[pad] %.0f loops/s (target %d Hz, %s)\n",
                              probe_loops / seconds, hz,
                              pad_.is_bluetooth() ? "bluetooth" : "usb");
+                std::fprintf(stderr,
+                             "[pad] gyro %.1f %.1f %.1f dps | accel %.2f %.2f %.2f g\n",
+                             state.gyro_dps[0], state.gyro_dps[1], state.gyro_dps[2],
+                             state.accel_g[0], state.accel_g[1], state.accel_g[2]);
                 probe_loops = 0;
                 probe_at = probe_now;
             }
@@ -2122,6 +2158,7 @@ void App::ToggleFullscreen() {
                        mi.rcMonitor.bottom - mi.rcMonitor.top,
                        SWP_FRAMECHANGED | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
         borderless_ = true;
+        window_->SetFullscreenChrome(true);
         RECT client{};
         ::GetClientRect(hwnd, &client);
         std::fprintf(stderr, "[app] fullscreen client %ldx%ld\n", client.right - client.left,
@@ -2141,6 +2178,7 @@ void App::ToggleFullscreen() {
                        windowed_rect_.bottom - windowed_rect_.top,
                        SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOOWNERZORDER);
         borderless_ = false;
+        window_->SetFullscreenChrome(false);
         RECT client{};
         ::GetClientRect(hwnd, &client);
         ui_.ReleaseTarget();
@@ -2174,9 +2212,7 @@ void App::StartProbe() {
     probe_.Start(profile_.host, 9295);
 }
 
-void App::ApplyControllerOutput(bool force) {
-    (void)force;
-
+void App::ApplyControllerOutput() {
     PadOutput out;
 
     // Index 8 is "Console (PS5)": leave the lightbar to the console.
@@ -2232,6 +2268,13 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     ui_w_ = physical_w / ui_scale_;
     ui_h_ = physical_h / ui_scale_;
     ui_.SetScale(ui_scale_);
+
+    // Follow monitor changes without restarting (WM_DISPLAYCHANGE already
+    // refreshes the window's cached value).
+    if (window_->refresh_hz() != refresh_hz_) {
+        refresh_hz_ = window_->refresh_hz();
+        std::fprintf(stderr, "[app] display refresh %d Hz\n", refresh_hz_);
+    }
     // Self-heal: the swap chain must always match the client area. If a
     // window resize message was missed (fullscreen transitions), the video
     // would otherwise be drawn at the wrong size - cropped or stretched.
@@ -2339,43 +2382,16 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     const float target = static_cast<float>(selected_);
     scroll_ += (target - scroll_) * (1.0f - std::exp(-16.0f * static_cast<float>(dt)));
 
-    if (screen_ == Screen::Stream || screen_ == Screen::StreamSettings) {
-        // Reflex low-latency sleep, right before the frame is submitted.
-        reflex_.Sleep(presenter_.device());
-        presenter_.Render(time_seconds);
-    } else {
-        const float bg[4] = {0.010f, 0.016f, 0.028f, 1.0f};
-        presenter_.Clear(bg);
-    }
-
-    ui_.BeginFrame();
-    switch (screen_) {
-        case Screen::Home:
-            RenderHome(time_seconds);
-            break;
-        case Screen::Settings:
-            RenderSettings(time_seconds);
-            break;
-        case Screen::Stream:
-            RenderStream(time_seconds);
-            break;
-        case Screen::StreamSettings:
-            RenderStreamSettings(time_seconds);
-            break;
-    }
-    ui_.EndFrame();
-
-    if (window_) {
-        window_->set_hand_cursor(hover_ != Hit::None);
-    }
-
-    if (pointer_.clicked) {
-        DispatchClick();
-    }
-
     if (profile_.dlss_fg >= 2 && nr_.present_mode() && !fg_window_) {
         AttachFgWindow();
     }
+
+    // The worker presents in its own child window, which sits above our
+    // Direct2D surface. When it covers the client the parent pass is invisible,
+    // so skip it (this is the expensive path at 240 Hz). Moving the pointer to
+    // the top strip hides the child again so the chrome/HUD can be rendered and
+    // used.
+    bool fg_covering = false;
     if (fg_window_) {
         const int want_w = static_cast<int>(ui_w_ * ui_scale_);
         const int want_h = static_cast<int>(ui_h_ * ui_scale_);
@@ -2385,7 +2401,59 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
             fg_w_ = want_w;
             fg_h_ = want_h;
         }
-        ::ShowWindow(fg_window_, screen_ == Screen::Stream ? SW_SHOW : SW_HIDE);
+
+        POINT cursor{};
+        ::GetCursorPos(&cursor);
+        ::ScreenToClient(window_->hwnd(), &cursor);
+        RECT client{};
+        ::GetClientRect(window_->hwnd(), &client);
+        const float trigger = (borderless_ ? 24.0f : kTitleBarH) * ui_scale_;
+        const bool reveal = screen_ == Screen::Stream && cursor.x >= 0 && cursor.y >= 0 &&
+                            cursor.x < client.right && cursor.y < static_cast<LONG>(trigger);
+        if (reveal) {
+            // The child window swallows mouse moves while it is visible, so the
+            // normal idle timer would keep the stream chrome faded out.
+            mouse_active_at_ = clock_;
+        }
+        fg_covering = screen_ == Screen::Stream && !reveal;
+        ::ShowWindow(fg_window_, fg_covering ? SW_SHOW : SW_HIDE);
+    }
+
+    if (!fg_covering) {
+        if (screen_ == Screen::Stream || screen_ == Screen::StreamSettings) {
+            // Reflex low-latency sleep, right before the frame is submitted.
+            reflex_.Sleep(presenter_.device());
+            presenter_.Render(time_seconds);
+        } else {
+            const float bg[4] = {0.010f, 0.016f, 0.028f, 1.0f};
+            presenter_.Clear(bg);
+        }
+
+        ui_.BeginFrame();
+        switch (screen_) {
+            case Screen::Home:
+                RenderHome(time_seconds);
+                break;
+            case Screen::Settings:
+                RenderSettings(time_seconds);
+                break;
+            case Screen::Stream:
+                RenderStream(time_seconds);
+                break;
+            case Screen::StreamSettings:
+                RenderStreamSettings(time_seconds);
+                break;
+        }
+        RenderWindowChrome();
+        ui_.EndFrame();
+    }
+
+    if (window_) {
+        window_->set_hand_cursor(hover_ != Hit::None);
+    }
+
+    if (pointer_.clicked) {
+        DispatchClick();
     }
 
     if (nr_settings_dirty_ && !pointer_.down) {
@@ -2435,7 +2503,11 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         } else if (streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
             if (profile_.dlss_fg >= 2 && nr_ready_ && nr_.present_mode()) {
                 // DLSS Frame Generation: the worker presents NR + generated
-                // frames in its own window; we only feed it.
+                // frames in its own window; we only feed it. Keep a copy in the
+                // parent presenter as well so revealing the chrome shows the
+                // last real frame instead of the synthetic pattern.
+                presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
+                                          stream_frame_.height, stream_frame_.pq);
                 SubmitNrFrame(stream_frame_);
                 std::string fg_error;
                 if (NrFailed(fg_error)) {
@@ -2694,10 +2766,13 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         }
     }
 
+    const bool rumble_testing = clock_ < rumble_until_;
     if (pad_.is_sony() &&
-        (output_dirty_ || clock_ < rumble_until_ + 0.1 || clock_ - last_output_ > 0.2)) {
-        ApplyControllerOutput(false);
+        (output_dirty_ || rumble_testing != rumble_was_testing_ ||
+         clock_ - last_output_ > 0.2)) {
+        ApplyControllerOutput();
     }
+    rumble_was_testing_ = rumble_testing;
     if (!pad_run_.load()) {
         last_send_ok_ = pad_.PumpOutput();
     }
@@ -2738,10 +2813,18 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
 void App::RenderTopBar() {
     const float w = ui_w_;
 
-    ui_.Text(L"BETTERREMOTEPLAY", {48.0f, 26.0f, 480.0f, 52.0f}, 14.0f, th::Rgba(th::kInk, 0.92f),
-             DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    // In fullscreen there is no custom title bar, so the brand stays here.
+    if (borderless_) {
+        ui_.Text(L"BETTERREMOTEPLAY", {48.0f, 24.0f, 480.0f, 54.0f}, 14.0f,
+                 th::Rgba(th::kInk, 0.92f), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    }
 
-    const D2D1_RECT_F settings_rect{w - 200.0f, 28.0f, w - 96.0f, 64.0f};
+    // Below the title bar in windowed mode, and at its original height in
+    // fullscreen. The clock/avatar decorations were removed: the custom frame
+    // already shows the app identity and the window state.
+    const float button_y = borderless_ ? 28.0f : kTitleBarH + 8.0f;
+    const D2D1_RECT_F settings_rect{w - kTitleBarClientRight, button_y,
+                                    w - kTitleBarClientRight + 100.0f, button_y + 36.0f};
     const bool settings_hover = hover_ == Hit::SettingsButton;
     ui_.FillRounded(settings_rect, 18.0f, th::Rgba(0xFFFFFF, settings_hover ? 0.12f : 0.06f));
     ui_.StrokeRounded(settings_rect, 18.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
@@ -2750,18 +2833,76 @@ void App::RenderTopBar() {
              13.0f, th::Rgba(th::kInk, 0.9f), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
     AddHit(Hit::SettingsButton, -1, settings_rect);
+}
 
-    SYSTEMTIME st{};
-    ::GetLocalTime(&st);
-    wchar_t clock_text[16];
-    swprintf_s(clock_text, L"%02d:%02d", st.wHour, st.wMinute);
-    ui_.Text(clock_text, {w - 340.0f, 28.0f, w - 290.0f, 60.0f}, 20.0f,
-             th::Rgba(th::kInk, 0.92f), DWRITE_FONT_WEIGHT_SEMI_BOLD,
-             DWRITE_TEXT_ALIGNMENT_TRAILING);
+void App::RenderWindowChrome() {
+    if (borderless_ || !window_) {
+        return;
+    }
 
-    ui_.FillCircle(w - 60.0f, 44.0f, 18.0f, th::Rgba(0x332846));
-    ui_.Text(L"C", {w - 78.0f, 26.0f, w - 42.0f, 62.0f}, 15.0f, th::Rgba(th::kInk),
-             DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
+    const float w = ui_w_;
+    const float h = kTitleBarH;
+
+    // The app draws the title bar on the backbuffer, so it must also tell
+    // Win32 which part is draggable and which part is client area.
+    window_->SetFrameMetrics(static_cast<int>(std::lround(h * ui_scale_)),
+                             static_cast<int>(std::lround(kTitleBarClientRight * ui_scale_)));
+
+    ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(0x0B0617, 0.97f), th::Rgba(0x0B0617, 0.88f));
+    ui_.FillRect({0.0f, h - 1.0f, w, h}, th::Rgba(0xFFFFFF, 0.07f));
+
+    // Small accent mark + brand. The mark is the only piece of "logo" the app
+    // needs; it stays crisp at every UI scale because it is drawn by D2D.
+    ui_.FillRounded({18.0f, h * 0.5f - 7.0f, 32.0f, h * 0.5f + 7.0f}, 4.0f,
+                    th::Rgba(th::kAccent, 0.95f));
+    ui_.Text(L"BETTERREMOTEPLAY", {44.0f, 0.0f, 420.0f, h}, 12.5f,
+             th::Rgba(th::kInk, 0.90f), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+
+    const float bw = kTitleBarButtonW;
+    const float cy = h * 0.5f;
+
+    const Hit buttons[] = {Hit::Minimize, Hit::Maximize, Hit::Close};
+
+    for (int i = 0; i < 3; ++i) {
+        const D2D1_RECT_F rect{w - static_cast<float>(3 - i) * bw, 0.0f,
+                               w - static_cast<float>(2 - i) * bw, h};
+        const bool hovered = hover_ == buttons[i];
+        const bool close = buttons[i] == Hit::Close;
+
+        if (hovered) {
+            ui_.FillRect(rect, close ? th::Rgba(0xE81123, 0.92f)
+                                     : th::Rgba(0xFFFFFF, 0.10f));
+        }
+
+        const D2D1_COLOR_F ink =
+            th::Rgba(th::kInk, hovered && close ? 1.0f : 0.82f);
+        const float cx = rect.left + bw * 0.5f;
+
+        switch (buttons[i]) {
+            case Hit::Minimize:
+                ui_.FillRect({cx - 6.0f, cy, cx + 6.0f, cy + 1.4f}, ink);
+                break;
+            case Hit::Maximize:
+                if (window_->maximized()) {
+                    ui_.StrokeRounded({cx - 6.0f, cy - 6.0f, cx + 4.0f, cy + 4.0f}, 1.5f, ink,
+                                      1.15f);
+                    ui_.StrokeRounded({cx - 3.0f, cy - 3.0f, cx + 7.0f, cy + 7.0f}, 1.5f, ink,
+                                      1.15f);
+                } else {
+                    ui_.StrokeRounded({cx - 6.0f, cy - 6.0f, cx + 6.0f, cy + 6.0f}, 1.5f, ink,
+                                      1.15f);
+                }
+                break;
+            case Hit::Close:
+                ui_.Line({cx - 5.5f, cy - 5.5f}, {cx + 5.5f, cy + 5.5f}, ink, 1.35f);
+                ui_.Line({cx + 5.5f, cy - 5.5f}, {cx - 5.5f, cy + 5.5f}, ink, 1.35f);
+                break;
+            default:
+                break;
+        }
+
+        AddHit(buttons[i], i, rect);
+    }
 }
 
 void App::DrawConsoleCard() {
@@ -3197,9 +3338,10 @@ void App::RenderHome(double t) {
              {x0 + 36.0f, y0 + 288.0f, x0 + card_w - 36.0f, y0 + 316.0f}, 11.5f,
              th::Rgba(th::kMuted, 0.85f));
 
-    if (pad_.state().connected) {
+    const PadState home_pad = pad_.snapshot();
+    if (home_pad.connected) {
         ui_.FillCircle(52.0f, h - 70.0f, 4.0f, th::Rgba(th::kOnline));
-        ui_.Text(Widen(pad_.state().name).c_str(), {64.0f, h - 82.0f, 420.0f, h - 58.0f}, 12.0f,
+        ui_.Text(Widen(home_pad.name).c_str(), {64.0f, h - 82.0f, 420.0f, h - 58.0f}, 12.0f,
                  th::Rgba(th::kMuted));
     }
 
@@ -3215,18 +3357,21 @@ void App::RenderSettings(double t) {
     ui_.FillRadial(w * 0.5f, -h * 0.1f, w * 0.7f, th::Rgba(0x5A2E9E, 0.28f),
                    th::Rgba(0x5A2E9E, 0.0f));
 
-    const D2D1_RECT_F back{w - 132.0f, 28.0f, w - 40.0f, 64.0f};
+    const float back_y = borderless_ ? 28.0f : kTitleBarH + 8.0f;
+    const D2D1_RECT_F back{w - kTitleBarClientRight, back_y,
+                           w - kTitleBarClientRight + 100.0f, back_y + 36.0f};
     ui_.FillRounded(back, 18.0f, th::Rgba(0xFFFFFF, hover_ == Hit::Back ? 0.12f : 0.06f));
     ui_.StrokeRounded(back, 18.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
     ui_.Text(L"Back", {back.left, back.top, back.right, back.bottom}, 13.0f,
              th::Rgba(th::kInk, 0.9f), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER);
     AddHit(Hit::Back, -1, back);
 
-    ui_.Text(L"Settings", {48.0f, 44.0f, 420.0f, 96.0f}, 34.0f, th::Rgba(th::kInk),
-             DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const float header_y = borderless_ ? 44.0f : kTitleBarH + 16.0f;
+    ui_.Text(L"Settings", {48.0f, header_y, 420.0f, header_y + 52.0f}, 34.0f,
+             th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
     if (!session_note_.empty()) {
-        ui_.Text(Widen(session_note_).c_str(), {48.0f, 98.0f, w - 64.0f, 122.0f}, 12.0f,
-                 th::Rgba(th::kMuted));
+        ui_.Text(Widen(session_note_).c_str(), {48.0f, header_y + 54.0f, w - 64.0f, header_y + 78.0f},
+                 12.0f, th::Rgba(th::kMuted));
     }
 
     const wchar_t* tab_names[] = {L"Display", L"Upscaling", L"Performance", L"Neural", L"Legacy", L"Audio", L"Controller", L"Connection", L"Debug", L"About"};
@@ -3584,7 +3729,7 @@ void App::RenderSettings(double t) {
                        W_Rumble, false);
             y += row;
 
-            std::wstring status = PadStatus(pad_.state());
+            std::wstring status = PadStatus(pad_.snapshot());
             if (pad_.is_sony()) {
                 wchar_t extra[160];
                 swprintf_s(extra, L"   -   fw 0x%04X   -   gyro %s%s", pad_.firmware_version(),
@@ -3595,6 +3740,19 @@ void App::RenderSettings(double t) {
             }
             ui_.Text(status.c_str(), {kContentX, y, w - 64.0f, y + 40.0f}, 12.0f,
                      th::Rgba(th::kMuted));
+
+            if (pad_.is_sony()) {
+                const PadState pad_state = pad_.snapshot();
+                if (pad_state.connected) {
+                    wchar_t motion[192];
+                    swprintf_s(motion,
+                               L"Gyro %.1f / %.1f / %.1f dps      Accel %.2f / %.2f / %.2f g",
+                               pad_state.gyro_dps[0], pad_state.gyro_dps[1], pad_state.gyro_dps[2],
+                               pad_state.accel_g[0], pad_state.accel_g[1], pad_state.accel_g[2]);
+                    ui_.Text(motion, {kContentX, y + 42.0f, w - 64.0f, y + 66.0f}, 11.5f,
+                             th::Rgba(th::kMuted, 0.85f));
+                }
+            }
             break;
         }
 
@@ -3724,26 +3882,38 @@ void App::RenderStream(double t) {
     (void)t;
     const float w = ui_w_;
 
+    // The DLSS Frame Generation worker covers the client with its own child
+    // window. When it is hidden to reveal the chrome, dim the stale parent
+    // frame so the HUD and buttons stay readable.
+    if (fg_window_) {
+        ui_.FillRect({0.0f, 0.0f, w, ui_h_}, th::Rgba(0x05030A, 0.70f));
+    }
+
     if (hud_) {
         const int mask = profile_.hud_mask;
-        float p50 = 0.0f;
-        float p95 = 0.0f;
-        float p99 = 0.0f;
-        float worst = 0.0f;
-        if (!frame_ms_.empty()) {
+
+        // Percentiles are stable enough to be recomputed a few times a second;
+        // sorting 240 samples on every 239 Hz frame was pure UI overhead.
+        if (clock_ - stat_at_ > 0.25 && !frame_ms_.empty()) {
             std::vector<float> sorted(frame_ms_.begin(), frame_ms_.end());
             std::sort(sorted.begin(), sorted.end());
             const auto pick = [&sorted](float q) {
                 const size_t index = static_cast<size_t>(q * (sorted.size() - 1));
                 return sorted[std::min(index, sorted.size() - 1)];
             };
-            p50 = pick(0.50f);
-            p95 = pick(0.95f);
-            p99 = pick(0.99f);
-            worst = sorted.back();
+            stat_p50_ = pick(0.50f);
+            stat_p95_ = pick(0.95f);
+            stat_p99_ = pick(0.99f);
+            stat_max_ = sorted.back();
+            stat_at_ = clock_;
         }
+        const float p50 = stat_p50_;
+        const float p95 = stat_p95_;
+        const float p99 = stat_p99_;
+        const float worst = stat_max_;
 
-        const bool show_pad = (mask & 0x4) != 0 && pad_.state().connected;
+        const PadState hud_pad = pad_.snapshot();
+        const bool show_pad = (mask & 0x4) != 0 && hud_pad.connected;
         const bool show_gpu = (mask & 0x2) != 0;
         const bool show_stream = (mask & 0x8) != 0 && stream_active_;
         const bool show_net = (mask & 0x10) != 0 && stream_active_;
@@ -3754,8 +3924,9 @@ void App::RenderStream(double t) {
         rows += show_stream ? 1 : 0;
         rows += show_net ? 1 : 0;
 
-        const D2D1_RECT_F panel{24.0f, 24.0f, 24.0f + 700.0f,
-                                24.0f + 20.0f + static_cast<float>(rows) * 22.0f};
+        const float hud_y = borderless_ ? 24.0f : kTitleBarH + 12.0f;
+        const D2D1_RECT_F panel{24.0f, hud_y, 24.0f + 700.0f,
+                                 hud_y + 20.0f + static_cast<float>(rows) * 22.0f};
         ui_.FillRounded(panel, 12.0f, th::Rgba(0x08040F, 0.72f));
         ui_.StrokeRounded(panel, 12.0f, th::Rgba(th::kAccent, 0.28f), 1.0f);
 
@@ -3780,7 +3951,7 @@ void App::RenderStream(double t) {
             line(Widen(presenter_.Summary()), 0.88f);
         }
         if (show_pad) {
-            line(PadStatus(pad_.state()), 0.88f);
+            line(PadStatus(hud_pad), 0.88f);
         }
         if (show_stream) {
             std::wstring chain;
@@ -4073,7 +4244,7 @@ void App::RenderStreamSettings(double t) {
             DrawButton(L"Rumble test", {kContentX, y + 4.0f, kContentX + 220.0f, y + 40.0f},
                        W_Rumble, false);
             y += row;
-            ui_.Text(PadStatus(pad_.state()).c_str(), {kContentX, y, w - 64.0f, y + 24.0f},
+            ui_.Text(PadStatus(pad_.snapshot()).c_str(), {kContentX, y, w - 64.0f, y + 24.0f},
                      12.0f, th::Rgba(th::kMuted));
             y += 24.0f;
             break;

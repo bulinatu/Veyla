@@ -121,14 +121,10 @@ void Renderer::BeginFrame() {
 }
 
 void Renderer::EndFrame() {
-    while (!clip_stack_.empty()) {
+    while (!layers_.empty()) {
         PopClip();
     }
     dc_->EndDraw();
-}
-
-void Renderer::Clear(D2D1_COLOR_F color) {
-    dc_->Clear(color);
 }
 
 void Renderer::FillRect(const D2D1_RECT_F& rect, D2D1_COLOR_F color) {
@@ -150,6 +146,11 @@ void Renderer::StrokeRounded(const D2D1_RECT_F& rect, float radius, D2D1_COLOR_F
 void Renderer::FillCircle(float cx, float cy, float radius, D2D1_COLOR_F color) {
     brush_->SetColor(color);
     dc_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), radius, radius), brush_.Get());
+}
+
+void Renderer::Line(D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_COLOR_F color, float stroke) {
+    brush_->SetColor(color);
+    dc_->DrawLine(a, b, brush_.Get(), stroke);
 }
 
 void Renderer::FillTriangle(D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_POINT_2F c,
@@ -293,11 +294,6 @@ float Renderer::TextWidth(const wchar_t* text, float size, DWRITE_FONT_WEIGHT we
     return metrics.widthIncludingTrailingWhitespace;
 }
 
-void Renderer::PushRectClip(const D2D1_RECT_F& rect) {
-    dc_->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-    clip_stack_.push_back(false);
-}
-
 void Renderer::PushRoundedClip(const D2D1_RECT_F& rect, float radius) {
     ComPtr<ID2D1RoundedRectangleGeometry> geometry;
     if (FAILED(factory_->CreateRoundedRectangleGeometry(D2D1::RoundedRect(rect, radius, radius),
@@ -321,32 +317,14 @@ void Renderer::PushRoundedClip(const D2D1_RECT_F& rect, float radius) {
 
     dc_->PushLayer(params, layer.Get());
     layers_.push_back({layer, geometry});
-    clip_stack_.push_back(true);
 }
 
 void Renderer::PopClip() {
-    if (clip_stack_.empty()) {
+    if (layers_.empty()) {
         return;
     }
-    const bool rounded = clip_stack_.back();
-    clip_stack_.pop_back();
-
-    if (rounded) {
-        if (!layers_.empty()) {
-            layers_.pop_back();
-        }
-        dc_->PopLayer();
-    } else {
-        dc_->PopAxisAlignedClip();
-    }
-}
-
-void Renderer::SetTransform(D2D1_MATRIX_3X2_F transform) {
-    dc_->SetTransform(transform);
-}
-
-void Renderer::ResetTransform() {
-    dc_->SetTransform(D2D1::Matrix3x2F::Identity());
+    layers_.pop_back();
+    dc_->PopLayer();
 }
 
 }  // namespace brp::ui

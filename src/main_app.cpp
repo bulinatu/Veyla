@@ -4,6 +4,8 @@
 #include "platform/win32_window.h"
 
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <thread>
 
 int main() {
@@ -19,6 +21,9 @@ int main() {
 
     const auto start = std::chrono::steady_clock::now();
     auto next_frame = start;
+    const bool loop_probe = std::getenv("BRP_LOOP_PROBE") != nullptr;
+    int probe_frames = 0;
+    auto probe_last = start;
 
     // A normal sleep_until() quantises to the 15.6 ms system tick, which would
     // cap a 120/180/240 Hz presentation loop at ~64 Hz. Use the high-resolution
@@ -77,9 +82,21 @@ int main() {
             std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         app.Frame(t, pointer);
 
+        if (loop_probe) {
+            ++probe_frames;
+            const auto probe_now = std::chrono::steady_clock::now();
+            const double interval =
+                std::chrono::duration<double>(probe_now - probe_last).count();
+            if (interval >= 2.0) {
+                std::fprintf(stderr, "[loop] %.1f fps (target %d Hz)\n",
+                             probe_frames / interval, app.present_hz());
+                probe_frames = 0;
+                probe_last = probe_now;
+            }
+        }
         // Vsync is not a reliable frame limiter on virtual/remote displays, so
-        // pace the UI loop explicitly. Frame generation raises the target to
-        // 120/180/240 Hz.
+        // pace the UI loop explicitly at the monitor's refresh rate. Frame
+        // generation has its own presenter and does not change this cadence.
         const auto budget = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
             std::chrono::duration<double>(1.0 / app.present_hz()));
         next_frame += budget;

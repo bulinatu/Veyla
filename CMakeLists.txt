@@ -22,7 +22,7 @@ add_library(brp_media STATIC
 target_include_directories(brp_media PUBLIC src)
 target_include_directories(brp_media PRIVATE third_party/nvidia-ngx/include)
 target_compile_definitions(brp_media PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
-target_link_libraries(brp_media PUBLIC d3d11 dxgi d3dcompiler d3d12)
+target_link_libraries(brp_media PUBLIC d3d11 dxgi d3dcompiler d3d12 dwmapi)
 
 if (MSVC)
     target_compile_options(brp_media PRIVATE /W4 /permissive- /utf-8)
