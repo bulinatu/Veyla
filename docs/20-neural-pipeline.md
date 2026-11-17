@@ -99,7 +99,8 @@ works together with Frame Generation. On this machine the driver accepts it
 - **Legacy settings page** (between Neural and Audio): RTX VSR and the Neural
   Ultra preset, with "not maintained any more, but still functional".
 - **Overlay** rebuilt as categories like the settings screen: Stream / DLSS /
-  Neural / Legacy, sharing the same widgets (sliders included).
+  Neural / Audio / Controller / Legacy, sharing the same widgets (sliders
+  included) and applying every change live while the stream runs.
 
 ## DLSS Frame Generation (implemented)
 

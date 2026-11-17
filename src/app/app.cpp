@@ -3682,23 +3682,24 @@ void App::RenderStreamSettings(double t) {
     ui_.Text(L"Stream settings", {kContentX, 84.0f, w - 64.0f, 120.0f}, 22.0f,
              th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
 
-    // Categories, like the settings screen: one strip, one page at a time.
-    const wchar_t* tabs[] = {L"Stream", L"DLSS", L"Neural", L"Legacy"};
+    // The same categories as Settings; every control applies live.
+    const wchar_t* tabs[] = {L"Stream", L"DLSS", L"Neural",
+                             L"Audio",  L"Controller", L"Legacy"};
     float tx = kContentX;
-    for (int i = 0; i < 4; ++i) {
-        const D2D1_RECT_F r{tx, 132.0f, tx + 118.0f, 166.0f};
+    for (int i = 0; i < 6; ++i) {
+        const D2D1_RECT_F r{tx, 132.0f, tx + 104.0f, 166.0f};
         const bool selected = overlay_tab_ == i;
         if (selected) {
             ui_.FillRounded(r, 10.0f, th::Rgba(th::kAccent, 0.22f));
         }
-        ui_.Text(tabs[i], {r.left, r.top, r.right, r.bottom}, 13.0f,
+        ui_.Text(tabs[i], {r.left, r.top, r.right, r.bottom}, 12.5f,
                  th::Rgba(selected ? th::kInk : th::kInkDim), DWRITE_FONT_WEIGHT_SEMI_BOLD,
                  DWRITE_TEXT_ALIGNMENT_CENTER);
         AddHit(Hit::OverlayTab, i, r);
-        tx += 126.0f;
+        tx += 112.0f;
     }
 
-    const float row = 48.0f;
+    const float row = 46.0f;
     float y = 184.0f;
 
     switch (overlay_tab_) {
@@ -3707,30 +3708,27 @@ void App::RenderStreamSettings(double t) {
                          {L"K (Transformer 1, stable)", L"L (Transformer 2, best)",
                           L"M (Transformer 2, sharp)"},
                          profile_.dlss_preset == 12 ? 1 : (profile_.dlss_preset == 13 ? 2 : 0),
-                         y, W_DlssPreset, DlssAvailable() && profile_.neural_sr > 0);
+                         y, W_DlssPreset, DlssAvailable());
             y += row;
             DrawDropdown(L"DLSS mode",
                          {L"Ultra Performance (33%)", L"Performance (50%)",
                           L"Balanced (58%)", L"Quality (66%)", L"Ultra Quality (77%)",
                           L"DLAA (100% - AI anti-aliasing)"},
                          std::clamp(profile_.dlss_mode, 0, 5), y, W_DlssMode,
-                         DlssAvailable() && profile_.neural_sr > 0);
+                         DlssAvailable());
             y += row;
-            ui_.Text(L"Percentage of the output resolution fed to DLSS; the 1080p stream is "
-                     L"the upper limit.",
+            ui_.Text(L"Percentage of the output resolution fed to DLSS; DLAA runs at the frame "
+                     L"size with AI AA.",
                      {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 11.5f, th::Rgba(th::kMuted));
-            y += 28.0f;
+            y += 30.0f;
             if (profile_.neural_sr > 0 && dlss_ready_) {
                 wchar_t text[224];
-                swprintf_s(text, L"DLSS SR active  -  %dx%d -> %dx%d  -  %.1f ms",
-                           dlss_in_w_, dlss_in_h_, dlss_sr_.out_width(),
-                           dlss_sr_.out_height(), dlss_sr_.last_ms());
+                swprintf_s(text, L"DLSS %s active  -  %dx%d -> %dx%d  -  %.1f ms",
+                           profile_.dlss_mode == 5 ? L"DLAA" : L"SR", dlss_in_w_,
+                           dlss_in_h_, dlss_sr_.out_width(), dlss_sr_.out_height(),
+                           dlss_sr_.last_ms());
                 ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
                          th::Rgba(th::kMuted));
-                y += 26.0f;
-            } else if (!dlss_note_.empty()) {
-                ui_.Text(dlss_note_.c_str(), {kContentX, y + 2.0f, w - 64.0f, y + 26.0f},
-                         12.0f, th::Rgba(th::kMuted));
                 y += 26.0f;
             }
             break;
@@ -3788,7 +3786,106 @@ void App::RenderStreamSettings(double t) {
             }
             break;
         }
-        case 3: {  // Legacy
+        case 3: {  // Audio
+            std::vector<std::wstring> devices;
+            if (audio_devices_.empty()) {
+                devices.push_back(L"System default");
+            }
+            for (const audio::DeviceInfo& device : audio_devices_) {
+                std::wstring name = Widen(device.name);
+                if (device.is_default) {
+                    name += L"  (default)";
+                } else if (device.is_controller) {
+                    name += L"  (controller)";
+                }
+                devices.push_back(name);
+            }
+            const int selected_device =
+                profile_.audio_device_id.empty()
+                    ? 0
+                    : std::clamp(audio_device_ + 1, 0, static_cast<int>(devices.size()) - 1);
+            DrawDropdown(L"Output device", devices, selected_device, y, W_AudioDevice);
+            y += row;
+            DrawDropdown(L"Buffer", {L"10 ms", L"20 ms", L"30 ms", L"40 ms"},
+                         BufferIndex(audio_buffer_ms_), y, W_AudioBuffer);
+            y += row;
+            DrawButton(L"Play test tone", {kContentX, y + 6.0f, kContentX + 220.0f, y + 46.0f},
+                       W_TestTone, false);
+            y += row;
+            std::wstring info;
+            if (audio_.is_open()) {
+                wchar_t buffer[256];
+                swprintf_s(buffer, L"%s   -   %.0f ms   -   underruns %d",
+                           Widen(audio_.format_text()).c_str(), audio_.latency_ms(),
+                           audio_.underruns());
+                info = buffer;
+            } else {
+                info = audio_failed_ ? L"Could not open the device (busy or removed)"
+                                     : L"Not started";
+            }
+            ui_.Text(info.c_str(), {kContentX, y, w - 64.0f, y + 40.0f}, 12.0f,
+                     th::Rgba(th::kMuted));
+            y += 26.0f;
+            break;
+        }
+        case 4: {  // Controller
+            DrawDropdown(L"Input source", {kInputSourceNames[0], kInputSourceNames[1],
+                                           kInputSourceNames[2]},
+                         input_source_, y, W_InputSource);
+            y += row;
+            {
+                int rate_index = 2;
+                const int rates[] = {60, 125, 250, 500, 1000};
+                for (int i = 0; i < 5; ++i) {
+                    if (rates[i] == pad_rate_hz_) {
+                        rate_index = i;
+                    }
+                }
+                DrawDropdown(L"Report rate", {L"60 Hz", L"125 Hz", L"250 Hz", L"500 Hz",
+                                              L"1000 Hz"},
+                             rate_index, y, W_PadRate);
+            }
+            y += row;
+            DrawDropdown(L"Console rumble", {L"On", L"Off"}, console_rumble_ ? 0 : 1, y,
+                         W_ConsoleRumble);
+            y += row;
+            DrawDropdown(L"Console triggers", {L"On", L"Off"}, console_triggers_ ? 0 : 1, y,
+                         W_ConsoleTriggers);
+            y += row;
+            DrawDropdown(L"Motion", {L"On", L"Off"}, motion_ ? 0 : 1, y, W_Motion);
+            y += row;
+            DrawDropdown(L"Lightbar",
+                         {kLightbarNames[0], kLightbarNames[1], kLightbarNames[2],
+                          kLightbarNames[3], kLightbarNames[4], kLightbarNames[5],
+                          kLightbarNames[6], kLightbarNames[7], kLightbarNames[8]},
+                         lightbar_index_, y, W_Lightbar);
+            y += row;
+            DrawDropdown(L"Adaptive trigger",
+                         {kTriggerNames[0], kTriggerNames[1], kTriggerNames[2], kTriggerNames[3],
+                          kTriggerNames[4], kTriggerNames[5], kTriggerNames[6], kTriggerNames[7]},
+                         trigger_effect_, y, W_Trigger);
+            y += row;
+            DrawDropdown(L"Trigger strength", {L"1", L"2", L"3", L"4", L"5", L"6", L"7", L"8"},
+                         trigger_strength_ - 1, y, W_Strength);
+            y += row;
+            DrawDropdown(L"Player LEDs",
+                         {kPlayerLedNames[0], kPlayerLedNames[1], kPlayerLedNames[2],
+                          kPlayerLedNames[3], kPlayerLedNames[4], kPlayerLedNames[5],
+                          kPlayerLedNames[6]},
+                         player_leds_, y, W_PlayerLeds);
+            y += row;
+            DrawDropdown(L"Mic LED", {kMicLedNames[0], kMicLedNames[1], kMicLedNames[2]},
+                         mic_led_, y, W_MicLed);
+            y += row;
+            DrawButton(L"Rumble test", {kContentX, y + 4.0f, kContentX + 220.0f, y + 40.0f},
+                       W_Rumble, false);
+            y += row;
+            ui_.Text(PadStatus(pad_.state()).c_str(), {kContentX, y, w - 64.0f, y + 24.0f},
+                     12.0f, th::Rgba(th::kMuted));
+            y += 24.0f;
+            break;
+        }
+        case 5: {  // Legacy
             ui_.Text(L"Not maintained, still functional: RTX VSR and the VSR preset.",
                      {kContentX, y + 2.0f, w - 64.0f, y + 40.0f}, 12.0f, th::Rgba(th::kMuted));
             y += 44.0f;
@@ -3796,7 +3893,7 @@ void App::RenderStreamSettings(double t) {
                          W_Vsr, VsrAvailable());
             y += row;
             DrawButton(L"Neural Ultra preset (VSR Ultra + 2160p)",
-                       {kContentX, y + 6.0f, kContentX + 380.0f, y + 50.0f}, W_NeuralMax, false);
+                       {kContentX, y + 6.0f, kContentX + 380.0f, y + 46.0f}, W_NeuralMax, false);
             y += row;
             break;
         }
@@ -3821,18 +3918,20 @@ void App::RenderStreamSettings(double t) {
             }
             y += row;
             DrawDropdown(L"DLSS Frame Generation", {L"Off", L"2x", L"3x", L"4x", L"5x", L"6x"},
-                         profile_.dlss_fg >= 2 ? std::clamp(profile_.dlss_fg - 1, 1, 5) : 0,
+                         profile_.dlss_fg >= 2
+                             ? std::clamp(profile_.dlss_fg - 1, 1, 5)
+                             : 0,
                          y, W_DlssFg);
             y += row;
             DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
+            y += row;
+            DrawDropdown(L"NVIDIA Reflex", {L"Off", L"On", L"On + Boost"}, profile_.reflex, y,
+                         W_Reflex);
             y += row;
             DrawDropdown(L"Frame buffer",
                          {L"0 (fixed, lowest)", L"1 (adaptive)", L"2 (adaptive)",
                           L"3 (adaptive max)"},
                          stream_buffer_, y, W_FrameBuffer);
-            y += row;
-            DrawDropdown(L"NVIDIA Reflex", {L"Off", L"On", L"On + Boost"}, profile_.reflex, y,
-                         W_Reflex);
             y += row;
             DrawDropdown(L"Video decoder (next session)",
                          {L"Auto", L"D3D11VA", L"D3D12VA", L"Vulkan", L"DXVA2",
@@ -3843,10 +3942,10 @@ void App::RenderStreamSettings(double t) {
         }
     }
 
-    DrawButton(L"Resume", {kContentX, y + 8.0f, kContentX + 200.0f, y + 52.0f},
+    DrawButton(L"Resume", {kContentX, y + 6.0f, kContentX + 200.0f, y + 50.0f},
                W_ResumeOverlay, true);
-    DrawButton(L"Disconnect", {kContentX + 220.0f, y + 8.0f, kContentX + 420.0f, y + 52.0f},
+    DrawButton(L"Disconnect", {kContentX + 220.0f, y + 6.0f, kContentX + 420.0f, y + 50.0f},
                W_Disconnect, false);
-    DrawHints(L"Tab / Esc   resume      categories above      sliders drag", 1.0f);
+    DrawHints(L"Tab / Esc   resume      categories above      everything applies live", 1.0f);
     DrawPopup();
 }
