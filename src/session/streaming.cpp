@@ -234,15 +234,10 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
 
 void Streaming::Stop() {
     session_live_.store(false);
-    if (initialised_) {
-        // Tell the decode thread to stop requesting IDRs, then tear down the
-        // session. chiaki_session_join() guarantees VideoCallback is done, so
-        // the queue is stable before it is drained below.
-        chiaki_session_stop(&session_);
-        chiaki_session_join(&session_);
-        chiaki_session_fini(&session_);
-        initialised_ = false;
-    }
+
+    // Stop the decode thread first: it references decoder_ and may be in a
+    // chiaki IDR request. Draining it before session teardown removes both
+    // races.
     {
         std::lock_guard<std::mutex> lock(video_mutex_);
         video_run_ = false;
@@ -251,6 +246,14 @@ void Streaming::Stop() {
     video_cv_.notify_all();
     if (decode_thread_.joinable()) {
         decode_thread_.join();
+    }
+
+    std::lock_guard<std::mutex> api(api_mutex_);
+    if (initialised_) {
+        chiaki_session_stop(&session_);
+        chiaki_session_join(&session_);
+        chiaki_session_fini(&session_);
+        initialised_ = false;
     }
     decoder_.Close();
 
@@ -692,6 +695,7 @@ double Streaming::fps() const {
 }
 
 void Streaming::SendController(const PadState& pad) {
+    std::lock_guard<std::mutex> api(api_mutex_);
     if (!initialised_) {
         return;
     }

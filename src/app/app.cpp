@@ -466,6 +466,12 @@ bool App::Init(Win32Window* window) {
         return false;
     }
 
+    // HID device enumeration (every two seconds while no controller is
+    // attached) can block for ~60 ms. That work must never run on the
+    // presentation thread, so the pad loop runs for the whole app lifetime,
+    // not just during a stream.
+    StartPadThread();
+
     // The logo intro plays first. Discovery and the NVIDIA/NGX startup are
     // kicked off when the boot screen appears, after the logo.
     return true;
@@ -635,7 +641,9 @@ void App::TickBoot(double t) {
     const double dt = boot_last_ < 0.0 ? 1.0 / 60.0 : std::clamp(t - boot_last_, 0.0, 0.1);
     boot_last_ = t;
     boot_status_alpha_ = std::min(1.0, boot_status_alpha_ + dt / 0.20);
-    pad_.Poll();
+    if (!pad_run_.load()) {
+        pad_.Poll();
+    }
 
     size_t worker_index = 0;
     bool worker_done = false;
@@ -1199,7 +1207,7 @@ void App::HandlePad() {
         return;
     }
 
-    const PadState& pad = pad_.state();
+    const PadState pad = pad_.snapshot();
     if (!pad.connected) {
         return;
     }
@@ -2790,9 +2798,11 @@ void App::ToggleFullscreen() {
     ::SetForegroundWindow(hwnd);
 }
 void App::DisconnectStream() {
-    StopPadThread();
-    streaming_.Stop();
+    // Mark the session dead before stopping it: the pad thread keeps running
+    // (it owns HID polling for the whole app) and must not send into a session
+    // that is being torn down.
     stream_active_ = false;
+    streaming_.Stop();
     pending_connect_ = PendingConnect::None;
     feedback_version_ = 0;
     pad_.SetConsoleFeedback(PadConsoleFeedback{});
@@ -3388,9 +3398,8 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
 
         if (streaming_.state() == session::StreamState::Failed) {
             const std::string reason = streaming_.message();
-            StopPadThread();
-            streaming_.Stop();
             stream_active_ = false;
+            streaming_.Stop();
             pad_.SetConsoleFeedback(PadConsoleFeedback{});
             cursor_hidden_ = false;
             window_->SetCursorHidden(false);

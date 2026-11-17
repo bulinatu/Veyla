@@ -107,6 +107,11 @@ private:
     ChiakiConnectInfo info_{};
     media::Decoder decoder_;
 
+    // Serialises session start/stop against controller sends from the pad
+    // thread. Without it, a disconnect could tear the session down while the
+    // 250 Hz pad loop is inside chiaki_session_set_controller_state.
+    std::mutex api_mutex_;
+
     std::string host_storage_;
     std::atomic<StreamState> state_{StreamState::Idle};
     mutable std::mutex mutex_;
