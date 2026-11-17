@@ -292,6 +292,11 @@ enum WidgetId {
     W_HudStream = 83,
     W_HudNet = 84,
     W_HudReset = 85,
+    W_PsnLogin = 90,
+    W_PsnOpen,
+    W_PsnPaste,
+    W_PsnSave,
+    W_PsnCancel,
 };
 
 constexpr float kContentX = 344.0f;
@@ -866,6 +871,20 @@ void App::DispatchClick() {
             continue;
         }
 
+        if (psn_modal_) {
+            const bool modal_hit =
+                it->hit == Hit::PsnUrlField || it->hit == Hit::PsnPanel ||
+                (it->hit == Hit::Button &&
+                 (it->index == W_PsnOpen || it->index == W_PsnPaste ||
+                  it->index == W_PsnSave || it->index == W_PsnCancel)) ||
+                it->hit == Hit::Minimize || it->hit == Hit::Maximize ||
+                it->hit == Hit::Close;
+            if (!modal_hit) {
+                ClosePsnModal();
+                return;
+            }
+        }
+
         if (open_dropdown_ >= 0 && it->hit != Hit::DropdownItem) {
             if (it->hit == Hit::Dropdown) {
                 open_dropdown_ = (open_dropdown_ == it->index) ? -1 : it->index;
@@ -943,6 +962,23 @@ void App::DispatchClick() {
                     if (pin_.size() == 8) {
                         pairing_.Start(profile_, static_cast<uint32_t>(std::stoul(pin_)));
                     }
+                } else if (it->index == W_PsnLogin) {
+                    StartPsnLogin();
+                } else if (it->index == W_PsnOpen) {
+                    std::string detail;
+                    if (!session::OpenPsnLoginPage(detail)) {
+                        psn_note_ = Widen(detail);
+                        psn_note_ok_ = false;
+                    } else {
+                        psn_note_ = L"Browser opened. Sign in, then paste the final URL.";
+                        psn_note_ok_ = false;
+                    }
+                } else if (it->index == W_PsnPaste) {
+                    PastePsnClipboard();
+                } else if (it->index == W_PsnSave) {
+                    SubmitPsnLogin();
+                } else if (it->index == W_PsnCancel) {
+                    ClosePsnModal();
                 } else {
                     // Buttons whose whole action lives in the widget switch
                     // (overlay pages, the Neural Ultra preset). Without this a
@@ -953,6 +989,11 @@ void App::DispatchClick() {
                 break;
             case Hit::PinField:
                 pin_focus_ = true;
+                break;
+            case Hit::PsnUrlField:
+                psn_url_focus_ = true;
+                break;
+            case Hit::PsnPanel:
                 break;
             case Hit::Minimize:
                 if (window_) {
@@ -974,6 +1015,9 @@ void App::DispatchClick() {
         }
         return;
     }
+    if (psn_modal_) {
+        ClosePsnModal();
+    }
     open_dropdown_ = -1;
     pin_focus_ = false;
 }
@@ -986,6 +1030,20 @@ void App::HandleKey(int vk) {
     if (booting_) {
         if (vk == VK_ESCAPE) {
             quit_ = true;
+        }
+        return;
+    }
+    if (psn_modal_) {
+        if (vk == VK_ESCAPE) {
+            ClosePsnModal();
+        } else if (vk == VK_RETURN) {
+            if (psn_note_ok_) {
+                ClosePsnModal();
+            } else {
+                SubmitPsnLogin();
+            }
+        } else if (vk == 'V' && (::GetKeyState(VK_CONTROL) & 0x8000) != 0) {
+            PastePsnClipboard();
         }
         return;
     }
@@ -2328,6 +2386,9 @@ App::~App() {
     if (discover_thread_.joinable()) {
         discover_thread_.join();
     }
+    if (psn_thread_.joinable()) {
+        psn_thread_.join();
+    }
     StopNrThread();
     StopPadThread();
 }
@@ -2819,14 +2880,30 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
 
     if (window_) {
         const int ch = window_->ConsumeChar();
-        if (ch != 0 && pin_focus_) {
-            if (ch >= '0' && ch <= '9' && pin_.size() < 8) {
-                pin_ += static_cast<char>(ch);
-            } else if (ch == 8 && !pin_.empty()) {
-                pin_.pop_back();
+        if (ch != 0) {
+            if (psn_modal_) {
+                if (!psn_busy_) {
+                    if (ch == 8) {
+                        if (!psn_url_input_.empty()) {
+                            psn_url_input_.pop_back();
+                            psn_note_ok_ = false;
+                        }
+                    } else if (ch >= 32 && ch < 127 && psn_url_input_.size() < 8192) {
+                        psn_url_input_.push_back(static_cast<char>(ch));
+                        psn_note_ok_ = false;
+                    }
+                }
+            } else if (pin_focus_) {
+                if (ch >= '0' && ch <= '9' && pin_.size() < 8) {
+                    pin_ += static_cast<char>(ch);
+                } else if (ch == 8 && !pin_.empty()) {
+                    pin_.pop_back();
+                }
             }
         }
     }
+
+    TickPsnLogin();
 
     pairing_.Poll();
     if (pairing_.state() == session::PairState::Success) {
@@ -2920,6 +2997,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
             case Screen::StreamSettings:
                 RenderStreamSettings(time_seconds);
                 break;
+        }
+        if (psn_modal_) {
+            RenderPsnModal();
         }
         RenderWindowChrome();
         ui_.EndFrame();
@@ -3285,6 +3365,228 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         window_->Show();
         window_shown_ = true;
     }
+}
+
+void App::StartPsnLogin() {
+    if (psn_busy_) {
+        return;
+    }
+    psn_modal_ = true;
+    psn_url_focus_ = true;
+    psn_url_input_.clear();
+    psn_note_.clear();
+    psn_note_ok_ = false;
+    psn_result_ok_ = false;
+    pin_focus_ = false;
+    open_dropdown_ = -1;
+
+    std::string detail;
+    if (!session::OpenPsnLoginPage(detail)) {
+        psn_note_ = Widen(detail);
+        psn_note_ok_ = false;
+    } else {
+        psn_note_ = L"Sign in in the browser, then paste the final redirect URL.";
+    }
+}
+
+void App::ClosePsnModal() {
+    psn_modal_ = false;
+    psn_url_focus_ = false;
+}
+
+void App::PastePsnClipboard() {
+    if (!window_) {
+        return;
+    }
+    if (!::OpenClipboard(window_->hwnd())) {
+        psn_note_ = L"Could not open the clipboard. Try again.";
+        psn_note_ok_ = false;
+        return;
+    }
+
+    std::string text;
+    if (HANDLE data = ::GetClipboardData(CF_UNICODETEXT)) {
+        if (auto* wide = static_cast<const wchar_t*>(::GlobalLock(data))) {
+            const int size = ::WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr,
+                                                  nullptr);
+            if (size > 1) {
+                text.resize(static_cast<size_t>(size - 1));
+                ::WideCharToMultiByte(CP_UTF8, 0, wide, -1, text.data(), size, nullptr,
+                                      nullptr);
+            }
+            ::GlobalUnlock(data);
+        }
+    }
+    ::CloseClipboard();
+
+    const auto first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        psn_note_ = L"Clipboard is empty.";
+        psn_note_ok_ = false;
+        return;
+    }
+    const auto last = text.find_last_not_of(" \t\r\n");
+    psn_url_input_ = text.substr(first, last - first + 1);
+    psn_url_focus_ = true;
+    psn_note_ = L"Link pasted. Press Save to fetch the account ID.";
+    psn_note_ok_ = false;
+}
+
+void App::SubmitPsnLogin() {
+    if (psn_busy_) {
+        return;
+    }
+    if (psn_url_input_.empty()) {
+        psn_note_ = L"Paste the redirect URL first.";
+        psn_note_ok_ = false;
+        return;
+    }
+    if (psn_thread_.joinable()) {
+        psn_thread_.join();
+    }
+
+    psn_busy_ = true;
+    psn_done_.store(false);
+    psn_result_ok_ = false;
+    psn_note_ = L"Contacting PlayStation...";
+    psn_note_ok_ = false;
+
+    const std::string input = psn_url_input_;
+    psn_thread_ = std::thread([this, input] {
+        session::PsnAccount account;
+        std::string detail;
+        const bool ok = session::PsnCompleteLogin(input, account, detail);
+        {
+            std::lock_guard<std::mutex> lock(psn_mutex_);
+            psn_result_ = account;
+            psn_detail_ = detail;
+            psn_result_ok_ = ok;
+        }
+        psn_done_.store(true);
+    });
+}
+
+void App::TickPsnLogin() {
+    if (!psn_busy_ || !psn_done_.load()) {
+        return;
+    }
+    if (psn_thread_.joinable()) {
+        psn_thread_.join();
+    }
+    psn_busy_ = false;
+    psn_done_.store(false);
+
+    session::PsnAccount account;
+    std::string detail;
+    bool ok = false;
+    {
+        std::lock_guard<std::mutex> lock(psn_mutex_);
+        account = psn_result_;
+        detail = psn_detail_;
+        ok = psn_result_ok_;
+    }
+
+    if (ok) {
+        profile_.psn_account_id = account.account_id;
+        profile_.psn_numeric_id = account.numeric_id;
+        SaveProfile();
+        psn_note_ = L"PSN account linked: " + Widen(account.numeric_id) +
+                    L". The ID is saved permanently.";
+        psn_note_ok_ = true;
+        session_note_ = "PSN account linked: " + account.numeric_id;
+    } else {
+        psn_note_ = Widen(detail);
+        psn_note_ok_ = false;
+    }
+}
+
+void App::RenderPsnModal() {
+    const float w = ui_w_;
+    const float h = ui_h_;
+    ui_.FillRect({0.0f, 0.0f, w, h}, th::Rgba(0x000000, 0.62f));
+
+    const float panel_w = 760.0f;
+    const float panel_h = 470.0f;
+    const D2D1_RECT_F panel{(w - panel_w) * 0.5f, (h - panel_h) * 0.5f,
+                            (w + panel_w) * 0.5f, (h + panel_h) * 0.5f};
+    ui_.FillRounded(panel, 18.0f, th::Rgba(0x120A20, 0.98f));
+    ui_.StrokeRounded(panel, 18.0f, th::Rgba(0xFFFFFF, 0.12f), 1.0f);
+    AddHit(Hit::PsnPanel, -1, panel);
+
+    ui_.Text(L"PSN account", {panel.left + 36.0f, panel.top + 24.0f, panel.right - 36.0f,
+                              panel.top + 60.0f},
+             24.0f, th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    ui_.Text(L"Sign in with your PlayStation account. After the blank redirect page opens, "
+             L"copy its URL and paste it below.",
+             {panel.left + 36.0f, panel.top + 68.0f, panel.right - 36.0f, panel.top + 116.0f},
+             12.5f, th::Rgba(th::kMuted));
+
+    DrawButton(L"Open browser", {panel.left + 36.0f, panel.top + 128.0f,
+                                 panel.left + 196.0f, panel.top + 172.0f},
+               W_PsnOpen, false);
+    DrawButton(L"Paste link", {panel.left + 212.0f, panel.top + 128.0f,
+                               panel.left + 356.0f, panel.top + 172.0f},
+               W_PsnPaste, false);
+
+    ui_.Text(L"Redirect URL", {panel.left + 36.0f, panel.top + 184.0f,
+                               panel.right - 36.0f, panel.top + 204.0f},
+             10.5f, th::Rgba(th::kMuted, 0.9f), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+
+    const D2D1_RECT_F field{panel.left + 36.0f, panel.top + 208.0f, panel.right - 36.0f,
+                            panel.top + 256.0f};
+    ui_.FillRounded(field, 10.0f,
+                    th::Rgba(0xFFFFFF, psn_url_focus_ ? 0.10f : 0.06f));
+    ui_.StrokeRounded(field, 10.0f,
+                      th::Rgba(psn_url_focus_ ? th::kAccent : 0xFFFFFF,
+                               psn_url_focus_ ? 0.55f : 0.10f),
+                      1.0f);
+    AddHit(Hit::PsnUrlField, -1, field);
+
+    std::wstring shown = Widen(psn_url_input_);
+    if (shown.size() > 86) {
+        shown = L"..." + shown.substr(shown.size() - 86);
+    }
+    if (shown.empty()) {
+        ui_.Text(L"Paste the URL from the blank redirect page here",
+                 {field.left + 14.0f, field.top, field.right - 14.0f, field.bottom}, 12.0f,
+                 th::Rgba(th::kMuted, 0.75f));
+    } else {
+        ui_.Text(shown.c_str(), {field.left + 14.0f, field.top, field.right - 14.0f,
+                                 field.bottom},
+                 12.0f, th::Rgba(th::kInk, 0.95f));
+    }
+    if (psn_url_focus_ && !psn_busy_ && std::fmod(clock_, 1.0) < 0.55) {
+        const float caret_x =
+            std::min(field.right - 12.0f,
+                     field.left + 14.0f + ui_.TextWidth(shown.c_str(), 12.0f));
+        ui_.Line({caret_x, field.top + 9.0f}, {caret_x, field.bottom - 9.0f},
+                 th::Rgba(th::kAccent, 0.9f), 1.2f);
+    }
+
+    if (psn_busy_) {
+        ui_.StrokeArc(panel.right - 56.0f, panel.top + 232.0f, 10.0f,
+                      static_cast<float>(clock_ * 5.0), 4.6f,
+                      th::Rgba(th::kAccent, 0.9f), 2.0f);
+    }
+
+    ui_.Text(psn_note_.c_str(), {panel.left + 36.0f, panel.top + 270.0f,
+                                 panel.right - 36.0f, panel.top + 318.0f},
+             12.0f, th::Rgba(psn_note_ok_ ? th::kOnline : th::kMuted, 0.95f));
+
+    ui_.Text(L"Only the PSN account ID is stored locally, in session.json. The browser "
+             L"token is never saved.",
+             {panel.left + 36.0f, panel.bottom - 104.0f, panel.right - 36.0f,
+              panel.bottom - 82.0f},
+             10.5f, th::Rgba(th::kMuted, 0.7f));
+
+    const float buttons_y = panel.bottom - 72.0f;
+    DrawButton(psn_busy_ ? L"Checking..."
+                         : (psn_note_ok_ ? L"Done" : L"Save account ID"),
+               {panel.left + 36.0f, buttons_y, panel.left + 260.0f, buttons_y + 44.0f},
+               psn_note_ok_ ? W_PsnCancel : W_PsnSave, true);
+    DrawButton(L"Cancel",
+               {panel.left + 276.0f, buttons_y, panel.left + 420.0f, buttons_y + 44.0f},
+               W_PsnCancel, false);
 }
 
 void App::RenderTopBar() {
@@ -4186,8 +4488,23 @@ void App::RenderSettings(double t) {
             DrawInfoRow(L"Pairing",
                         profile_.needs_pairing() ? L"Needed (8-digit console code)" : L"Paired", y);
             y += kRowH;
-            DrawInfoRow(L"PSN account",
-                        profile_.psn_account_id.empty() ? L"Not set" : L"Imported", y);
+            DrawSettingLabel(L"PSN account", y, true);
+            {
+                const float right = w - 64.0f;
+                const bool linked = !profile_.psn_account_id.empty();
+                if (linked) {
+                    const std::wstring linked_text =
+                        profile_.psn_numeric_id.empty()
+                            ? std::wstring(L"Linked")
+                            : L"Linked: " + Widen(profile_.psn_numeric_id);
+                    ui_.Text(linked_text.c_str(), {kContentX, y + 30.0f, right - 260.0f,
+                                                   y + 54.0f},
+                             11.5f, th::Rgba(th::kMuted));
+                }
+                DrawButton(linked ? L"Re-link PSN" : L"Sign in with PSN",
+                           {right - 240.0f, y + 8.0f, right, y + 52.0f}, W_PsnLogin,
+                           !linked);
+            }
             y += kRowH;
             DrawInfoRow(L"Stream defaults",
                         Widen(std::to_string(profile_.bitrate_kbps / 1000) + " Mbps · " +

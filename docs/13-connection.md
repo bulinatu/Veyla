@@ -25,6 +25,31 @@ not TCP 9295.
 
 ---
 
+## PSN account ID (browser sign-in)
+
+Pairing needs the 8-byte PSN account ID, not the decimal number users see.
+`Settings > Connection > PSN account` has a dedicated **Sign in with PSN**
+button (shown as **Re-link PSN** when an ID is already stored):
+
+1. The button opens Sony's PSN OAuth page in the default browser using the
+   public Remote Play client constants (the same client chiaki-ng uses).
+2. Sign in. The browser ends on a blank
+   `https://remoteplay.dl.playstation.net/remoteplay/redirect?code=...` page.
+3. Copy the whole URL from the address bar, click **Paste link** in the app
+   (clipboard is read locally), then **Save account ID**.
+4. The app exchanges the code at
+   `https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/token`, reads
+   `user_id` from the token's account endpoint, converts the decimal id to
+   **8 bytes little-endian**, base64-encodes it, and stores
+   `psn_account_id` + `psn_numeric_id` in `session.json`.
+
+The account ID persists indefinitely and is what the Pair button uses. No
+access/refresh token is saved; the browser token is only used for the two
+requests above. If Sony returns `HTTP 400 invalid_grant`, the code expired or
+was already used: open the browser again and paste the fresh redirect URL.
+
+---
+
 ## Wake-up packet
 
 A console in rest mode still answers UDP discovery (9302 for PS5, 987 for PS4)

@@ -24,7 +24,7 @@ Five categories in a left sidebar, each with its own settings — nothing is lum
 | Display | Upscaler, upscale target (window/1080p/1440p/2160p), latency HUD, frame generation (NVIDIA VFG 2x), video decoder (Auto/D3D11VA/D3D12VA/Vulkan/DXVA2/CUDA/Software), HDR (startup) |
 | Audio | Output device, buffer size, test tone, live format/latency/underruns |
 | Controller | Input source, lightbar, adaptive trigger, strength, player LEDs, mic LED, rumble |
-| Connection | Console, address, pairing, PSN account, stream defaults, reachability test |
+| Connection | Console, address, pairing, PSN account browser sign-in (stores the account ID), stream defaults, reachability test |
 | About | Version, description, legal note |
 
 Every setting is a **dropdown** (or a button), not a key cycle. Dropdowns open a popup list, close on outside click, and show the current value with ellipsis when it does not fit.

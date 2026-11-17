@@ -25,6 +25,7 @@
 #include "platform/gamepad.h"
 #include "session/pairing.h"
 #include "session/discovery.h"
+#include "session/psn_auth.h"
 #include "session/streaming.h"
 #include "session/profile.h"
 #include "ui/ui_renderer.h"
@@ -77,6 +78,8 @@ private:
         OverlayTab,
         Button,
         PinField,
+        PsnUrlField,
+        PsnPanel,
         Minimize,
         Maximize,
         Close,
@@ -120,6 +123,13 @@ private:
     void DrawButton(const wchar_t* label, const D2D1_RECT_F& rect, int id, bool primary);
     void DrawPinRow(float y);
     void DrawPopup();
+    void RenderPsnModal();
+
+    void StartPsnLogin();
+    void SubmitPsnLogin();
+    void ClosePsnModal();
+    void PastePsnClipboard();
+    void TickPsnLogin();
 
     void AddHit(Hit hit, int index, const D2D1_RECT_F& rect);
     void DispatchClick();
@@ -387,6 +397,20 @@ private:
     session::Pairing pairing_;
     std::string pin_;
     bool pin_focus_ = false;
+
+    // PSN browser sign-in (account id retrieval)
+    bool psn_modal_ = false;
+    bool psn_url_focus_ = true;
+    bool psn_busy_ = false;
+    bool psn_result_ok_ = false;
+    bool psn_note_ok_ = false;
+    std::string psn_url_input_;
+    std::wstring psn_note_;
+    std::thread psn_thread_;
+    std::atomic<bool> psn_done_{false};
+    std::mutex psn_mutex_;
+    session::PsnAccount psn_result_;
+    std::string psn_detail_;
 };
 
 }  // namespace brp
