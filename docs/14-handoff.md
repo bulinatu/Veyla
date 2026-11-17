@@ -198,10 +198,10 @@ Verified: audio header 2ch/48kHz received during a live session; video 1080p60 a
    the Rumble test; firmware 0x0630 now uses the new rumble path.
 2. RTX VSR: user visual test at 1440p/2160p (AI High vs FSR1); optional 10-bit
    RGB10A2 path once the decoder keeps 10-bit surfaces (docs/17).
-3. DLSSNR: live stream test (NR worker is connected at 1080p; settings are
-   under Settings > Neural). Then move `NvDlssnr::Process` to its own thread so
-   a 20-25 ms worker spike does not stall the UI, and wire the 2/3/4-pass
-   command. See `docs/18-neural-nr-status.md`.
+3. DLSSNR: live stream test (NR worker is connected at 1080p, on its own thread,
+   with live RNSZ settings and the Boost/stack-pass ladder; see
+   `docs/18-neural-nr-status.md`). Check NR on/off and full vs Boost during a
+   real stream; the overlay Neural page also needs a live pass.
 4. Frame generation: worker-owned D3D11 device + shared textures (the same-device
    worker failed with a CUDA interop device-ordinal crash; see docs/15).
 5. DualSense haptic audio (USB only): decode the console haptics Opus stream and

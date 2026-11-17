@@ -36,6 +36,8 @@ New-Item -ItemType Directory -Force -Path $Dest | Out-Null
 # The worker also loads the forwarder and, depending on the build, Spout and
 # the FG snippet. Copy the whole native folder to preserve the vendor layout.
 Copy-Item (Join-Path $native "*") $Dest -Recurse -Force
+# The vendor folder ships a .bak copy of the runtime; it is dead weight.
+Get-ChildItem $Dest -Filter *.bak -File -ErrorAction SilentlyContinue | Remove-Item -Force
 Write-Host "NGX NR runtime installed to $Dest"
 
 if (-not [string]::IsNullOrWhiteSpace($AppDir)) {

@@ -5,7 +5,10 @@
 #include <d2d1_1.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <deque>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -140,9 +143,16 @@ private:
 
     bool NrAvailable() const;
     bool EnsureNr();
+    bool ReconfigureNr();
     std::wstring FindNrRuntime() const;
     void ApplyNrSettings();
     void DisableNr();
+    void StartNrThread();
+    void StopNrThread();
+    void NrThreadMain();
+    void SubmitNrFrame(media::DecodedFrame& frame);
+    bool TakeNrResult(int& width, int& height, bool& pq);
+    bool NrFailed(std::string& error);
 
     Win32Window* window_ = nullptr;
     Presenter presenter_;
@@ -262,6 +272,28 @@ private:
     int nr_in_h_ = 0;
     std::wstring nr_note_;
     std::vector<uint8_t> nr_out_;
+
+    // Off-thread NR: a one-frame input queue and a latest-result slot. The
+    // presentation loop never waits for the NGX worker; when the worker is
+    // late its frame is skipped instead of stalling the UI.
+    struct NrFrame {
+        std::vector<uint8_t> rgba;
+        int width = 0;
+        int height = 0;
+        bool pq = false;
+        double ms = 0.0;
+    };
+    std::thread nr_thread_;
+    std::mutex nr_mutex_;
+    std::condition_variable nr_cv_;
+    bool nr_run_ = false;
+    std::optional<NrFrame> nr_pending_;
+    std::optional<NrFrame> nr_latest_;
+    bool nr_failed_ = false;
+    std::string nr_error_;
+    uint64_t nr_dropped_ = 0;
+    uint64_t nr_shown_ = 0;
+    double nr_last_ms_ = 0.0;
 
     // Connect flow: check the control port, wake the console if it is asleep,
     // then start the session.

@@ -377,6 +377,7 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"dlss_quality\": " << profile.dlss_quality << ",\n";
     json << "  \"neural_nr\": " << profile.neural_nr << ",\n";
     json << "  \"nr_passes\": " << profile.nr_passes << ",\n";
+    json << "  \"nr_scale\": " << profile.nr_scale << ",\n";
     json << "  \"nr_style\": " << profile.nr_style << ",\n";
     json << "  \"nr_tone\": " << profile.nr_tone << ",\n";
     json << "  \"nr_structure\": " << profile.nr_structure << ",\n";
@@ -384,8 +385,6 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"nr_mask\": " << profile.nr_mask << ",\n";
     json << "  \"nr_intensity\": " << profile.nr_intensity << ",\n";
     json << "  \"nr_ui\": " << profile.nr_ui << ",\n";
-    json << "  \"nr_hook\": " << profile.nr_hook << ",\n";
-    json << "  \"nr_resolution\": " << profile.nr_resolution << ",\n";
     json << "  \"decoder\": " << profile.decoder << ",\n";
     json << "  \"chroma\": " << profile.chroma << ",\n";
     json << "  \"lightbar\": " << profile.lightbar << ",\n";
@@ -459,6 +458,7 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     if (ExtractNumber(json, "dlss_quality", number)) p.dlss_quality = static_cast<int>(number);
     if (ExtractNumber(json, "neural_nr", number)) p.neural_nr = static_cast<int>(number);
     if (ExtractNumber(json, "nr_passes", number)) p.nr_passes = static_cast<int>(number);
+    if (ExtractNumber(json, "nr_scale", number)) p.nr_scale = static_cast<int>(number);
     if (ExtractNumber(json, "nr_style", number)) p.nr_style = static_cast<int>(number);
     if (ExtractNumber(json, "nr_tone", number)) p.nr_tone = static_cast<int>(number);
     if (ExtractNumber(json, "nr_structure", number)) p.nr_structure = static_cast<int>(number);
@@ -466,8 +466,15 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     if (ExtractNumber(json, "nr_mask", number)) p.nr_mask = static_cast<int>(number);
     if (ExtractNumber(json, "nr_intensity", number)) p.nr_intensity = static_cast<int>(number);
     if (ExtractNumber(json, "nr_ui", number)) p.nr_ui = static_cast<int>(number);
-    if (ExtractNumber(json, "nr_hook", number)) p.nr_hook = static_cast<int>(number);
-    if (ExtractNumber(json, "nr_resolution", number)) p.nr_resolution = static_cast<int>(number);
+    // The cascade only exists under Boost; at full resolution the worker runs
+    // exactly one pass, so a stored count of 2 must not look active.
+    p.nr_scale = std::clamp(p.nr_scale, 50, 100);
+    p.nr_passes = std::clamp(p.nr_passes, 1, 4);
+    if (p.nr_scale >= 100) {
+        p.nr_passes = 1;
+    } else if (p.nr_passes < 2) {
+        p.nr_passes = 2;
+    }
     if (ExtractNumber(json, "decoder", number)) p.decoder = static_cast<int>(number);
     if (ExtractNumber(json, "chroma", number)) p.chroma = static_cast<int>(number);
     if (ExtractNumber(json, "lightbar", number)) p.lightbar = static_cast<int>(number);

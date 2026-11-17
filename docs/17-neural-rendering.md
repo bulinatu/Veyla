@@ -1,13 +1,13 @@
-# 17 - Neural rendering: RTX VSR shipped, DLSSNR host proven
+# 17 - Neural rendering: RTX VSR shipped, DLSSNR connected
 
 Status:
 
 - **NVIDIA RTX Video Super Resolution (VSR): implemented and verified live** on the
   RTX 4090 at 1080p -> 1440p and 1080p -> 2160p. It is the shipped neural upscaler.
-- **DLSS Neural Rendering (`nvngx_dlssnr.dll`): host proven, not integrated.** Init,
-  feature 18 creation and evaluation now run in a standalone probe on this machine
-  (`tools/dlssnr_probe`). The remaining work is the residual composite/temporal path
-  and app integration; the exact working recipe is below.
+- **DLSS Neural Rendering (DLSSNR): connected and running** through the vendor
+  NGX NR worker (NeuralScreen). It has its own thread, live settings through
+  `RNSZ`, and the worker's Boost/stack-pass ladder. See
+  `docs/18-neural-nr-status.md` for measurements and limits.
 
 ---
 
@@ -78,7 +78,13 @@ The setting is persisted as `"vsr"` in `session.json`.
 
 ---
 
-## DLSSNR (host proven, not integrated)
+## DLSSNR (native host recipe - historical)
+
+> **Shipped engine:** the app does not use this single-pass host. The vendor NGX
+> NR worker (NeuralScreen) is the engine behind `Settings > Neural`; it produces
+> a real NR image, runs on its own thread and takes live settings. See
+> `docs/18-neural-nr-status.md`. This section is kept because the NGX init
+> recipe below is what made the vendor runtime work on this driver.
 
 ### Working recipe (verified 2026-11-16)
 

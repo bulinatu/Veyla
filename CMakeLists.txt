@@ -48,6 +48,9 @@ target_link_libraries(dlss_sr_module_probe PRIVATE brp_media)
 
 add_executable(nr_module_probe tools/nr_module_probe/main.cpp)
 target_link_libraries(nr_module_probe PRIVATE brp_media)
+
+add_executable(nr_motion_probe tools/nr_motion_probe/main.cpp)
+target_link_libraries(nr_motion_probe PRIVATE brp_media)
 target_compile_options(dlss_sr_module_probe PRIVATE /Zi)
 target_link_options(dlss_sr_module_probe PRIVATE /DEBUG)
 

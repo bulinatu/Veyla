@@ -36,6 +36,12 @@ std::string EnvString(const char* name) {
     return value ? std::string(value) : std::string();
 }
 
+double NowMs() {
+    using clock = std::chrono::steady_clock;
+    static const clock::time_point start = clock::now();
+    return std::chrono::duration<double, std::milli>(clock::now() - start).count();
+}
+
 // RTX VSR quality levels exposed in the UI (0 = off).
 const int kVsrLevels[] = {0, 1, 2, 3, 4, 21, 23};
 
@@ -124,7 +130,6 @@ enum WidgetId {
     W_RenderTarget = 52,
     W_PairHome = 42,
     W_NeuralMax = 61,
-    W_NeuralSr = 62,
     W_DlssPreset = 63,
     W_DlssQuality = 64,
     W_NeuralOverlay = 65,
@@ -136,8 +141,7 @@ enum WidgetId {
     W_NrStructure = 71,
     W_NrSkin = 72,
     W_NrUi = 73,
-    W_NrHook = 74,
-    W_NrResolution = 75,
+    W_NrScale = 74,
     W_NrMask = 76,
     W_NrIntensity = 77,
     W_ResumeOverlay = 60,
@@ -789,14 +793,6 @@ void App::ApplyDropdown(int id, int index) {
             SaveProfile();
             break;
         }
-        case W_NeuralSr: {
-            profile_.neural_sr = index == 1 ? 1 : 0;
-            ApplyNeuralSettings();
-            stream_note_ = profile_.neural_sr
-                               ? "DLSS Super Resolution enabled (D3D12, zero depth)."
-                               : "DLSS Super Resolution off.";
-            break;
-        }
         case W_DlssPreset: {
             static const int kPresets[] = {11, 12, 13};
             profile_.dlss_preset = kPresets[std::clamp(index, 0, 2)];
@@ -827,7 +823,7 @@ void App::ApplyDropdown(int id, int index) {
             break;
         case W_NrPasses:
             profile_.nr_passes = std::clamp(index, 0, 3) + 1;
-            SaveProfile();
+            if (profile_.neural_nr > 0) ApplyNrSettings(); else SaveProfile();
             break;
         case W_NrStyle:
             profile_.nr_style = std::clamp(index, 0, 2);
@@ -857,15 +853,20 @@ void App::ApplyDropdown(int id, int index) {
             profile_.nr_ui = index == 1 ? 1 : 0;
             if (profile_.neural_nr > 0) ApplyNrSettings(); else SaveProfile();
             break;
-        case W_NrHook:
-            profile_.nr_hook = std::clamp(index, 0, 2);
-            SaveProfile();
+        case W_NrScale: {
+            // 100 = full-resolution network (always one pass); the rest is the
+            // worker's Boost mode: a smaller network run N times and upscaled
+            // back to the frame.
+            static const int kScales[] = {100, 85, 70, 55};
+            profile_.nr_scale = kScales[std::clamp(index, 0, 3)];
+            if (profile_.nr_scale >= 100) {
+                profile_.nr_passes = 1;
+            } else if (profile_.nr_passes < 2) {
+                profile_.nr_passes = 2;
+            }
+            if (profile_.neural_nr > 0) ApplyNrSettings(); else SaveProfile();
             break;
-        case W_NrResolution:
-            profile_.nr_resolution = 0;
-            SaveProfile();
-            break;
-        case W_NeuralOverlay:
+        }        case W_NeuralOverlay:
             overlay_neural_ = true;
             open_dropdown_ = -1;
             break;
@@ -1323,10 +1324,22 @@ bool App::EnsureNr() {
     }
     const int width = profile_.width > 0 ? profile_.width : 1920;
     const int height = profile_.height > 0 ? profile_.height : 1080;
-    if (!nr_.Start(dir + L"\\nvngx.dll", dir, width, height, profile_.nr_style,
-                   profile_.nr_tone / 100.0f, profile_.nr_structure / 100.0f,
-                   profile_.nr_skin / 100.0f, profile_.nr_mask != 0, profile_.nr_ui != 0,
-                   profile_.nr_intensity / 100.0f, detail)) {
+    media::NvDlssnr::Options options;
+    options.style = profile_.nr_style;
+    options.intensity = profile_.nr_intensity / 100.0f;
+    options.local_tone = profile_.nr_tone / 100.0f;
+    options.local_structure = profile_.nr_structure / 100.0f;
+    options.skin_structure = profile_.nr_skin / 100.0f;
+    options.auto_mask = profile_.nr_mask != 0;
+    options.ui_correction = profile_.nr_ui != 0;
+    options.passes = std::clamp(profile_.nr_passes, 1, 4);
+    options.work_scale = std::clamp(profile_.nr_scale, 0, 100) / 100.0f;
+    if (options.work_scale >= 1.0f) {
+        // Full-resolution network always runs exactly one pass; the cascade
+        // only exists under Boost.
+        options.passes = 1;
+    }
+    if (!nr_.Start(dir + L"\\nvngx.dll", dir, width, height, options, detail)) {
         nr_note_ = L"NR init: " + Widen(detail);
         std::fprintf(stderr, "[app] NR init failed: %s\n", detail.c_str());
         return false;
@@ -1335,15 +1348,167 @@ bool App::EnsureNr() {
     nr_in_w_ = width;
     nr_in_h_ = height;
     nr_note_ = L"NR active";
-    std::fprintf(stderr, "[app] NR worker ready %dx%d, style %d\n", width, height,
-                 profile_.nr_style);
+    nr_dropped_ = 0;
+    nr_shown_ = 0;
+    nr_last_ms_ = 0.0;
+    StartNrThread();
+    std::fprintf(stderr, "[app] NR worker ready %dx%d, style %d, scale %d%%, passes %d\n", width,
+                 height, profile_.nr_style, profile_.nr_scale, profile_.nr_passes);
     return true;
 }
 
 void App::DisableNr() {
+    // The worker thread is the only caller of nr_.Process; join it before the
+    // worker handles are closed.
+    StopNrThread();
     nr_.Stop();
     nr_ready_ = false;
     nr_out_.clear();
+    nr_dropped_ = 0;
+    nr_shown_ = 0;
+    nr_last_ms_ = 0.0;
+}
+
+void App::StartNrThread() {
+    StopNrThread();
+    {
+        std::lock_guard<std::mutex> lock(nr_mutex_);
+        nr_run_ = true;
+        nr_pending_.reset();
+        nr_latest_.reset();
+        nr_failed_ = false;
+        nr_error_.clear();
+    }
+    nr_thread_ = std::thread(&App::NrThreadMain, this);
+}
+
+void App::StopNrThread() {
+    {
+        std::lock_guard<std::mutex> lock(nr_mutex_);
+        nr_run_ = false;
+        nr_pending_.reset();
+    }
+    nr_cv_.notify_all();
+    if (nr_thread_.joinable()) {
+        nr_thread_.join();
+    }
+    {
+        std::lock_guard<std::mutex> lock(nr_mutex_);
+        nr_latest_.reset();
+    }
+}
+
+void App::NrThreadMain() {
+    for (;;) {
+        NrFrame job;
+        {
+            std::unique_lock<std::mutex> lock(nr_mutex_);
+            nr_cv_.wait(lock, [this] { return !nr_run_ || nr_pending_.has_value(); });
+            if (!nr_run_) {
+                return;
+            }
+            job = std::move(*nr_pending_);
+            nr_pending_.reset();
+        }
+
+        std::string detail;
+        const double started = NowMs();
+        // Process() copies the pixels into the worker's mapping before it
+        // writes the result, so passing the job buffer as both input and
+        // output is safe and avoids a second 8 MB allocation per frame.
+        if (!nr_.Process(job.rgba.data(), job.width, job.height, job.rgba, detail)) {
+            std::lock_guard<std::mutex> lock(nr_mutex_);
+            nr_failed_ = true;
+            nr_error_ = detail;
+            return;
+        }
+        job.ms = NowMs() - started;
+        {
+            std::lock_guard<std::mutex> lock(nr_mutex_);
+            nr_latest_ = std::move(job);
+        }
+    }
+}
+
+void App::SubmitNrFrame(media::DecodedFrame& frame) {
+    if (frame.rgba.empty()) {
+        return;
+    }
+    NrFrame job;
+    job.rgba = std::move(frame.rgba);
+    job.width = frame.width;
+    job.height = frame.height;
+    job.pq = frame.pq;
+    {
+        std::lock_guard<std::mutex> lock(nr_mutex_);
+        // One-frame queue: the newest frame wins. The replaced one was not
+        // processed, so it is a dropped source frame, not a lost result.
+        if (nr_pending_) {
+            ++nr_dropped_;
+        }
+        nr_pending_ = std::move(job);
+    }
+    nr_cv_.notify_one();
+}
+
+bool App::TakeNrResult(int& width, int& height, bool& pq) {
+    std::lock_guard<std::mutex> lock(nr_mutex_);
+    if (!nr_latest_) {
+        return false;
+    }
+    nr_out_.swap(nr_latest_->rgba);
+    width = nr_latest_->width;
+    height = nr_latest_->height;
+    pq = nr_latest_->pq;
+    nr_last_ms_ = nr_latest_->ms;
+    nr_latest_.reset();
+    ++nr_shown_;
+    return true;
+}
+
+bool App::NrFailed(std::string& error) {
+    std::lock_guard<std::mutex> lock(nr_mutex_);
+    if (!nr_failed_) {
+        return false;
+    }
+    error = nr_error_;
+    return true;
+}
+
+bool App::ReconfigureNr() {
+    if (!nr_.ready()) {
+        return EnsureNr();
+    }
+    media::NvDlssnr::Options options;
+    options.style = profile_.nr_style;
+    options.intensity = profile_.nr_intensity / 100.0f;
+    options.local_tone = profile_.nr_tone / 100.0f;
+    options.local_structure = profile_.nr_structure / 100.0f;
+    options.skin_structure = profile_.nr_skin / 100.0f;
+    options.auto_mask = profile_.nr_mask != 0;
+    options.ui_correction = profile_.nr_ui != 0;
+    options.passes = std::clamp(profile_.nr_passes, 1, 4);
+    options.work_scale = std::clamp(profile_.nr_scale, 0, 100) / 100.0f;
+    if (options.work_scale >= 1.0f) {
+        // Full-resolution network always runs exactly one pass; the cascade
+        // only exists under Boost.
+        options.passes = 1;
+    }
+
+    // The worker rebuilds or retunes the feature inside RNSZ; no Process call
+    // may be in flight while it does. Pausing the NR thread costs one frame,
+    // a full worker restart costs seconds of frozen picture.
+    StopNrThread();
+    std::string detail;
+    const bool ok = nr_.Reconfigure(options, detail);
+    StartNrThread();
+    if (!ok) {
+        nr_note_ = L"NR reconfigure: " + Widen(detail);
+        std::fprintf(stderr, "[app] NR reconfigure failed: %s\n", detail.c_str());
+        return false;
+    }
+    nr_note_ = L"NR active";
+    return true;
 }
 
 void App::ApplyNrSettings() {
@@ -1365,7 +1530,7 @@ void App::ApplyNrSettings() {
         profile_.frame_gen = 0;
         fg_queue_.clear();
         fg_last_ = {};
-        if (!EnsureNr()) {
+        if (!ReconfigureNr()) {
             profile_.neural_nr = 0;
             DisableNr();
         }
@@ -1376,6 +1541,7 @@ void App::ApplyNrSettings() {
 }
 
 App::~App() {
+    StopNrThread();
     StopPadThread();
 }
 
@@ -1850,20 +2016,25 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         } else if (streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
             const bool nr_active = profile_.neural_nr > 0 && nr_ready_;
             if (nr_active) {
-                std::string detail;
-                if (nr_.Process(stream_frame_.rgba.data(), stream_frame_.width,
-                                stream_frame_.height, nr_out_, detail)) {
-                    presenter_.SetSourceFrame(nr_out_.data(), stream_frame_.width,
-                                              stream_frame_.height, stream_frame_.pq);
-                    presenter_.SetSourceFinal(false);
-                } else {
-                    nr_note_ = L"NR: " + Widen(detail);
-                    std::fprintf(stderr, "[app] NR failed: %s\n", detail.c_str());
+                // Hand the frame to the NR thread and show the newest result.
+                // Nothing here waits for the worker: when it is late the last
+                // result stays on screen for one or two ticks.
+                SubmitNrFrame(stream_frame_);
+                std::string nr_error;
+                if (NrFailed(nr_error)) {
+                    nr_note_ = L"NR: " + Widen(nr_error);
+                    std::fprintf(stderr, "[app] NR failed: %s\n", nr_error.c_str());
                     profile_.neural_nr = 0;
                     DisableNr();
                     SaveProfile();
-                    presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
-                                              stream_frame_.height, stream_frame_.pq);
+                } else {
+                    int nr_w = 0;
+                    int nr_h = 0;
+                    bool nr_pq = false;
+                    if (TakeNrResult(nr_w, nr_h, nr_pq)) {
+                        presenter_.SetSourceFinal(false);
+                        presenter_.SetSourceFrame(nr_out_.data(), nr_w, nr_h, nr_pq);
+                    }
                 }
             }
             if (!nr_active) {
@@ -2566,10 +2737,11 @@ void App::RenderSettings(double t) {
                          {L"K (Transformer 1, stable)", L"L (Transformer 2, best)",
                           L"M (Transformer 2, sharp)"},
                          profile_.dlss_preset == 12 ? 1 : (profile_.dlss_preset == 13 ? 2 : 0),
-                         y, W_DlssPreset, dlss);
+                         y, W_DlssPreset, dlss && profile_.neural_sr > 0);
             y += kRowH;
             DrawDropdown(L"DLSS quality", {L"Balanced", L"Max Quality"},
-                         std::clamp(profile_.dlss_quality, 0, 1), y, W_DlssQuality, dlss);
+                         std::clamp(profile_.dlss_quality, 0, 1), y, W_DlssQuality,
+                         dlss && profile_.neural_sr > 0);
             y += kRowH;
             DrawDropdown(L"Upscale target",
                          {L"Window / display", L"1080p", L"1440p", L"2160p"}, render_target_, y,
@@ -2613,40 +2785,66 @@ void App::RenderSettings(double t) {
         }
 
         case Tab::Neural: {
-            ui_.Text(L"DLSS Neural Rendering (same resolution)",
+            ui_.Text(L"DLSS Neural Rendering (NR)",
                      {kContentX, y, w - 64.0f, y + 30.0f}, 16.0f, th::Rgba(th::kInk),
                      DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 36.0f;
+            const float kRow = 52.0f;
 
             DrawDropdown(L"Neural Rendering", {L"Off", L"On"}, profile_.neural_nr > 0 ? 1 : 0, y,
                          W_NeuralNr);
-            y += kRowH;
+            y += kRow;
+            {
+                // Boost = the worker's smaller-network cascade: the network
+                // runs at a fraction of the frame and the result is upscaled
+                // back, so passes > 1 buy detail back at a lower cost.
+                static const int kScales[] = {100, 85, 70, 55};
+                int scale_index = 0;
+                for (int i = 0; i < 4; ++i) {
+                    if (profile_.nr_scale == kScales[i]) {
+                        scale_index = i;
+                    }
+                }
+                DrawDropdown(L"Network size",
+                             {L"Full 1080p (1 pass)", L"Boost 85% + passes",
+                              L"Boost 70% + passes", L"Boost 55% + passes"},
+                             scale_index, y, W_NrScale);
+                y += kRow;
+                DrawDropdown(L"Stack passes", {L"1", L"2 (recommended)", L"3", L"4"},
+                             std::clamp(profile_.nr_passes - 1, 0, 3), y, W_NrPasses,
+                             profile_.nr_scale < 100);
+                y += kRow;
+            }
             DrawDropdown(L"Style", {L"Default", L"Natural", L"Cinematic"},
                          std::clamp(profile_.nr_style, 0, 2), y, W_NrStyle);
-            y += kRowH;
+            y += kRow;
             DrawDropdown(L"Strength", PercentLabels(), PercentIndex(profile_.nr_intensity), y,
                          W_NrIntensity);
-            y += kRowH;
+            y += kRow;
             DrawDropdown(L"Local tone", PercentLabels(), PercentIndex(profile_.nr_tone), y,
                          W_NrTone);
-            y += kRowH;
+            y += kRow;
             DrawDropdown(L"Structure", PercentLabels(), PercentIndex(profile_.nr_structure), y,
                          W_NrStructure);
-            y += kRowH;
+            y += kRow;
             DrawDropdown(L"Character / skin", PercentLabels(), PercentIndex(profile_.nr_skin), y,
                          W_NrSkin);
-            y += kRowH;
+            y += kRow;
             DrawDropdown(L"Character mask", {L"Off", L"On"}, profile_.nr_mask > 0 ? 1 : 0, y,
                          W_NrMask);
-            y += kRowH;
+            y += kRow;
             DrawDropdown(L"UI correction", {L"Off", L"On"}, profile_.nr_ui > 0 ? 1 : 0, y,
                          W_NrUi);
-            y += kRowH;
+            y += kRow;
 
             if (profile_.neural_nr > 0 && nr_ready_) {
-                wchar_t text[192];
-                swprintf_s(text, L"NR active  -  %dx%d  -  last %.1f ms  -  %d frames",
-                           nr_.width(), nr_.height(), nr_.last_ms(), nr_.frame_count());
+                wchar_t text[224];
+                swprintf_s(text,
+                           L"NR active  -  %dx%d  -  net %dx%d (%d pass)  -  %.1f ms  -  %llu frames  -  %llu dropped",
+                           nr_in_w_, nr_in_h_, nr_.work_width(), nr_.work_height(),
+                           profile_.nr_passes, nr_last_ms_,
+                           static_cast<unsigned long long>(nr_shown_),
+                           static_cast<unsigned long long>(nr_dropped_));
                 ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
                          th::Rgba(th::kMuted));
             } else if (!NrAvailable()) {
@@ -2663,8 +2861,8 @@ void App::RenderSettings(double t) {
             }
             y += 26.0f;
             ui_.Text(
-                L"NR runs at 1920x1080 with the NGX worker (zero depth, optical-flow motion); "
-                L"FSR1 upscales to the target.",
+                L"NGX worker at the stream size (zero depth, zero motion field); "
+                L"FSR1 upscales the NR result to the target.",
                 {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 11.5f, th::Rgba(th::kMuted));
             break;
         }
@@ -2996,6 +3194,24 @@ void App::RenderStreamSettings(double t) {
         DrawDropdown(L"Neural Rendering", {L"Off", L"On"}, profile_.neural_nr > 0 ? 1 : 0, y,
                      W_NeuralNr);
         y += 56.0f;
+        {
+            static const int kScales[] = {100, 85, 70, 55};
+            int scale_index = 0;
+            for (int i = 0; i < 4; ++i) {
+                if (profile_.nr_scale == kScales[i]) {
+                    scale_index = i;
+                }
+            }
+            DrawDropdown(L"Network size",
+                         {L"Full 1080p (1 pass)", L"Boost 85% + passes",
+                          L"Boost 70% + passes", L"Boost 55% + passes"},
+                         scale_index, y, W_NrScale);
+            y += 56.0f;
+            DrawDropdown(L"Stack passes", {L"1", L"2 (recommended)", L"3", L"4"},
+                         std::clamp(profile_.nr_passes - 1, 0, 3), y, W_NrPasses,
+                         profile_.nr_scale < 100);
+            y += 56.0f;
+        }
         DrawDropdown(L"Style", {L"Default", L"Natural", L"Cinematic"},
                      std::clamp(profile_.nr_style, 0, 2), y, W_NrStyle);
         y += 56.0f;
@@ -3018,9 +3234,10 @@ void App::RenderStreamSettings(double t) {
         y += 56.0f;
 
         if (profile_.neural_nr > 0 && nr_ready_) {
-            wchar_t text[192];
-            swprintf_s(text, L"NR active  -  %dx%d  -  last %.1f ms", nr_.width(), nr_.height(),
-                       nr_.last_ms());
+            wchar_t text[224];
+            swprintf_s(text, L"NR active  -  net %dx%d (%d pass)  -  %.1f ms  -  %llu dropped",
+                       nr_.work_width(), nr_.work_height(), profile_.nr_passes, nr_last_ms_,
+                       static_cast<unsigned long long>(nr_dropped_));
             ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
                      th::Rgba(th::kMuted));
         } else if (!NrAvailable()) {
@@ -3051,10 +3268,11 @@ void App::RenderStreamSettings(double t) {
                  {L"K (Transformer 1, stable)", L"L (Transformer 2, best)",
                   L"M (Transformer 2, sharp)"},
                  profile_.dlss_preset == 12 ? 1 : (profile_.dlss_preset == 13 ? 2 : 0), y,
-                 W_DlssPreset, DlssAvailable());
+                 W_DlssPreset, DlssAvailable() && profile_.neural_sr > 0);
     y += 56.0f;
     DrawDropdown(L"DLSS quality", {L"Balanced", L"Max Quality"},
-                 std::clamp(profile_.dlss_quality, 0, 1), y, W_DlssQuality, DlssAvailable());
+                 std::clamp(profile_.dlss_quality, 0, 1), y, W_DlssQuality,
+                 DlssAvailable() && profile_.neural_sr > 0);
     y += 56.0f;
     DrawDropdown(L"Upscale target", {L"Window / display", L"1080p", L"1440p", L"2160p"},
                  render_target_, y, W_RenderTarget);

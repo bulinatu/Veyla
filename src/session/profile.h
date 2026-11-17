@@ -58,8 +58,9 @@ struct Profile {
     int neural_sr = 0;  // 1 = DLSS Super Resolution (D3D12), exclusive with VSR/VFG
     int dlss_preset = 11;  // 11 K, 12 L, 13 M
     int dlss_quality = 0;  // 0 balanced, 1 max quality
-    int neural_nr = 0;     // DLSSNR on/off (UI; engine port pending)
-    int nr_passes = 2;
+    int neural_nr = 0;     // DLSSNR on/off (NGX worker at 1080p)
+    int nr_passes = 1;     // cascade depth under Boost, 1..4
+    int nr_scale = 100;    // NGX work scale percent: 100 = full-res network, lower = Boost
     int nr_style = 2;      // 0 default, 1 natural, 2 cinematic
     int nr_tone = 100;     // percent 0..200
     int nr_structure = 100;
@@ -67,8 +68,6 @@ struct Profile {
     int nr_mask = 0;
     int nr_intensity = 100;
     int nr_ui = 0;
-    int nr_hook = 0;       // 0 upscaled, 1 render, 2 present
-    int nr_resolution = 0; // 0 match game
     int decoder = 0;    // 0 auto, 1 d3d11va, 2 d3d12va, 3 vulkan, 4 dxva2, 5 cuda, 6 software
     int chroma = 1;     // 0 bilinear, 1 bicubic, 2 lanczos
     int lightbar = 0;

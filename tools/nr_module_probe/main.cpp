@@ -69,10 +69,10 @@ int main(int argc, char** argv) {
     const std::wstring worker = root + L"\\native\\nvngx.dll";
     const std::wstring working = root + L"\\native";
 
+    brp::media::NvDlssnr::Options options;
     brp::media::NvDlssnr nr;
     std::string detail;
-    if (!nr.Start(worker, working, kInW, kInH, 2, 1.0f, 0.5f, 0.75f, false, false, 1.0f,
-                  detail)) {
+    if (!nr.Start(worker, working, kInW, kInH, options, detail)) {
         std::fprintf(stderr, "start: %s\n", detail.c_str());
         return 1;
     }

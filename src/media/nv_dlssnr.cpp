@@ -10,6 +10,8 @@ namespace brp::media {
 namespace {
 
 constexpr uint32_t kVideoMagic = 0x33563544;      // DV5
+constexpr uint32_t kResizeMagic = 0x5A534E52;     // RNSZ
+constexpr uint32_t kResizeAckMagic = 0x4B434152;  // RACK
 constexpr uint32_t kCreateAckMagic = 0x4B434143;  // CACK
 constexpr uint32_t kShmMagic = 0x494D4853;        // SHMI
 constexpr uint32_t kShmAckMagic = 0x4B434153;     // SACK
@@ -19,6 +21,11 @@ constexpr uint32_t kFrameMagic = 0x314D5246;      // FMR1
 constexpr uint32_t kOutMagic = 0x3154554F;        // OUT1
 constexpr uint32_t kFrameFlagShm = 0x1;
 constexpr uint32_t kFrameFlagWantPixels = 0x2;
+constexpr uint32_t kOutBytesInShm = 0xFFFFFFFF;  // OUT1 byte_count sentinel
+// RNSZ flags word (the same 4-byte slot the VIDEO header uses for frame_count).
+constexpr uint32_t kResizeFlagNrSmall = 0x1;  // network at work size, upscaled back
+constexpr uint32_t kResizePassesShift = 2;
+constexpr int kMaxPasses = 4;
 
 #pragma pack(push, 1)
 struct VideoHeader {
@@ -95,6 +102,21 @@ std::string Hex(uint32_t value) {
     char text[16];
     std::snprintf(text, sizeof(text), "0x%08X", value);
     return text;
+}
+
+// The NGX work size. A downscale rounds DOWN to an even number and never
+// exceeds the frame; 1.0 keeps the frame exactly (odd sizes stay on the 1:1
+// path, which is the known-good one).
+void WorkSize(int full_w, int full_h, float scale, int* work_w, int* work_h) {
+    if (scale >= 1.0f) {
+        *work_w = full_w;
+        *work_h = full_h;
+        return;
+    }
+    *work_w = std::max(64, static_cast<int>(full_w * scale) / 2 * 2);
+    *work_h = std::max(64, static_cast<int>(full_h * scale) / 2 * 2);
+    *work_w = std::min(*work_w, full_w);
+    *work_h = std::min(*work_h, full_h);
 }
 
 }  // namespace
@@ -230,8 +252,7 @@ bool NvDlssnr::WaitForMagic(uint32_t expected, uint32_t* extra, std::string& det
 }
 
 bool NvDlssnr::Start(const std::wstring& worker_exe, const std::wstring& working_dir, int width,
-                     int height, int style, float tone, float structure, float skin, bool mask,
-                     bool ui, float intensity, std::string& detail) {
+                     int height, const Options& options, std::string& detail) {
     Stop();
     if (width <= 0 || height <= 0) {
         detail = "NR size is invalid";
@@ -251,6 +272,12 @@ bool NvDlssnr::Start(const std::wstring& worker_exe, const std::wstring& working
     if (!::CreatePipe(&stdin_read, &stdin_write_, &sa, 1 << 20) ||
         !::CreatePipe(&stdout_read_, &stdout_write, &sa, 1 << 20)) {
         detail = "cannot create NR pipes";
+        if (stdin_read) {
+            ::CloseHandle(stdin_read);
+        }
+        if (stdout_write) {
+            ::CloseHandle(stdout_write);
+        }
         CloseHandles();
         return false;
     }
@@ -258,10 +285,24 @@ bool NvDlssnr::Start(const std::wstring& worker_exe, const std::wstring& working
     ::SetHandleInformation(stdout_read_, HANDLE_FLAG_INHERIT, 0);
 
     log_file_ = ::CreateFileW((ExeDirectory() + L"\\nr-worker.log").c_str(), GENERIC_WRITE,
-                              FILE_SHARE_READ, &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
-                              nullptr);
-    if (log_file_ == INVALID_HANDLE_VALUE) {
-        log_file_ = nullptr;
+                              FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, CREATE_ALWAYS,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (log_file_ == INVALID_HANDLE_VALUE || !log_file_) {
+        // Never let the worker's log fall through to stdout: that pipe is the
+        // protocol, and a log line there desynchronises every reply.
+        log_file_ = ::CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                  &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (log_file_ == INVALID_HANDLE_VALUE) {
+            log_file_ = nullptr;
+        }
+    }
+
+    if (!log_file_) {
+        detail = "cannot open the NR worker log (and NUL is unavailable)";
+        ::CloseHandle(stdin_read);
+        ::CloseHandle(stdout_write);
+        CloseHandles();
+        return false;
     }
 
     STARTUPINFOW si{};
@@ -270,7 +311,7 @@ bool NvDlssnr::Start(const std::wstring& worker_exe, const std::wstring& working
     si.wShowWindow = SW_HIDE;
     si.hStdInput = stdin_read;
     si.hStdOutput = stdout_write;
-    si.hStdError = log_file_ ? log_file_ : stdout_write;
+    si.hStdError = log_file_;
 
     PROCESS_INFORMATION pi{};
     std::wstring command = L"\"" + worker_exe + L"\" --live";
@@ -296,21 +337,25 @@ bool NvDlssnr::Start(const std::wstring& worker_exe, const std::wstring& working
     ::ResumeThread(pi.hThread);
     ::CloseHandle(pi.hThread);
 
+    int work_w = width;
+    int work_h = height;
+    WorkSize(width, height, options.work_scale, &work_w, &work_h);
+
     VideoHeader header{};
     header.magic = kVideoMagic;
-    header.width = static_cast<uint32_t>(width);
-    header.height = static_cast<uint32_t>(height);
+    header.width = static_cast<uint32_t>(work_w);
+    header.height = static_cast<uint32_t>(work_h);
     header.warmup = 0;
-    header.frame_count = 0;
+    header.frame_count = 0;  // 0 = endless loop (flags word only in RNSZ)
     header.profile = 0;
     header.preset = 0;
-    header.style = static_cast<uint32_t>(style);
-    header.auto_mask = mask ? 1u : 0u;
-    header.ui_correction = ui ? 1u : 0u;
-    header.intensity = intensity;
-    header.local_tone = tone;
-    header.local_structure = structure;
-    header.skin_structure = skin;
+    header.style = static_cast<uint32_t>(options.style);
+    header.auto_mask = options.auto_mask ? 1u : 0u;
+    header.ui_correction = options.ui_correction ? 1u : 0u;
+    header.intensity = options.intensity;
+    header.local_tone = options.local_tone;
+    header.local_structure = options.local_structure;
+    header.skin_structure = options.skin_structure;
     header.full_w = static_cast<uint32_t>(width);
     header.full_h = static_cast<uint32_t>(height);
     if (!WriteAll(&header, sizeof(header), detail)) {
@@ -388,18 +433,82 @@ bool NvDlssnr::Start(const std::wstring& worker_exe, const std::wstring& working
         return false;
     }
 
-    width_ = width;
-    height_ = height;
+    options_ = options;
+    full_w_ = width;
+    full_h_ = height;
+    work_w_ = work_w;
+    work_h_ = work_h;
     frames_ = 0;
     frame_index_ = 0;
     ready_ = true;
     status_ = "NR ready";
+
+    // The VIDEO header has no flags word (that slot is frame_count), so Boost
+    // and a pass count > 1 travel in an RNSZ right after the channel setup -
+    // the same order the reference client uses.
+    if (work_w != full_w_ || work_h != full_h_ || options_.passes > 1) {
+        if (!SendResize(options_, work_w_, work_h_, detail)) {
+            Stop();
+            return false;
+        }
+    }
+    return true;
+}
+
+bool NvDlssnr::SendResize(const Options& options, int work_w, int work_h,
+                          std::string& detail) {
+    VideoHeader cmd{};
+    cmd.magic = kResizeMagic;
+    cmd.width = static_cast<uint32_t>(work_w);
+    cmd.height = static_cast<uint32_t>(work_h);
+    cmd.warmup = 0;
+    const int passes = std::clamp(options.passes, 1, kMaxPasses);
+    cmd.frame_count = (work_w != full_w_ || work_h != full_h_ ? kResizeFlagNrSmall : 0u) |
+                      (static_cast<uint32_t>(passes) << kResizePassesShift);
+    cmd.profile = 0;
+    cmd.preset = 0;
+    cmd.style = static_cast<uint32_t>(options.style);
+    cmd.auto_mask = options.auto_mask ? 1u : 0u;
+    cmd.ui_correction = options.ui_correction ? 1u : 0u;
+    cmd.intensity = options.intensity;
+    cmd.local_tone = options.local_tone;
+    cmd.local_structure = options.local_structure;
+    cmd.skin_structure = options.skin_structure;
+    cmd.full_w = static_cast<uint32_t>(full_w_);
+    cmd.full_h = static_cast<uint32_t>(full_h_);
+    if (!WriteAll(&cmd, sizeof(cmd), detail)) {
+        return false;
+    }
+    const double started = NowMs();
+    if (!WaitForMagic(kResizeAckMagic, nullptr, detail)) {
+        return false;
+    }
+    status_ = "NR reconfigured";
+    std::fprintf(stderr, "[nr] RNSZ %dx%d (full %dx%d, %d pass, %.0f ms)\n", work_w, work_h,
+                 full_w_, full_h_, passes, NowMs() - started);
+    return true;
+}
+
+bool NvDlssnr::Reconfigure(const Options& options, std::string& detail) {
+    if (!ready_) {
+        detail = "NR is not running";
+        return false;
+    }
+    int work_w = full_w_;
+    int work_h = full_h_;
+    WorkSize(full_w_, full_h_, options.work_scale, &work_w, &work_h);
+    if (!SendResize(options, work_w, work_h, detail)) {
+        return false;
+    }
+    options_ = options;
+    work_w_ = work_w;
+    work_h_ = work_h;
     return true;
 }
 
 bool NvDlssnr::Process(const uint8_t* rgba, int width, int height, std::vector<uint8_t>& out,
                        std::string& detail) {
-    if (!ready_ || !rgba || width != width_ || height != height_ || !in_view_ || !out_view_) {
+    if (!ready_ || !rgba || width != full_w_ || height != full_h_ || !in_view_ || !out_view_) {
         detail = "NR is not initialized for this frame size";
         return false;
     }
@@ -419,7 +528,7 @@ bool NvDlssnr::Process(const uint8_t* rgba, int width, int height, std::vector<u
     }
 
     uint32_t magic = 0;
-    if (!ReadExact(&magic, sizeof(magic), 30000, detail)) {
+    if (!ReadExact(&magic, sizeof(magic), 4000, detail)) {
         ready_ = false;
         return false;
     }
@@ -429,13 +538,19 @@ bool NvDlssnr::Process(const uint8_t* rgba, int width, int height, std::vector<u
         return false;
     }
     OutHeader reply{};
-    if (!ReadExact(reinterpret_cast<uint8_t*>(&reply) + 4, sizeof(reply) - 4, 30000, detail)) {
+    if (!ReadExact(reinterpret_cast<uint8_t*>(&reply) + 4, sizeof(reply) - 4, 4000, detail)) {
         ready_ = false;
         return false;
     }
     reply.magic = magic;
     if (reply.ok == 0) {
         detail = "NR worker failed frame (ngx " + Hex(reply.ngx_result) + ")";
+        ready_ = false;
+        return false;
+    }
+    if (reply.bytes != kOutBytesInShm) {
+        detail = "NR worker returned " + std::to_string(reply.bytes) +
+                 " bytes instead of a shared-memory frame";
         ready_ = false;
         return false;
     }
