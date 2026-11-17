@@ -57,10 +57,12 @@ struct Profile {
     int vsr = 0;        // 0 off, else RTX VSR quality level (1..4, 21, 23)
     int neural_sr = 0;  // 1 = DLSS Super Resolution (D3D12), exclusive with VSR/VFG
     int dlss_preset = 11;  // 11 K, 12 L, 13 M
-    int dlss_quality = 0;  // 0 balanced, 1 max quality
-    int neural_nr = 0;     // DLSSNR on/off (NGX worker at 1080p)
-    int nr_passes = 1;     // cascade depth under Boost, 1..4
-    int nr_scale = 100;    // NGX work scale percent: 100 = full-res network, lower = Boost
+    int dlss_mode = 4;     // 0 UP 33%, 1 Perf 50%, 2 Bal 58%, 3 Qual 66%, 4 UQ 77%, 5 DLAA
+    int nr_order = 1;      // 0 NR before SR (upstream), 1 NR after SR (NVIDIA order)
+    int reflex = 0;        // 0 off, 1 on, 2 on + boost (NVAPI low-latency)
+    int neural_nr = 0;     // DLSSNR on/off (NGX worker at stream size)
+    int nr_passes = 1;     // cascade depth, 1..4, independent of the scale
+    int nr_scale = 100;    // NGX work scale percent, 50..100 (slider)
     int nr_style = 2;      // 0 default, 1 natural, 2 cinematic
     int nr_tone = 100;     // percent 0..200
     int nr_structure = 100;

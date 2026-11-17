@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace brp::media {
 
@@ -33,11 +34,25 @@ public:
     // Loads nvngx_dlss.dll and the NGX D3D12 core. Safe to call once.
     bool LoadRuntime(const std::wstring& directory, std::string& detail);
 
+    // NVIDIA quality modes, in NGX enum order.
+    enum PerfQuality {
+        MaxPerf = 0,
+        Balanced = 1,
+        MaxQuality = 2,
+        UltraPerformance = 3,
+        UltraQuality = 4,
+        Dlaa = 5,
+    };
+
     // Creates the D3D12 feature and its shared textures. Re-initializes when
     // the geometry, preset or quality changes.
     bool Initialize(ID3D11Device* device, ID3D11DeviceContext* context, int in_width,
                     int in_height, int out_width, int out_height, int preset, int quality,
                     std::string& detail);
+
+    // Copies the last SR output back to CPU RGBA (target resolution). Used by
+    // the NVIDIA pipeline order, where NR runs on the upscaled frame.
+    bool Readback(std::vector<uint8_t>& out, std::string& detail);
 
     bool Process(const uint8_t* rgba, int width, int height, Frame& out, std::string& detail);
 
@@ -95,6 +110,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> input11_;
     Microsoft::WRL::ComPtr<ID3D12Resource> input12_;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> output11_;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> output_staging_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> output_srv_;
     Microsoft::WRL::ComPtr<ID3D12Resource> output12_;
 

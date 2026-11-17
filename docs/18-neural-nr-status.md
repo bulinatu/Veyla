@@ -49,10 +49,12 @@ Status date: 2026-11-17 (second session).
   SR**: when DLSS SR is the selected upscaler it runs on the NR result.
 
 ### NR + DLSS SR chain (the required combination)
-- Pipeline: stream 1080p -> NR (NGX worker, own thread) -> DLSS SR
-  (1080p -> 1440p/2160p) -> present. Both features stay enabled together;
-  selecting DLSS SR does not turn NR off, and enabling NR does not turn
-  DLSS SR off.
+- The implemented order is the one the project specified: video -> DLSS SR ->
+  Frame Generation -> NR -> display. NR therefore runs on the DLSS SR output at
+  the target resolution (see docs/20). An `Upstream: NR -> SR` option keeps the
+  cheaper 1080p order for comparison.
+- Both features stay enabled together; selecting DLSS SR does not turn NR off,
+  and enabling NR does not turn DLSS SR off.
 - Measured with `tools/nr_sr_chain_probe` at 1080p -> 2560x1440:
   **NR 10.3 ms + SR 2.8 ms = 13.2 ms per frame (75.7 fps ceiling)**.
 - The SR number used to be ~15 ms because the fence wait polled with

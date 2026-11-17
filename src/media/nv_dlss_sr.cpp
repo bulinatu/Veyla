@@ -361,8 +361,9 @@ bool NvDlssSr::CreateFeature(int preset, int quality, std::string& detail) {
     params->Set(NVSDK_NGX_Parameter_OutWidth, static_cast<unsigned>(out_width_));
     params->Set(NVSDK_NGX_Parameter_OutHeight, static_cast<unsigned>(out_height_));
     params->Set(NVSDK_NGX_Parameter_PerfQualityValue,
-                     quality == 1 ? NVSDK_NGX_PerfQuality_Value_MaxQuality
-                                  : NVSDK_NGX_PerfQuality_Value_Balanced);
+                     static_cast<NVSDK_NGX_PerfQuality_Value>(
+                         std::clamp(quality, 0,
+                                    static_cast<int>(NVSDK_NGX_PerfQuality_Value_DLAA))));
     params->Set(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags,
                      static_cast<int>(NVSDK_NGX_DLSS_Feature_Flags_MVLowRes |
                                       NVSDK_NGX_DLSS_Feature_Flags_AutoExposure));
@@ -506,8 +507,41 @@ bool NvDlssSr::Process(const uint8_t* rgba, int width, int height, Frame& out,
     return true;
 }
 
-void NvDlssSr::Shutdown() {
-    if (feature_ && api_ && api_->release) {
+bool NvDlssSr::Readback(std::vector<uint8_t>& out, std::string& detail) {
+    if (!output11_ || !context_ || !device_) {
+        detail = "DLSS SR has no output to read back";
+        return false;
+    }
+    D3D11_TEXTURE2D_DESC desc{};
+    output11_->GetDesc(&desc);
+    if (!output_staging_) {
+        D3D11_TEXTURE2D_DESC staging = desc;
+        staging.Usage = D3D11_USAGE_STAGING;
+        staging.BindFlags = 0;
+        staging.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        staging.MiscFlags = 0;
+        if (FAILED(device_->CreateTexture2D(&staging, nullptr, &output_staging_))) {
+            detail = "cannot create the DLSS readback texture";
+            return false;
+        }
+    }
+    context_->CopyResource(output_staging_.Get(), output11_.Get());
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(context_->Map(output_staging_.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+        detail = "cannot map the DLSS readback texture";
+        return false;
+    }
+    const size_t row = static_cast<size_t>(desc.Width) * 4;
+    out.resize(row * desc.Height);
+    const auto* src = static_cast<const uint8_t*>(mapped.pData);
+    for (UINT y = 0; y < desc.Height; ++y) {
+        std::memcpy(out.data() + row * y, src + static_cast<size_t>(mapped.RowPitch) * y, row);
+    }
+    context_->Unmap(output_staging_.Get(), 0);
+    return true;
+}
+
+void NvDlssSr::Shutdown() {    if (feature_ && api_ && api_->release) {
         if (queue_ && fence12_) {
             // Drain before releasing the feature.
             const UINT64 value = ++fence_value_;
@@ -531,6 +565,7 @@ void NvDlssSr::Shutdown() {
     input12_.Reset();
     output11_.Reset();
     output12_.Reset();
+    output_staging_.Reset();
     output_srv_.Reset();
     motion12_.Reset();
     depth12_.Reset();

@@ -374,7 +374,9 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"vsr\": " << profile.vsr << ",\n";
     json << "  \"neural_sr\": " << profile.neural_sr << ",\n";
     json << "  \"dlss_preset\": " << profile.dlss_preset << ",\n";
-    json << "  \"dlss_quality\": " << profile.dlss_quality << ",\n";
+    json << "  \"dlss_mode\": " << profile.dlss_mode << ",\n";
+    json << "  \"nr_order\": " << profile.nr_order << ",\n";
+    json << "  \"reflex\": " << profile.reflex << ",\n";
     json << "  \"neural_nr\": " << profile.neural_nr << ",\n";
     json << "  \"nr_passes\": " << profile.nr_passes << ",\n";
     json << "  \"nr_scale\": " << profile.nr_scale << ",\n";
@@ -455,8 +457,14 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     if (ExtractNumber(json, "vsr", number)) p.vsr = static_cast<int>(number);
     if (ExtractNumber(json, "neural_sr", number)) p.neural_sr = static_cast<int>(number);
     if (ExtractNumber(json, "dlss_preset", number)) p.dlss_preset = static_cast<int>(number);
-    if (ExtractNumber(json, "dlss_quality", number)) p.dlss_quality = static_cast<int>(number);
+    if (ExtractNumber(json, "dlss_mode", number)) p.dlss_mode = static_cast<int>(number);
+    if (ExtractNumber(json, "dlss_quality", number)) {
+        // Pre-0.9 profiles stored 0 balanced / 1 max quality.
+        p.dlss_mode = number >= 1 ? 3 : 2;
+    }
     if (ExtractNumber(json, "neural_nr", number)) p.neural_nr = static_cast<int>(number);
+    if (ExtractNumber(json, "nr_order", number)) p.nr_order = static_cast<int>(number);
+    if (ExtractNumber(json, "reflex", number)) p.reflex = static_cast<int>(number);
     if (ExtractNumber(json, "nr_passes", number)) p.nr_passes = static_cast<int>(number);
     if (ExtractNumber(json, "nr_scale", number)) p.nr_scale = static_cast<int>(number);
     if (ExtractNumber(json, "nr_style", number)) p.nr_style = static_cast<int>(number);
@@ -466,15 +474,13 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     if (ExtractNumber(json, "nr_mask", number)) p.nr_mask = static_cast<int>(number);
     if (ExtractNumber(json, "nr_intensity", number)) p.nr_intensity = static_cast<int>(number);
     if (ExtractNumber(json, "nr_ui", number)) p.nr_ui = static_cast<int>(number);
-    // The cascade only exists under Boost; at full resolution the worker runs
-    // exactly one pass, so a stored count of 2 must not look active.
+    // The render scale and the pass count are independent now: the user sets
+    // both and they stay exactly as set.
     p.nr_scale = std::clamp(p.nr_scale, 50, 100);
     p.nr_passes = std::clamp(p.nr_passes, 1, 4);
-    if (p.nr_scale >= 100) {
-        p.nr_passes = 1;
-    } else if (p.nr_passes < 2) {
-        p.nr_passes = 2;
-    }
+    p.dlss_mode = std::clamp(p.dlss_mode, 0, 5);
+    p.nr_order = std::clamp(p.nr_order, 0, 1);
+    p.reflex = std::clamp(p.reflex, 0, 2);
     if (ExtractNumber(json, "decoder", number)) p.decoder = static_cast<int>(number);
     if (ExtractNumber(json, "chroma", number)) p.chroma = static_cast<int>(number);
     if (ExtractNumber(json, "lightbar", number)) p.lightbar = static_cast<int>(number);

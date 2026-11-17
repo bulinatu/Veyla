@@ -18,6 +18,7 @@
 #include "media/nv_vsr.h"
 #include "media/nv_dlss_sr.h"
 #include "media/nv_dlssnr.h"
+#include "media/nv_reflex.h"
 #include "media/pipeline.h"
 #include "net/reachability.h"
 #include "platform/gamepad.h"
@@ -58,7 +59,7 @@ public:
 
 private:
     enum class Screen { Home, Settings, Stream, StreamSettings };
-    enum class Tab { Display, Upscaling, Performance, Neural, Audio, Controller, Connection, About };
+    enum class Tab { Display, Upscaling, Performance, Neural, Legacy, Audio, Controller, Connection, About };
 
     enum class Hit {
         None,
@@ -70,6 +71,8 @@ private:
         ConsoleConnect,
         Dropdown,
         DropdownItem,
+        Slider,
+        OverlayTab,
         Button,
         PinField,
     };
@@ -103,6 +106,8 @@ private:
     void DrawInfoRow(const wchar_t* label, const std::wstring& value, float y);
     void DrawDropdown(const wchar_t* label, const std::vector<std::wstring>& options, int selected,
                       float y, int id, bool enabled = true);
+    void DrawSlider(const wchar_t* label, int& value, int min, int max, int step, float y,
+                    int id, bool percent = true);
     void DrawButton(const wchar_t* label, const D2D1_RECT_F& rect, int id, bool primary);
     void DrawPinRow(float y);
     void DrawPopup();
@@ -138,12 +143,16 @@ private:
 
     bool DlssAvailable() const;
     bool EnsureDlssSr(int in_width, int in_height);
+    bool EnsureDlssSrForTarget();
     std::wstring FindDlssRuntime() const;
     void ApplyNeuralSettings();
 
     bool NrAvailable() const;
     bool EnsureNr();
     bool ReconfigureNr();
+    void NrStageSize(int* width, int* height) const;
+    void DlssInputSize(int src_w, int src_h, int* in_w, int* in_h) const;
+    void ApplyReflex();
     std::wstring FindNrRuntime() const;
     void ApplyNrSettings();
     void DisableNr();
@@ -151,6 +160,7 @@ private:
     void StopNrThread();
     void NrThreadMain();
     void SubmitNrFrame(media::DecodedFrame& frame);
+    void SubmitNrFrameData(std::vector<uint8_t>&& rgba, int width, int height, bool pq);
     bool TakeNrResult(int& width, int& height, bool& pq);
     bool NrFailed(std::string& error);
 
@@ -262,7 +272,7 @@ private:
     int dlss_in_h_ = 0;
     std::wstring dlss_note_;
     media::NvDlssSr::Frame dlss_frame_;
-    bool overlay_neural_ = false;
+
 
     // neural rendering (DLSSNR through the NGX worker)
     media::NvDlssnr nr_;
@@ -287,6 +297,7 @@ private:
     std::mutex nr_mutex_;
     std::condition_variable nr_cv_;
     bool nr_run_ = false;
+    bool nr_settings_dirty_ = false;
     std::optional<NrFrame> nr_pending_;
     std::optional<NrFrame> nr_latest_;
     bool nr_failed_ = false;
@@ -294,6 +305,12 @@ private:
     uint64_t nr_dropped_ = 0;
     uint64_t nr_shown_ = 0;
     double nr_last_ms_ = 0.0;
+    std::vector<uint8_t> sr_readback_;
+    std::vector<uint8_t> sr_scaled_;
+    std::vector<uint16_t> scale_tmp_;
+    media::NvReflex reflex_;
+    bool reflex_loaded_ = false;
+    int overlay_tab_ = 0;
 
     // Connect flow: check the control port, wake the console if it is asleep,
     // then start the session.

@@ -16,6 +16,8 @@ add_library(brp_media STATIC
     src/media/nv_vsr.cpp
     src/media/nv_dlss_sr.cpp
     src/media/nv_dlssnr.cpp
+    src/media/nv_reflex.cpp
+    src/media/rgba_scale.cpp
 )
 target_include_directories(brp_media PUBLIC src)
 target_include_directories(brp_media PRIVATE third_party/nvidia-ngx/include)

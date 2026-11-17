@@ -55,20 +55,20 @@ inline uint32_t Scale(uint32_t rgb, float factor) {
 }
 
 // Surfaces (dark, cold, slightly blue — PS5-adjacent without copying it).
-inline constexpr uint32_t kBgTop = 0x0B1220;
-inline constexpr uint32_t kBgBottom = 0x04060B;
-inline constexpr uint32_t kPanel = 0x121A28;
-inline constexpr uint32_t kPanelRaised = 0x1A2333;
-inline constexpr uint32_t kHairline = 0x2A3444;
+inline constexpr uint32_t kBgTop = 0x120A20;
+inline constexpr uint32_t kBgBottom = 0x05030A;
+inline constexpr uint32_t kPanel = 0x1A1029;
+inline constexpr uint32_t kPanelRaised = 0x241634;
+inline constexpr uint32_t kHairline = 0x3A2A4E;
 
 // Text
-inline constexpr uint32_t kInk = 0xF4F7FC;
-inline constexpr uint32_t kInkDim = 0xC2CBDA;
-inline constexpr uint32_t kMuted = 0x7E8AA0;
+inline constexpr uint32_t kInk = 0xF7F3FF;
+inline constexpr uint32_t kInkDim = 0xD3C8E6;
+inline constexpr uint32_t kMuted = 0x9A8CB4;
 
 // Selection
-inline constexpr uint32_t kAccent = 0x5AA9FF;
-inline constexpr uint32_t kAccentWarm = 0xFF7A45;
+inline constexpr uint32_t kAccent = 0xB072FF;
+inline constexpr uint32_t kAccentWarm = 0xFF6BD6;
 inline constexpr uint32_t kOnline = 0x57D68A;
 inline constexpr uint32_t kOffline = 0xE0A23A;
 
