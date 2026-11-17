@@ -17,6 +17,9 @@ constexpr uint32_t kShmMagic = 0x494D4853;        // SHMI
 constexpr uint32_t kShmAckMagic = 0x4B434153;     // SACK
 constexpr uint32_t kOutsMagic = 0x5354554F;       // OUTS
 constexpr uint32_t kOutsAckMagic = 0x324B414F;    // OAK2
+constexpr uint32_t kWindowMagic = 0x4F444E57;     // WNDO
+constexpr uint32_t kWindowAckMagic = 0x4B434157;  // WACK
+constexpr uint32_t kWindowFlagCapturable = 0x1;
 constexpr uint32_t kFrameMagic = 0x314D5246;      // FMR1
 constexpr uint32_t kOutMagic = 0x3154554F;        // OUT1
 constexpr uint32_t kFrameFlagShm = 0x1;
@@ -180,6 +183,8 @@ void NvDlssnr::Stop() {
     }
     CloseHandles();
     ready_ = false;
+    present_mode_ = false;
+    worker_pid_ = 0;
 }
 
 bool NvDlssnr::WriteAll(const void* data, size_t bytes, std::string& detail) {
@@ -328,6 +333,7 @@ bool NvDlssnr::Start(const std::wstring& worker_exe, const std::wstring& working
         return false;
     }
     process_ = pi.hProcess;
+    worker_pid_ = pi.dwProcessId;
 
     job_ = ::CreateJobObjectW(nullptr, nullptr);
     if (job_) {
@@ -457,6 +463,53 @@ bool NvDlssnr::Start(const std::wstring& worker_exe, const std::wstring& working
     return true;
 }
 
+bool NvDlssnr::EnablePresent(int width, int height, std::string& detail) {
+    if (present_mode_) {
+        return true;
+    }
+    if (!ready_ || !stdin_write_) {
+        detail = "NR is not running";
+        return false;
+    }
+    struct WindowCommand {
+        uint32_t magic;
+        uint32_t width;
+        uint32_t height;
+        uint32_t flags;
+        int64_t pts;
+    };
+    static_assert(sizeof(WindowCommand) == 24, "WNDO must stay 24 bytes");
+    WindowCommand cmd{};
+    cmd.magic = kWindowMagic;
+    cmd.width = static_cast<uint32_t>(width);
+    cmd.height = static_cast<uint32_t>(height);
+    cmd.flags = kWindowFlagCapturable;
+    if (!WriteAll(&cmd, sizeof(cmd), detail) ||
+        !WaitForMagic(kWindowAckMagic, nullptr, detail)) {
+        return false;
+    }
+    present_mode_ = true;
+    return true;
+}
+
+void NvDlssnr::DisablePresent() {
+    if (!ready_ || !stdin_write_ || !present_mode_) {
+        return;
+    }
+    struct WindowCommand {
+        uint32_t magic;
+        uint32_t width;
+        uint32_t height;
+        uint32_t flags;
+        int64_t pts;
+    };
+    WindowCommand cmd{};
+    cmd.magic = kWindowMagic;
+    cmd.flags = 0x2;  // WINDOW_FLAG_DISABLE
+    std::string ignored;
+    WriteAll(&cmd, sizeof(cmd), ignored);
+    present_mode_ = false;
+}
 bool NvDlssnr::SendResize(const Options& options, int work_w, int work_h,
                           std::string& detail) {
     VideoHeader cmd{};
@@ -522,7 +575,21 @@ bool NvDlssnr::Process(const uint8_t* rgba, int width, int height, std::vector<u
     frame.magic = kFrameMagic;
     frame.index = frame_index_;
     frame.reset = frame_index_ == 0 ? 1u : 0u;
-    frame.flags = kFrameFlagShm | kFrameFlagWantPixels;
+    uint32_t flags = kFrameFlagShm | (present_mode_ ? 0u : kFrameFlagWantPixels);
+    if (nr_bypass_) {
+        flags |= 0x10u;  // FRAME_FLAG_BYPASS
+    }
+    if (fg_multiplier_ >= 2) {
+        // Bits 8-11: FG enabled, multiplier minus two, explicit-UI flag; bit
+        // 15 carries the third multiplier bit.
+        flags |= 0x800u | 0x100u;
+        const uint32_t step = static_cast<uint32_t>(std::clamp(fg_multiplier_, 2, 6) - 2);
+        flags |= (step & 3u) << 9;
+        if (step & 4u) {
+            flags |= 0x8000u;  // FRAME_FLAG_FG_MULT_HIGH
+        }
+    }
+    frame.flags = flags;
     frame.pts = static_cast<int64_t>(frame_index_);
     if (!WriteAll(&frame, sizeof(frame), detail)) {
         ready_ = false;
@@ -549,6 +616,13 @@ bool NvDlssnr::Process(const uint8_t* rgba, int width, int height, std::vector<u
         detail = "NR worker failed frame (ngx " + Hex(reply.ngx_result) + ")";
         ready_ = false;
         return false;
+    }
+    if (present_mode_) {
+        // WNDO: the worker shows the frame (and generated ones) itself.
+        last_ms_ = NowMs() - started;
+        ++frame_index_;
+        ++frames_;
+        return true;
     }
     if (reply.bytes != kOutBytesInShm) {
         detail = "NR worker returned " + std::to_string(reply.bytes) +

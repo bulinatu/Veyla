@@ -376,6 +376,7 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"dlss_preset\": " << profile.dlss_preset << ",\n";
     json << "  \"dlss_mode\": " << profile.dlss_mode << ",\n";
     json << "  \"nr_order\": " << profile.nr_order << ",\n";
+    json << "  \"dlss_fg\": " << profile.dlss_fg << ",\n";
     json << "  \"reflex\": " << profile.reflex << ",\n";
     json << "  \"neural_nr\": " << profile.neural_nr << ",\n";
     json << "  \"nr_passes\": " << profile.nr_passes << ",\n";
@@ -464,6 +465,7 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     }
     if (ExtractNumber(json, "neural_nr", number)) p.neural_nr = static_cast<int>(number);
     if (ExtractNumber(json, "nr_order", number)) p.nr_order = static_cast<int>(number);
+    if (ExtractNumber(json, "dlss_fg", number)) p.dlss_fg = static_cast<int>(number);
     if (ExtractNumber(json, "reflex", number)) p.reflex = static_cast<int>(number);
     if (ExtractNumber(json, "nr_passes", number)) p.nr_passes = static_cast<int>(number);
     if (ExtractNumber(json, "nr_scale", number)) p.nr_scale = static_cast<int>(number);
@@ -480,6 +482,7 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     p.nr_passes = std::clamp(p.nr_passes, 1, 4);
     p.dlss_mode = std::clamp(p.dlss_mode, 0, 5);
     p.nr_order = std::clamp(p.nr_order, 0, 1);
+    p.dlss_fg = std::clamp(p.dlss_fg, 0, 6);
     p.reflex = std::clamp(p.reflex, 0, 2);
     if (ExtractNumber(json, "decoder", number)) p.decoder = static_cast<int>(number);
     if (ExtractNumber(json, "chroma", number)) p.chroma = static_cast<int>(number);

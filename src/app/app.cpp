@@ -146,6 +146,7 @@ enum WidgetId {
     W_DlssPreset = 63,
     W_DlssMode = 64,
     W_Reflex = 65,
+    W_DlssFg = 79,
     W_NrOrder = 66,
     W_NeuralNr = 67,
     W_NrPasses = 68,
@@ -324,6 +325,9 @@ bool App::Init(Win32Window* window) {
     render_target_ = std::clamp(profile_.render_target, 0, 3);
     ApplyRenderTarget();
     ApplyReflex();
+    if (profile_.dlss_fg >= 2) {
+        ApplyDlssFrameGen();
+    }
 
     frame_gen_ = profile_.frame_gen >= 2 ? 2 : 0;
     nv_vfx_present_ = !FindFrameGenRuntime().empty();
@@ -712,6 +716,11 @@ void App::ApplyDropdown(int id, int index) {
                 profile_.vsr = 0;
                 stream_note_ = "Frame generation replaced RTX VSR.";
             }
+            if (value > 0 && profile_.dlss_fg >= 2) {
+                profile_.dlss_fg = 0;
+                ApplyDlssFrameGen();
+                stream_note_ = "Frame generation: NVIDIA VFG replaced DLSS FG.";
+            }
             if (value > 0 && profile_.neural_nr > 0) {
                 profile_.neural_nr = 0;
                 DisableNr();
@@ -840,6 +849,20 @@ void App::ApplyDropdown(int id, int index) {
             profile_.reflex = std::clamp(index, 0, 2);
             ApplyReflex();
             SaveProfile();
+            break;
+        }
+        case W_DlssFg: {
+            profile_.dlss_fg = index >= 1 ? 2 : 0;
+            if (profile_.dlss_fg >= 2) {
+                frame_gen_ = 0;
+                profile_.frame_gen = 0;
+                fg_queue_.clear();
+                fg_last_ = {};
+            }
+            ApplyDlssFrameGen();
+            stream_note_ = profile_.dlss_fg >= 2
+                               ? "DLSS Frame Generation 2x enabled (worker presenter)."
+                               : "DLSS Frame Generation off.";
             break;
         }
         case W_NrOrder: {
@@ -1342,6 +1365,11 @@ bool App::NrAvailable() const {
 }
 
 void App::NrStageSize(int* width, int* height) const {
+    if (profile_.dlss_fg >= 2) {
+        // Frame Generation presents the worker window at the stream size.
+        *width = profile_.width;
+        *height = profile_.height;
+    } else {
     const bool sr_stage =
         profile_.neural_sr > 0 && profile_.dlss_mode != 5 && DlssAvailable();
     if (profile_.nr_order == 1 && sr_stage) {
@@ -1357,6 +1385,7 @@ void App::NrStageSize(int* width, int* height) const {
     }
     if (*height <= 0) {
         *height = 1080;
+    }
     }
 }
 
@@ -1390,8 +1419,99 @@ bool App::EnsureDlssSrForTarget() {
     return EnsureDlssSr(in_w, in_h);
 }
 
-void App::ApplyReflex() {
+void App::DetachFgWindow() {
+    if (fg_window_) {
+        ::ShowWindow(fg_window_, SW_HIDE);
+        ::SetParent(fg_window_, nullptr);
+        fg_window_ = nullptr;
+    }
+}
+
+bool App::AttachFgWindow() {
+    if (!nr_.present_mode() || nr_.worker_pid() == 0 || !window_) {
+        return false;
+    }
+    if (fg_window_) {
+        return true;
+    }
+    struct Find {
+        DWORD pid;
+        HWND hwnd;
+    } find{nr_.worker_pid(), nullptr};
+    ::EnumWindows(
+        [](HWND hwnd, LPARAM param) -> BOOL {
+            auto* f = reinterpret_cast<Find*>(param);
+            DWORD pid = 0;
+            ::GetWindowThreadProcessId(hwnd, &pid);
+            if (pid == f->pid && ::IsWindowVisible(hwnd) && ::GetWindow(hwnd, GW_OWNER) == nullptr) {
+                f->hwnd = hwnd;
+                return FALSE;
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&find));
+    if (!find.hwnd) {
+        return false;
+    }
+    ::SetParent(find.hwnd, window_->hwnd());
+    LONG_PTR style = ::GetWindowLongPtrW(find.hwnd, GWL_STYLE);
+    style &= ~(WS_POPUP | WS_CAPTION | WS_THICKFRAME);
+    style |= WS_CHILD | WS_VISIBLE;
+    ::SetWindowLongPtrW(find.hwnd, GWL_STYLE, style);
+    ::SetWindowPos(find.hwnd, HWND_TOP, 0, 0, static_cast<int>(ui_w_),
+                   static_cast<int>(ui_h_), SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+    fg_window_ = find.hwnd;
+    return true;
+}
+
+void App::ApplyDlssFrameGen() {
     std::string detail;
+    if (profile_.dlss_fg >= 2) {
+        // The worker's presenter owns the screen: everything else that also
+        // presents must step aside.
+        frame_gen_ = 0;
+        profile_.frame_gen = 0;
+        fg_queue_.clear();
+        fg_last_ = {};
+        if (vsr_quality_ > 0) {
+            DisableVsr();
+            vsr_quality_ = 0;
+            profile_.vsr = 0;
+        }
+        if (profile_.neural_sr > 0) {
+            profile_.neural_sr = 0;
+            dlss_ready_ = false;
+            dlss_sr_.Shutdown();
+        }
+        if (!EnsureNr()) {
+            profile_.dlss_fg = 0;
+            SaveProfile();
+            return;
+        }
+        nr_.SetFrameGeneration(profile_.dlss_fg);
+        nr_.SetNeuralBypass(profile_.neural_nr == 0);
+        if (!nr_.present_mode() &&
+            !nr_.EnablePresent(profile_.width > 0 ? profile_.width : 1920,
+                               profile_.height > 0 ? profile_.height : 1080, detail)) {
+            stream_note_ = "DLSS Frame Generation: " + detail;
+            nr_.SetFrameGeneration(0);
+            profile_.dlss_fg = 0;
+            SaveProfile();
+            return;
+        }
+        AttachFgWindow();
+    } else {
+        nr_.SetFrameGeneration(0);
+        nr_.DisablePresent();
+        DetachFgWindow();
+        if (nr_.ready()) {
+            ReconfigureNr();
+        }
+    }
+    SaveProfile();
+}
+
+void App::ApplyReflex() {    std::string detail;
     if (profile_.reflex > 0 && !reflex_loaded_) {
         reflex_loaded_ = reflex_.Load(detail);
         if (!reflex_loaded_) {
@@ -1448,6 +1568,17 @@ bool App::EnsureNr() {
     nr_shown_ = 0;
     nr_last_ms_ = 0.0;
     StartNrThread();
+    if (profile_.dlss_fg >= 2) {
+        std::string fg_detail;
+        nr_.SetFrameGeneration(profile_.dlss_fg);
+        nr_.SetNeuralBypass(profile_.neural_nr == 0);
+        if (!nr_.EnablePresent(width, height, fg_detail)) {
+            nr_note_ = L"FG presenter: " + Widen(fg_detail);
+            std::fprintf(stderr, "[app] FG presenter refused: %s\n", fg_detail.c_str());
+        } else {
+            AttachFgWindow();
+        }
+    }
     std::fprintf(stderr, "[app] NR worker ready %dx%d, style %d, scale %d%%, passes %d\n", width,
                  height, profile_.nr_style, profile_.nr_scale, profile_.nr_passes);
     return true;
@@ -1519,7 +1650,7 @@ void App::NrThreadMain() {
             return;
         }
         job.ms = NowMs() - started;
-        {
+        if (!nr_.present_mode()) {
             std::lock_guard<std::mutex> lock(nr_mutex_);
             nr_latest_ = std::move(job);
         }
@@ -1592,6 +1723,7 @@ bool App::ReconfigureNr() {
     options.ui_correction = profile_.nr_ui != 0;
     options.passes = std::clamp(profile_.nr_passes, 1, 4);
     options.work_scale = std::clamp(profile_.nr_scale, 0, 100) / 100.0f;
+    nr_.SetNeuralBypass(profile_.neural_nr == 0);
 
     int stage_w = 0;
     int stage_h = 0;
@@ -2094,6 +2226,13 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         DispatchClick();
     }
 
+    if (profile_.dlss_fg >= 2 && nr_.present_mode() && !fg_window_) {
+        AttachFgWindow();
+    }
+    if (fg_window_) {
+        ::ShowWindow(fg_window_, screen_ == Screen::Stream ? SW_SHOW : SW_HIDE);
+    }
+
     if (nr_settings_dirty_ && !pointer_.down) {
         nr_settings_dirty_ = false;
         if (profile_.neural_nr > 0) {
@@ -2139,6 +2278,21 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                 }
             }
         } else if (streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
+            if (profile_.dlss_fg >= 2 && nr_ready_ && nr_.present_mode()) {
+                // DLSS Frame Generation: the worker presents NR + generated
+                // frames in its own window; we only feed it.
+                SubmitNrFrame(stream_frame_);
+                std::string fg_error;
+                if (NrFailed(fg_error)) {
+                    nr_note_ = L"DLSS FG: " + Widen(fg_error);
+                    std::fprintf(stderr, "[app] DLSS FG worker failed: %s\n", fg_error.c_str());
+                    profile_.dlss_fg = 0;
+                    profile_.neural_nr = 0;
+                    DisableNr();
+                    DetachFgWindow();
+                    SaveProfile();
+                }
+            } else {
             const bool sr_wanted = profile_.neural_sr > 0 && profile_.dlss_mode != 5;
             const bool sr_stage = sr_wanted && DlssAvailable();
             const bool nr_on = profile_.neural_nr > 0 && nr_ready_;
@@ -2280,6 +2434,7 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                     presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
                                               stream_frame_.height, stream_frame_.pq);
                 }
+            }
             }
         }
         if (frame_gen_ >= 2 && fg_ready_) {
@@ -2949,7 +3104,13 @@ void App::RenderSettings(double t) {
                 DrawDropdown(L"Frame generation", options, selected, y, W_FrameGen, available);
             }
             y += kRowH;
-            DrawDropdown(L"Frame buffer", {L"0 (fixed, lowest)", L"1 (adaptive)", L"2 (adaptive)", L"3 (adaptive max)"},
+            DrawDropdown(L"DLSS Frame Generation",
+                         {L"Off", L"2x (worker presenter)"}, profile_.dlss_fg >= 2 ? 1 : 0, y,
+                         W_DlssFg);
+            y += kRowH;
+            DrawDropdown(L"Frame buffer",
+                         {L"0 (fixed, lowest)", L"1 (adaptive)", L"2 (adaptive)",
+                          L"3 (adaptive max)"},
                          stream_buffer_, y, W_FrameBuffer);
             y += kRowH;
             DrawDropdown(L"NVIDIA Reflex", {L"Off", L"On", L"On + Boost"}, profile_.reflex, y,
@@ -3596,6 +3757,9 @@ void App::RenderStreamSettings(double t) {
                 DrawDropdown(L"Frame generation", options, frame_gen_ == 2 ? 1 : 0, y,
                              W_FrameGen, available);
             }
+            y += row;
+            DrawDropdown(L"DLSS Frame Generation", {L"Off", L"2x (worker presenter)"},
+                         profile_.dlss_fg >= 2 ? 1 : 0, y, W_DlssFg);
             y += row;
             DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
             y += row;

@@ -153,6 +153,9 @@ private:
     void NrStageSize(int* width, int* height) const;
     void DlssInputSize(int src_w, int src_h, int* in_w, int* in_h) const;
     void ApplyReflex();
+    void ApplyDlssFrameGen();
+    bool AttachFgWindow();
+    void DetachFgWindow();
     std::wstring FindNrRuntime() const;
     void ApplyNrSettings();
     void DisableNr();
@@ -311,6 +314,7 @@ private:
     media::NvReflex reflex_;
     bool reflex_loaded_ = false;
     int overlay_tab_ = 0;
+    HWND fg_window_ = nullptr;
 
     // Connect flow: check the control port, wake the console if it is asleep,
     // then start the session.

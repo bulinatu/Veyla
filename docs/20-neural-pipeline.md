@@ -99,24 +99,45 @@ works together with Frame Generation. On this machine the driver accepts it
 - **Overlay** rebuilt as categories like the settings screen: Stream / DLSS /
   Neural / Legacy, sharing the same widgets (sliders included).
 
-## DLSS Frame Generation (the honest answer)
+## DLSS Frame Generation (implemented)
 
-Having `nvngx_dlss.dll` and `nvngx_dlssnr.dll` does not give Frame Generation
-for free. DLSS-G is a swapchain-level feature:
+`Settings > Performance > DLSS Frame Generation`: **Off / 2x (worker presenter)**.
 
-- it needs two **consecutively rendered** frames with depth and motion vectors,
-  plus a swapchain it can present into (it inserts generated frames between the
-  real ones);
-- it is integrated with Reflex latency markers and expects the rendering app to
-  own the present queue;
-- for a video client the "real frames" are decoded frames with no depth or
-  motion vectors, which is exactly why the video path uses **NVIDIA VFG**
-  (Video Effects Frame Generation) instead - it is the API meant for video and
-  it is already shipped;
-- VFG and NR are mutually exclusive today because NR needs 13-18 ms per frame
-  and generated frames arrive at 120/s.
+This is the real DLSS-G runtime, not a re-label of VFG:
 
-A real DLSS-G path would mean owning a D3D12 swapchain in the app, feeding it
-two frames + guides, and handling UI/HDR around generated frames. That is a
-separate project, not a checkbox; it is on the list, after the current chain is
-live-verified.
+- the vendor NGX worker loads `nvngx_dlssg.dll` (its own strings: `[fg] ...
+  Init_Ext`, `[fg] 2x enabled at 1920x1080, format=28; flat depth and estimated
+  motion (experimental)`);
+- our client asks the worker to present itself (`WNDO`, capturable window),
+  sends frames with the FG flag bits (enabled, multiplier in bits 9-10/15),
+  and makes the worker's window the video surface: it is re-parented into the
+  app window and hidden while the overlay/settings are open;
+- no depth or motion vectors exist in a video stream, so the worker feeds the
+  FG runtime flat depth and estimated motion - the same experimental path the
+  vendor uses for video. This is why the log calls it "experimental
+  flat-depth guides".
+- Live result: `[fg] displayed 120.0 FPS (real + generated, 2x)` with the
+  stream at 60 fps, while NR stays enabled inside the worker (`direct feature
+  18 ready`, NR then FG).
+
+Constraints, stated in the UI and here:
+
+- FG needs the worker, so RTX VSR, DLSS SR and NVIDIA VFG are off in this
+  mode; the worker owns the display.
+- The worker presents at the stream size (1080p); the window is scaled by the
+  compositor to our client area.
+- Our HUD is covered by the worker window while streaming; opening the overlay
+  (Tab) hides it so the UI is usable, and resuming shows it again.
+- The pipeline inside this mode is the vendor's NR -> FG, because that is how
+  its presenter is built. DLSS SR cannot be stacked under it in this mode.
+
+DLSS-G still is not a post-process on a texture: a home-grown integration
+would require our own D3D12 swapchain. The worker path is the real thing
+without that rewrite.
+
+### Why VFG still exists
+
+VFG (NVIDIA Video Effects) is the video-specific frame generator: it returns
+pixels, so our own presenter keeps the HUD and the overlay. DLSS FG gives the
+NVIDIA DLSS-G look at 2x through the worker presenter. They are alternatives,
+not two stages.

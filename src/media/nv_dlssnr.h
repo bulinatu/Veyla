@@ -48,6 +48,17 @@ public:
     // Must not be called while Process() is running.
     bool Reconfigure(const Options& options, std::string& detail);
 
+    // WNDO: the worker presents (and, with FG, generates) frames in its own
+    // window instead of returning pixels. DLSS-G lives there.
+    bool EnablePresent(int width, int height, std::string& detail);
+    void DisablePresent();
+
+    // DLSS Frame Generation inside the worker: 0 off, else the multiplier.
+    void SetFrameGeneration(int multiplier) { fg_multiplier_ = multiplier; }
+
+    // FRAME_FLAG_BYPASS: the worker presents the raw frame (FG can still run).
+    void SetNeuralBypass(bool bypass) { nr_bypass_ = bypass; }
+
     bool Process(const uint8_t* rgba, int width, int height, std::vector<uint8_t>& out,
                  std::string& detail);
 
@@ -59,6 +70,8 @@ public:
     int work_width() const { return work_w_; }
     int work_height() const { return work_h_; }
     int frame_count() const { return frames_; }
+    DWORD worker_pid() const { return worker_pid_; }
+    bool present_mode() const { return present_mode_; }
 
     void Stop();
 
@@ -92,6 +105,10 @@ private:
     size_t in_size_ = 0;
     size_t out_size_ = 0;
     uint32_t frame_index_ = 0;
+    int fg_multiplier_ = 0;
+    bool nr_bypass_ = false;
+    bool present_mode_ = false;
+    DWORD worker_pid_ = 0;
 };
 
 }  // namespace brp::media
