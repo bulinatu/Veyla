@@ -195,13 +195,9 @@ Problem markers:
 
 ---
 
-## Relationship with RTX VSR
+## Relationship with RTX VSR (removed)
 
-VFG and RTX VSR are mutually exclusive in the current pipeline: VFG needs 1080p
-input/output pairs, while VSR produces a 1440p/2160p output and cannot be run on
-every generated frame within a 60 fps budget. Selecting one in
-`Settings > Upscaling` / `Performance` turns the other off. See `docs/17-neural-rendering.md`.
-
+RTX Video Super Resolution was removed from the client. VFG and DLSS Frame Generation remain; VFG is the legacy path and requires 1080p input/output pairs.
 ---
 
 ## Licensing note

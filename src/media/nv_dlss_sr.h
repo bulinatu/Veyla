@@ -74,7 +74,8 @@ private:
                         std::string& detail);
     bool ClearGuides(std::string& detail);
     bool CreateFeature(int preset, int quality, std::string& detail);
-    bool SubmitAndWait(std::string& detail);
+    bool Submit(std::string& detail);
+    bool WaitPending(std::string& detail);
     std::string ErrorText(int result) const;
 
     bool runtime_loaded_ = false;
@@ -109,10 +110,17 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> input11_;
     Microsoft::WRL::ComPtr<ID3D12Resource> input12_;
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> output11_;
+    static constexpr int kOutputSlots = 2;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> output11_[kOutputSlots];
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> output_srv_[kOutputSlots];
+    Microsoft::WRL::ComPtr<ID3D12Resource> output12_[kOutputSlots];
+    int output_slot_ = 0;
+    int last_output_slot_ = 0;
+    int pending_slot_ = 0;
+    uint64_t pending_value_ = 0;
+    bool have_pending_ = false;
+    bool have_output_ = false;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> output_staging_;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> output_srv_;
-    Microsoft::WRL::ComPtr<ID3D12Resource> output12_;
 
     Microsoft::WRL::ComPtr<ID3D11Fence> fence11_;
 

@@ -46,7 +46,7 @@ the app name, a progress bar, the current stage ("Preparing audio", "Starting
 DLSS Frame Generation", ...), step dots and the current display refresh rate.
 
 Session load, LAN discovery, audio enumeration, NVIDIA runtime detection and the
-DLSS SR / VSR / VFG / NR worker startup all run on background threads. The
+DLSS SR / VFG / NR worker startup all run on background threads. The
 presentation thread only animates and presents the boot screen, so the loader
 stays at the monitor refresh rate (240 Hz here) even while NGX or the NR worker
 starts. `BRP_LOOP_PROBE=1` logs the measured loop rate.

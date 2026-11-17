@@ -15,6 +15,8 @@ are worth a rewrite instead of another patch.
 | Resize | `ResizeBuffers` omitted the waitable flag and failed with `E_INVALIDARG`; fullscreen/maximize could never resize. | Pass the creation flags; recreate the swapchain as a fallback. |
 | Fullscreen + Reflex | The NVAPI driver low-latency mode, with or without latency markers, capped the loop at **225 fps** and produced **56+ missed refreshes/s**; `NvAPI_D3D_Sleep` added ~4 ms/frame. | Reflex mode rejected (setting stays off); markers implemented but unused. Vblank pacing is the low-latency path. |
 | DLSS FG | 6x/4x/3x displayed 165/150/140 fps, not 360/240/180. The worker caps at ~100-120 generated fps and the result was severe judder. | 2x default (stable 120 fps), live worker fps readout and warning. |
+| DLSS SR | Synchronous D3D12 submit + fence waited **10-15 ms** on the presentation thread (25% of ticks late). | Two-slot asynchronous submit; presents the previous output. `p99 4.44 ms`, `late 0`, one source frame extra latency. |
+| VSR | RTX Video Super Resolution was a separate upscaler with its own runtime and a Legacy tab. | Removed from the UI, profile, code and package; the tabs are now DLSS-only. |
 | Video cadence | Wall-clock grid released frames early, producing 3/4/5-refresh selections. | Tick-phase gate: frame every fourth vblank at 240/60; one-frame cushion; no early release. |
 | Decode | hw transfer + swscale ran inline on chiaki's RTP receive thread; a slow frame delayed socket reads. | Dedicated decode thread with a bounded compressed-frame queue. |
 | Audio | Opus resampler recreated per 10 ms packet. | One-time resampler, reused PCM buffer. |
@@ -46,16 +48,19 @@ Phase it: NV12 presenter first, then DLSS SR on the native texture, then NR.
 NR receives/returns 8 MB RGBA buffers; NR-after-SR additionally does a GPU
 readback per frame. That is 16 MB+ of copies per frame and a hard sync point.
 Shared D3D11 textures (or a shared NT handle) would remove both copies. The
-worker's protocol already uses shared-memory magic handshakes, so the change is
-contained but requires the worker side. **Rewrite of the worker ABI.**
+worker binary exposes only the `SHM`/`RNSZ`/`WNDO` protocol (verified in
+`vngx.dll`); there is no texture mode to switch to. Removing the copies requires
+replacing the worker with an in-process NGX NR stage. **Blocked by the closed
+worker ABI.**
 
-### 3. DLSS SR runs on the presentation thread
+### 3. DLSS SR is asynchronous now; the upload/readback remain
 
-`NvDlssSr::Process` uploads, submits and waits on a D3D12 fence synchronously
-inside `App::Frame`. It is 0 ms when disabled, but with SR on it can consume a
-significant part of the 4.17 ms budget. A two-slot worker (as NR already has)
-would keep the UI at full rate. **Improve with a worker; rewrite if combined
-with #1.**
+`NvDlssSr::Process` used to submit and wait on a D3D12 fence synchronously
+inside `App::Frame`: 10-15 ms on 25% of ticks. It now uses two output slots,
+returns the previous result and waits for the fence on the next source frame.
+Measured `p99 4.44 ms`, `late 0`. The remaining costs are the 8 MB CPU upload
+and the readback used by NR-after-SR; both disappear with the GPU-native path
+(#1).
 
 ### 4. Frame generation ceiling
 

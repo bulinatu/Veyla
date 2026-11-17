@@ -17,7 +17,6 @@
 
 #include "audio/audio_engine.h"
 #include "media/nv_vfx.h"
-#include "media/nv_vsr.h"
 #include "media/nv_dlss_sr.h"
 #include "media/nv_dlssnr.h"
 #include "media/nv_reflex.h"
@@ -72,7 +71,7 @@ public:
 
 private:
     enum class Screen { Home, Settings, Stream, StreamSettings };
-    enum class Tab { Display, Upscaling, Performance, Neural, Legacy, Audio, Controller, Connection, Debug, About };
+    enum class Tab { Display, Upscaling, Performance, Neural, Audio, Controller, Connection, Debug, About };
 
     enum class Hit {
         None,
@@ -179,11 +178,6 @@ private:
     bool FrameGenAvailable() const;
     bool EnsureFrameGen();
     std::wstring FindFrameGenRuntime() const;
-
-    bool VsrAvailable() const;
-    bool EnsureVsr();
-    std::wstring FindVsrRuntime() const;
-    void DisableVsr();
 
     bool DlssAvailable() const;
     bool EnsureDlssSr(int in_width, int in_height);
@@ -344,14 +338,6 @@ private:
     std::wstring fg_note_;
     std::deque<media::NvVfx::Frame> fg_queue_;
     media::NvVfx::Frame fg_last_;
-
-    // neural upscaling (NVIDIA RTX VSR)
-    media::NvVsr nv_vsr_;
-    bool vsr_present_ = false;
-    bool vsr_ready_ = false;
-    int vsr_quality_ = 0;  // 0 off, else 1..4 / 21 / 23
-    std::wstring vsr_note_;
-    media::NvVsr::Frame vsr_frame_;
 
     // neural rendering (DLSS Super Resolution, D3D12)
     media::NvDlssSr dlss_sr_;

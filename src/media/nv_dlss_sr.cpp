@@ -289,14 +289,20 @@ bool NvDlssSr::CreateTextures(int in_width, int in_height, int out_width, int ou
     };
 
     if (!create_shared(in_width, in_height, input11_, input12_) ||
-        !create_shared(out_width, out_height, output11_, output12_)) {
+        !create_shared(out_width, out_height, output11_[0], output12_[0]) ||
+        !create_shared(out_width, out_height, output11_[1], output12_[1])) {
         detail = "shared DLSS textures failed";
         return false;
     }
-    if (FAILED(device_->CreateShaderResourceView(output11_.Get(), nullptr, &output_srv_))) {
-        detail = "DLSS output SRV failed";
-        return false;
+    for (int i = 0; i < kOutputSlots; ++i) {
+        if (FAILED(device_->CreateShaderResourceView(output11_[i].Get(), nullptr,
+                                                     &output_srv_[i]))) {
+            detail = "DLSS output SRV failed";
+            return false;
+        }
     }
+    output_slot_ = 0;
+    last_output_slot_ = 0;
 
     auto create_guide = [&](int w, int h, DXGI_FORMAT format,
                             Microsoft::WRL::ComPtr<ID3D12Resource>& resource) -> bool {
@@ -351,7 +357,7 @@ bool NvDlssSr::ClearGuides(std::string& detail) {
     const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     list_->ClearUnorderedAccessViewFloat(gpu0, cpu0, motion12_.Get(), zero, 0, nullptr);
     list_->ClearUnorderedAccessViewFloat(gpu1, cpu1, depth12_.Get(), zero, 0, nullptr);
-    return SubmitAndWait(detail);
+    return Submit(detail) && WaitPending(detail);
 }
 
 bool NvDlssSr::CreateFeature(int preset, int quality, std::string& detail) {
@@ -388,44 +394,51 @@ bool NvDlssSr::CreateFeature(int preset, int quality, std::string& detail) {
         return false;
     }
     feature_ = feature;
-    if (!SubmitAndWait(detail)) {
+    if (!Submit(detail) || !WaitPending(detail)) {
         return false;
     }
     return true;
 }
 
-bool NvDlssSr::SubmitAndWait(std::string& detail) {
+bool NvDlssSr::Submit(std::string& detail) {
     list_->Close();
     ID3D12CommandList* lists[] = {list_.Get()};
     queue_->ExecuteCommandLists(1, lists);
     const UINT64 value = ++fence_value_;
     queue_->Signal(fence12_.Get(), value);
-    // Wait on the fence event rather than polling with Sleep(1): the default
-    // Windows timer granularity is 15.6 ms, so a Sleep-based poll reports the
-    // GPU as ~15 ms slower than it is.
+    pending_value_ = value;
+    have_pending_ = true;
+    return true;
+}
+
+bool NvDlssSr::WaitPending(std::string& detail) {
+    if (!have_pending_) {
+        return true;
+    }
     if (!wait_event_) {
         wait_event_ = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
     }
     bool completed = false;
     if (wait_event_) {
-        if (SUCCEEDED(fence12_->SetEventOnCompletion(value, wait_event_))) {
+        if (SUCCEEDED(fence12_->SetEventOnCompletion(pending_value_, wait_event_))) {
             completed = ::WaitForSingleObject(wait_event_, 5000) == WAIT_OBJECT_0;
         }
     } else {
-        for (int spin = 0; spin < 5000 && fence12_->GetCompletedValue() < value; ++spin) {
+        for (int spin = 0; spin < 5000 && fence12_->GetCompletedValue() < pending_value_; ++spin) {
             ::Sleep(0);
         }
-        completed = fence12_->GetCompletedValue() >= value;
+        completed = fence12_->GetCompletedValue() >= pending_value_;
     }
     if (!completed) {
         detail = "DLSS GPU fence timed out";
         return false;
     }
     if (context4_) {
-        context4_->Wait(fence11_.Get(), value);
+        context4_->Wait(fence11_.Get(), pending_value_);
     }
     allocator_->Reset();
     list_->Reset(allocator_.Get(), nullptr);
+    have_pending_ = false;
     return true;
 }
 
@@ -437,6 +450,18 @@ bool NvDlssSr::Process(const uint8_t* rgba, int width, int height, Frame& out,
         return false;
     }
     const double started = NowMs();
+    // Complete the previous submission first. It was queued one source frame
+    // ago, so this normally returns immediately; the GPU work overlapped the
+    // display interval instead of blocking the presentation thread.
+    if (have_pending_) {
+        if (!WaitPending(detail)) {
+            return false;
+        }
+        last_output_slot_ = pending_slot_;
+        have_output_ = true;
+    }
+    const int slot = have_output_ ? (last_output_slot_ ^ 1) : 0;
+    output_slot_ = slot;
     context_->UpdateSubresource(input11_.Get(), 0, nullptr, rgba,
                                 static_cast<UINT>(width) * 4u, 0);
     const UINT64 input_value = ++fence_value_;
@@ -457,11 +482,11 @@ bool NvDlssSr::Process(const uint8_t* rgba, int width, int height, Frame& out,
             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     barrier(depth12_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    barrier(output12_.Get(), D3D12_RESOURCE_STATE_COMMON,
+    barrier(output12_[slot].Get(), D3D12_RESOURCE_STATE_COMMON,
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     params->Set(NVSDK_NGX_Parameter_Color, input12_.Get());
-    params->Set(NVSDK_NGX_Parameter_Output, output12_.Get());
+    params->Set(NVSDK_NGX_Parameter_Output, output12_[slot].Get());
     params->Set(NVSDK_NGX_Parameter_Depth, depth12_.Get());
     params->Set(NVSDK_NGX_Parameter_MotionVectors, motion12_.Get());
     params->Set(NVSDK_NGX_Parameter_Jitter_Offset_X, 0.0f);
@@ -495,25 +520,42 @@ bool NvDlssSr::Process(const uint8_t* rgba, int width, int height, Frame& out,
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     barrier(depth12_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    barrier(output12_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+    barrier(output12_[slot].Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
             D3D12_RESOURCE_STATE_COMMON);
-    if (!SubmitAndWait(detail)) {
+    if (!Submit(detail)) {
         return false;
     }
-    out.texture = output11_;
-    out.srv = output_srv_;
+    pending_slot_ = slot;
+    if (!have_output_) {
+        // First frame after a (re)init: the caller needs something to show.
+        if (!WaitPending(detail)) {
+            return false;
+        }
+        last_output_slot_ = slot;
+        have_output_ = true;
+    }
+    out.texture = output11_[last_output_slot_];
+    out.srv = output_srv_[last_output_slot_];
     last_ms_ = NowMs() - started;
     status_ = "upscaling";
     return true;
 }
 
 bool NvDlssSr::Readback(std::vector<uint8_t>& out, std::string& detail) {
-    if (!output11_ || !context_ || !device_) {
+    if (have_pending_) {
+        if (!WaitPending(detail)) {
+            return false;
+        }
+        last_output_slot_ = pending_slot_;
+        have_output_ = true;
+    }
+    if (!initialized_ || !output11_[last_output_slot_] || !context_ || !device_) {
         detail = "DLSS SR has no output to read back";
         return false;
     }
+    ID3D11Texture2D* source = output11_[last_output_slot_].Get();
     D3D11_TEXTURE2D_DESC desc{};
-    output11_->GetDesc(&desc);
+    source->GetDesc(&desc);
     if (!output_staging_) {
         D3D11_TEXTURE2D_DESC staging = desc;
         staging.Usage = D3D11_USAGE_STAGING;
@@ -525,7 +567,7 @@ bool NvDlssSr::Readback(std::vector<uint8_t>& out, std::string& detail) {
             return false;
         }
     }
-    context_->CopyResource(output_staging_.Get(), output11_.Get());
+    context_->CopyResource(output_staging_.Get(), source);
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (FAILED(context_->Map(output_staging_.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
         detail = "cannot map the DLSS readback texture";
@@ -563,10 +605,18 @@ void NvDlssSr::Shutdown() {    if (feature_ && api_ && api_->release) {
     // feature is re-created live (preset/quality/target changes).
     input11_.Reset();
     input12_.Reset();
-    output11_.Reset();
-    output12_.Reset();
+    for (int i = 0; i < kOutputSlots; ++i) {
+        output11_[i].Reset();
+        output12_[i].Reset();
+        output_srv_[i].Reset();
+    }
     output_staging_.Reset();
-    output_srv_.Reset();
+    output_slot_ = 0;
+    last_output_slot_ = 0;
+    pending_slot_ = 0;
+    pending_value_ = 0;
+    have_pending_ = false;
+    have_output_ = false;
     motion12_.Reset();
     depth12_.Reset();
     guide_heap_.Reset();

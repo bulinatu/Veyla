@@ -21,7 +21,7 @@ Last updated: live streaming + full controller pipeline.
 | User interface | **WORKS** — 1440p/4K UI scaling, Tab stream-settings overlay |
 | Frame generation | **WORKS** — NVIDIA VFG 2× at 120 fps (synchronous; async blocked) |
 | Input rate | 60–1000 Hz, dedicated thread + high-resolution timer |
-| Neural upscaling | **WORKS** — RTX VSR 1080p→1440p/2160p, 7–11 ms; exclusive with VFG |
+| Neural upscaling | **REMOVED** - replaced by DLSS SR/DLAA and DLSS NR |
 | DLSSNR (same-res neural) | **WORKS via the NGX NR worker at 1080p**, on its own thread, live settings; DLSS SR can run on the NR result (13.2 ms chain); live stream test pending (docs/18, docs/19) |
 | Colour pipeline | **WORKS** — chroma bilinear/bicubic/Lanczos + PQ detect/pass-through/tone-map |
 
@@ -196,7 +196,7 @@ Verified: audio header 2ch/48kHz received during a live session; video 1080p60 a
 1. User hardware test: rumble + adaptive triggers + touchpad + gyro in-game.
    Watch `BRP_PAD_PROBE=1` for `[pad] rumble`, `[hid] rumble`, trigger effects and
    the Rumble test; firmware 0x0630 now uses the new rumble path.
-2. RTX VSR: user visual test at 1440p/2160p (AI High vs FSR1); optional 10-bit
+2. DLSS SR/DLAA visual test at 1440p;
    RGB10A2 path once the decoder keeps 10-bit surfaces (docs/17).
 3. DLSSNR: live stream test (NR worker is connected at 1080p, on its own thread,
    with live RNSZ settings and the Boost/stack-pass ladder; see
@@ -305,17 +305,9 @@ The 1440p/2160p options are **client-side supersampling/upscaling of the 1080p
 stream**. They cannot add detail the console did not send; they trade a little
 GPU time for a resolution-matched present (and clean high-res captures).
 
-### Neural upscaling (RTX VSR)
+### Neural upscaling (RTX VSR) - removed
 
-`Settings -> Upscaling -> Neural upscaling (RTX VSR)` replaces the selected upscaler
-with NVIDIA's AI video upscaler, which writes directly at the render target size
-(1440p/2160p). The presenter is told the source is already final so it does not
-resample or sharpen twice. Measured 7.5–11 ms depending on target/quality; see
-`docs/17-neural-rendering.md`. VSR cannot be combined with VFG.
-
-`Neural Ultra preset (VSR Ultra + 2160p)` is a one-click maximum-GPU setting. At
-1440p, AI High is the verified default (~8–10 ms, 54–59 fps live); Ultra/2160p is
-12–17 ms in isolation and can exceed a 60 fps budget on a 1440p display.
+RTX Video Super Resolution was removed from the client. The neural paths are now DLSS Super Resolution/DLAA (Upscaling), DLSS Neural Rendering (Neural) and DLSS Frame Generation (Performance). See `docs/17-neural-rendering.md`.
 
 ### Frame pacing / smoothness
 

@@ -22,7 +22,7 @@ Outputs:
 | `fonts/` | Noto Sans + Noto Sans Display (SIL OFL, `OFL.txt`). |
 | `nvngx_dlss.dll` | DLSS Super Resolution feature runtime. |
 | `nr/native/` | NeuralScreen worker (`nvngx.dll` is the worker EXE), DLSSNR model, DLSSG runtime, the SM86 frame-generation proxy and its kernels. |
-| `nvidia-vfx/runtime/` | Optional RTX VSR and legacy NVIDIA VFG runtimes. |
+| `nvidia-vfx/runtime/` | Optional legacy NVIDIA VFG runtime (VSR removed). |
 | `vcruntime140*.dll`, `msvcp140*.dll`, `concrt140.dll` | MSVC runtime, so no VC redist install is needed. |
 | `README.txt` | Friend-facing setup instructions. |
 
@@ -44,8 +44,8 @@ account.
 - The NeuralScreen worker uses `nr/native/nvngx.dll` as its executable. It is
   deliberately named `.dll` by the upstream package; the app launches it with
   `CREATE_NO_WINDOW`, so it never shows a console.
-- The optional `nvidia-vfx` runtimes can be deleted if RTX VSR / legacy VFG are
-  not needed. The UI reports them as unavailable instead of failing.
+- The optional `nvidia-vfx` runtime can be deleted if legacy VFG is not used.
+  The UI reports it as unavailable instead of failing.
 - `nvngx.dll` in `nr/native/` and `nvngx_dlss.dll` in the root are different
   NGX components: one is the NeuralScreen worker, the other the DLSS SR feature
   DLL.

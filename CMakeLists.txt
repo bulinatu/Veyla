@@ -13,7 +13,6 @@ add_library(brp_media STATIC
     src/platform/win32_window.cpp
     src/media/pipeline.cpp
     src/media/nv_vfx.cpp
-    src/media/nv_vsr.cpp
     src/media/nv_dlss_sr.cpp
     src/media/nv_dlssnr.cpp
     src/media/nv_reflex.cpp

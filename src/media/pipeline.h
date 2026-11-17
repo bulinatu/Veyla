@@ -105,8 +105,8 @@ public:
     void SetSourceView(ID3D11ShaderResourceView* view, int width, int height,
                        bool source_pq = false);
 
-    // Marks the source as already upscaled to the render target (RTX VSR). The
-    // stage pass then copies without running the selected upscaler/sharpen.
+    // Marks the source as already upscaled to the render target (an earlier
+    // stage pass then copies without running the selected upscaler/sharpen).
     void SetSourceFinal(bool final) { cfg_.source_final = final; }
 
     void Clear(const float rgba[4]);

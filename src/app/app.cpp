@@ -46,15 +46,8 @@ double NowMs() {
     return std::chrono::duration<double, std::milli>(clock::now() - start).count();
 }
 
-// RTX VSR quality levels exposed in the UI (0 = off).
-const int kVsrLevels[] = {0, 1, 2, 3, 4, 21, 23};
-
-const std::vector<std::wstring>& VsrLabels() {
-    static const std::vector<std::wstring> labels = {
-        L"Off",          L"AI Low",   L"AI Medium", L"AI High",
-        L"AI Ultra",     L"AI Streaming Medium", L"AI Streaming Ultra"};
-    return labels;
-}
+// RTX VSR has been removed: the app now uses DLSS Super Resolution/DLAA,
+// DLSS Neural Rendering and DLSS Frame Generation only.
 
 int DlssPerfQuality(int mode) {
     // The NGX PerfQuality value is only a hint, and not every value is valid
@@ -68,14 +61,6 @@ int DlssPerfQuality(int mode) {
         default: return 2;  // Quality 66%, Ultra Quality 77%, DLAA
     }
 }
-int VsrIndex(int quality) {
-    for (int i = 0; i < 7; ++i) {
-        if (kVsrLevels[i] == quality) {
-            return i;
-        }
-    }
-    return 0;
-}
 
 enum class Icon {
     Gear,
@@ -85,7 +70,6 @@ enum class Icon {
     Upscaling,
     Performance,
     Neural,
-    Legacy,
     Audio,
     Controller,
     Connection,
@@ -159,11 +143,6 @@ void DrawIcon(ui::Renderer& ui, Icon icon, float cx, float cy, float s, D2D1_COL
             ui.FillTriangle({cx + s, cy}, {cx + s * 0.15f, cy - s * 0.25f},
                             {cx + s * 0.15f, cy + s * 0.25f}, color);
             break;
-        case Icon::Legacy:
-            ui.StrokeCircle(cx, cy, s * 0.78f, color, weight);
-            ui.Line({cx, cy}, {cx, cy - s * 0.45f}, color, weight);
-            ui.Line({cx, cy}, {cx + s * 0.35f, cy}, color, weight);
-            break;
         case Icon::Audio:
             ui.FillRect({cx - s * 0.78f, cy - s * 0.28f, cx - s * 0.38f, cy + s * 0.28f}, color);
             ui.FillTriangle({cx - s * 0.38f, cy - s * 0.28f}, {cx, cy - s * 0.66f},
@@ -203,25 +182,6 @@ void DrawIcon(ui::Renderer& ui, Icon icon, float cx, float cy, float s, D2D1_COL
     }
 }
 
-const wchar_t* VsrQualityLabel(int quality) {
-    switch (quality) {
-        case 1:
-            return L"AI Low";
-        case 2:
-            return L"AI Medium";
-        case 3:
-            return L"AI High";
-        case 4:
-            return L"AI Ultra";
-        case 21:
-            return L"AI Stream M";
-        case 23:
-            return L"AI Stream U";
-        default:
-            return L"off";
-    }
-}
-
 const std::vector<std::wstring>& PercentLabels() {
     static const std::vector<std::wstring> labels = {
         L"0.00", L"0.25", L"0.50", L"0.75", L"1.00",
@@ -246,7 +206,6 @@ enum WidgetId {
     W_FrameGen,
     W_Decoder = 53,
     W_Chroma = 55,
-    W_Vsr = 56,
     W_Hdr,
     W_AudioDevice = 10,
     W_AudioBuffer,
@@ -271,7 +230,6 @@ enum WidgetId {
     W_Motion = 51,
     W_RenderTarget = 52,
     W_PairHome = 42,
-    W_NeuralMax = 61,
     W_DlssPreset = 63,
     W_DlssMode = 64,
     W_Reflex = 65,
@@ -288,7 +246,6 @@ enum WidgetId {
     W_NrMask = 76,
     W_NrIntensity = 77,
     W_ResumeOverlay = 60,
-    W_Legacy = 78,
     W_HudFrames = 80,
     W_HudGpu = 81,
     W_HudPad = 82,
@@ -519,7 +476,6 @@ void App::BuildBootTasks() {
         frame_gen_ = profile_.frame_gen >= 2 ? 2 : 0;
         nv_vfx_present_ = !FindFrameGenRuntime().empty();
         dlss_present_ = !FindDlssRuntime().empty();
-        vsr_present_ = !FindVsrRuntime().empty();
         nr_present_ = !FindNrRuntime().empty();
         return true;
     }});
@@ -541,38 +497,10 @@ void App::BuildBootTasks() {
         boot_tasks_.push_back({L"Starting DLSS Super Resolution", [this] {
             if (profile_.neural_sr > 0) {
                 if (dlss_present_ && EnsureDlssSrForTarget()) {
-                    vsr_quality_ = 0;
-                    profile_.vsr = 0;
                     frame_gen_ = 0;
                     profile_.frame_gen = 0;
                 } else {
                     profile_.neural_sr = 0;
-                }
-            }
-            return true;
-        }});
-    }
-
-    if (profile_.vsr > 0 && profile_.neural_sr == 0 && profile_.dlss_fg < 2) {
-        boot_tasks_.push_back({L"Starting RTX VSR", [this] {
-            vsr_quality_ = profile_.neural_sr > 0 ? 0 : profile_.vsr;
-            bool valid_vsr = false;
-            for (int level : kVsrLevels) {
-                if (level != 0 && level == vsr_quality_) {
-                    valid_vsr = true;
-                }
-            }
-            if (!valid_vsr) {
-                vsr_quality_ = 0;
-            }
-            if (vsr_quality_ > 0) {
-                if (vsr_present_ && EnsureVsr()) {
-                    // VSR replaces VFG: keep the persisted profile consistent.
-                    frame_gen_ = 0;
-                    profile_.frame_gen = 0;
-                } else {
-                    vsr_quality_ = 0;
-                    profile_.vsr = 0;
                 }
             }
             return true;
@@ -595,10 +523,7 @@ void App::BuildBootTasks() {
         boot_tasks_.push_back({L"Starting Neural Rendering", [this] {
             if (profile_.neural_nr > 0) {
                 if (nr_present_ && EnsureNr()) {
-                    // NR is an enhancement stage; DLSS SR may run after it. VSR
-                    // and frame generation still replace the whole chain.
-                    DisableVsr();
-                    profile_.vsr = 0;
+                    // NR is an enhancement stage; DLSS SR may run after it.
                     frame_gen_ = 0;
                     profile_.frame_gen = 0;
                 } else {
@@ -1156,10 +1081,10 @@ void App::HandleKey(int vk) {
             } else if (vk == 'S') {
                 screen_ = Screen::Home;
             } else if (vk == VK_TAB || vk == VK_RIGHT) {
-                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 1) % 10);
+                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 1) % 9);
                 open_dropdown_ = -1;
             } else if (vk == VK_LEFT) {
-                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 9) % 10);
+                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 8) % 9);
                 open_dropdown_ = -1;
             }
             break;
@@ -1303,11 +1228,6 @@ void App::ApplyDropdown(int id, int index) {
                 SaveProfile();
                 break;
             }
-            if (value > 0 && vsr_quality_ > 0) {
-                DisableVsr();
-                profile_.vsr = 0;
-                stream_note_ = "Frame generation replaced RTX VSR.";
-            }
             if (value > 0 && profile_.dlss_fg >= 2) {
                 profile_.dlss_fg = 0;
                 ApplyDlssFrameGen();
@@ -1346,76 +1266,6 @@ void App::ApplyDropdown(int id, int index) {
             SaveProfile();
             stream_note_ = "Chroma upsampling applies to the next session.";
             break;
-        case W_Vsr: {
-            const int level = kVsrLevels[std::clamp(index, 0, 6)];
-            if (level == 0) {
-                DisableVsr();
-                profile_.vsr = 0;
-                if (stream_active_ && !stream_frame_.rgba.empty()) {
-                    presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
-                                              stream_frame_.height, stream_frame_.pq);
-                }
-                SaveProfile();
-                break;
-            }
-            if (profile_.neural_nr > 0) {
-                profile_.neural_nr = 0;
-                DisableNr();
-            }
-            vsr_quality_ = level;
-            if (!EnsureVsr()) {
-                vsr_quality_ = 0;
-                profile_.vsr = 0;
-                stream_note_ = "RTX VSR unavailable: " + std::string("see Settings > Display");
-                SaveProfile();
-                break;
-            }
-            if (profile_.neural_sr > 0) {
-                profile_.neural_sr = 0;
-                dlss_ready_ = false;
-                dlss_sr_.Shutdown();
-                stream_note_ = "RTX VSR replaced DLSS Super Resolution.";
-            }
-            if (frame_gen_ >= 2 || profile_.frame_gen >= 2) {
-                frame_gen_ = 0;
-                profile_.frame_gen = 0;
-                fg_queue_.clear();
-                fg_last_ = {};
-                fg_generated_ = 0;
-            }
-            profile_.vsr = level;
-            stream_note_ = "RTX VSR enabled; it replaces frame generation.";
-            SaveProfile();
-            break;
-        }
-        case W_NeuralMax: {
-            if (profile_.neural_nr > 0) {
-                profile_.neural_nr = 0;
-                DisableNr();
-            }
-            if (profile_.neural_sr > 0) {
-                profile_.neural_sr = 0;
-                dlss_ready_ = false;
-                dlss_sr_.Shutdown();
-            }
-            vsr_quality_ = 4;  // AI Ultra
-            render_target_ = 3;  // 2160p
-            profile_.render_target = 3;
-            ApplyRenderTarget();
-            frame_gen_ = 0;
-            profile_.frame_gen = 0;
-            fg_queue_.clear();
-            fg_last_ = {};
-            if (vsr_quality_ > 0 && vsr_ready_) {
-                profile_.vsr = 4;
-                stream_note_ = "Neural Ultra: RTX VSR AI Ultra at 2160p (max GPU).";
-            } else {
-                profile_.vsr = 0;
-                stream_note_ = "Neural Ultra unavailable; using the regular upscaler.";
-            }
-            SaveProfile();
-            break;
-        }
         case W_DlssPreset: {
             static const int kPresets[] = {11, 12, 13};
             profile_.dlss_preset = kPresets[std::clamp(index, 0, 2)];
@@ -1685,16 +1535,6 @@ void App::ApplyRenderTarget() {
     const int index = std::clamp(render_target_, 0, 3);
     presenter_.SetUpscaleTarget(kTargets[index][0], kTargets[index][1]);
 
-    // VSR output follows the render target, so a live target change rebuilds it.
-    if (vsr_quality_ > 0) {
-        if (!EnsureVsr()) {
-            const std::wstring note = vsr_note_;
-            DisableVsr();
-            profile_.vsr = 0;
-            SaveProfile();
-            vsr_note_ = note;
-        }
-    }
     if (profile_.neural_sr > 0) {
         // Keep the selection even when the feature cannot be created right
         // now (DLAA on an odd size, a driver hiccup): the user must always be
@@ -1942,79 +1782,6 @@ bool App::EnsureFrameGen() {    std::string detail;
     return true;
 }
 
-std::wstring App::FindVsrRuntime() const {
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    std::vector<fs::path> candidates;
-
-    wchar_t exe_path[MAX_PATH] = {};
-    if (::GetModuleFileNameW(nullptr, exe_path, MAX_PATH) > 0) {
-        const fs::path exe_dir = fs::path(exe_path).parent_path();
-        candidates.push_back(exe_dir / "nvidia-vfx" / "runtime");
-        candidates.push_back(exe_dir / "nvidia-vfx");
-        candidates.push_back(exe_dir / ".." / ".." / "third_party" / "nvidia-vfx" / "runtime");
-    }
-    const fs::path cwd = fs::current_path(ec);
-    if (!ec) {
-        candidates.push_back(cwd / "third_party" / "nvidia-vfx" / "runtime");
-        candidates.push_back(cwd / "nvidia-vfx" / "runtime");
-    }
-
-    for (const fs::path& dir : candidates) {
-        const fs::path effect = dir / "nvVFXVideoSuperRes.dll";
-        const fs::path model = dir / "nvngx_vsr.dll";
-        if (fs::exists(effect, ec) && !ec && fs::exists(model, ec) && !ec) {
-            return fs::absolute(dir, ec).wstring();
-        }
-        ec.clear();
-    }
-    return {};
-}
-
-bool App::VsrAvailable() const {
-    return vsr_present_ || nv_vsr_.runtime_loaded();
-}
-
-bool App::EnsureVsr() {
-    std::string detail;
-    if (!nv_vsr_.runtime_loaded()) {
-        const std::wstring dir = FindVsrRuntime();
-        if (dir.empty()) {
-            vsr_note_ =
-                L"RTX VSR runtime missing: put nvVFXVideoSuperRes.dll + nvngx_vsr.dll in "
-                L"third_party\\nvidia-vfx\\runtime";
-            return false;
-        }
-        if (!nv_vsr_.LoadRuntime(dir, detail)) {
-            vsr_note_ = L"RTX VSR runtime: " + Widen(detail);
-            return false;
-        }
-    }
-    const int width = profile_.width > 0 ? profile_.width : 1920;
-    const int height = profile_.height > 0 ? profile_.height : 1080;
-    const int out_w = presenter_.render_width();
-    const int out_h = presenter_.render_height();
-    if (out_w < width || out_h < height) {
-        vsr_note_ = L"RTX VSR cannot downscale: pick a 1440p/2160p upscale target";
-        return false;
-    }
-    if (!nv_vsr_.Initialize(presenter_.device(), presenter_.context(), width, height, out_w,
-                            out_h, vsr_quality_, 1.0f, detail)) {
-        vsr_note_ = L"RTX VSR init: " + Widen(detail);
-        return false;
-    }
-    vsr_ready_ = true;
-    vsr_note_ = L"RTX VSR ready";
-    return true;
-}
-
-void App::DisableVsr() {
-    vsr_quality_ = 0;
-    vsr_ready_ = false;
-    vsr_frame_ = {};
-    nv_vsr_.Shutdown();
-}
-
 std::wstring App::FindDlssRuntime() const {
     namespace fs = std::filesystem;
     std::error_code ec;
@@ -2092,8 +1859,14 @@ void App::ApplyNeuralSettings() {
             SaveProfile();
             return;
         }
-        DisableVsr();
-        profile_.vsr = 0;
+        // The FG worker owns the output and takes the raw stream frame, so the
+        // two cannot both be the final stage. Selecting DLSS SR/DLAA switches
+        // the output back to the parent presenter.
+        if (profile_.dlss_fg >= 2) {
+            profile_.dlss_fg = 0;
+            ApplyDlssFrameGen();
+            stream_note_ = "DLSS Frame Generation off; DLSS SR is the active output.";
+        }
         frame_gen_ = 0;
         profile_.frame_gen = 0;
         fg_queue_.clear();
@@ -2298,11 +2071,6 @@ void App::ApplyDlssFrameGen() {
         profile_.frame_gen = 0;
         fg_queue_.clear();
         fg_last_ = {};
-        if (vsr_quality_ > 0) {
-            DisableVsr();
-            vsr_quality_ = 0;
-            profile_.vsr = 0;
-        }
         if (profile_.neural_sr > 0) {
             profile_.neural_sr = 0;
             dlss_ready_ = false;
@@ -2590,8 +2358,6 @@ void App::ApplyNrSettings() {
             SaveProfile();
             return;
         }
-        DisableVsr();
-        profile_.vsr = 0;
         frame_gen_ = 0;
         profile_.frame_gen = 0;
         fg_queue_.clear();
@@ -2781,8 +2547,6 @@ void App::StartStream() {
             stream_note_ = "DLSSNR unavailable; using the regular upscaler.";
             std::fprintf(stderr, "[app] NR disabled: %ls\n", nr_note_.c_str());
         } else {
-            profile_.vsr = 0;
-            vsr_quality_ = 0;
             frame_gen_ = 0;
         }
     }
@@ -2797,18 +2561,6 @@ void App::StartStream() {
             stream_note_ = "DLSS SR unavailable; using the regular upscaler.";
             std::fprintf(stderr, "[app] DLSS SR disabled: %ls\n", dlss_note_.c_str());
         }
-        frame_gen_ = 0;
-    }
-    if (vsr_quality_ > 0 && !EnsureVsr()) {
-        const std::wstring note = vsr_note_;
-        DisableVsr();
-        profile_.vsr = 0;
-        SaveProfile();
-        vsr_note_ = note;
-        stream_note_ = "RTX VSR unavailable; using the regular upscaler.";
-        std::fprintf(stderr, "[app] RTX VSR disabled: %ls\n", vsr_note_.c_str());
-    }
-    if (vsr_quality_ > 0) {
         frame_gen_ = 0;
     }
 
@@ -3654,27 +3406,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
             }
 
             if (!nr_on && !sr_presented) {
-                if (vsr_quality_ > 0 && vsr_ready_) {
-                    std::string detail;
-                    if (nv_vsr_.Process(stream_frame_.rgba.data(), stream_frame_.width,
-                                        stream_frame_.height, vsr_frame_, detail)) {
-                        presenter_.SetSourceView(vsr_frame_.srv.Get(), nv_vsr_.out_width(),
-                                                 nv_vsr_.out_height(), stream_frame_.pq);
-                        presenter_.SetSourceFinal(true);
-                    } else {
-                        vsr_note_ = L"RTX VSR: " + Widen(detail);
-                        DisableVsr();
-                        profile_.vsr = 0;
-                        presenter_.SetSourceFinal(false);
-                        presenter_.SetSourceFrame(stream_frame_.rgba.data(),
-                                                  stream_frame_.width, stream_frame_.height,
-                                                  stream_frame_.pq);
-                    }
-                } else {
-                    presenter_.SetSourceFinal(false);
-                    presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
-                                              stream_frame_.height, stream_frame_.pq);
-                }
+                presenter_.SetSourceFinal(false);
+                presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
+                                          stream_frame_.height, stream_frame_.pq);
             }
             }
         }
@@ -3722,16 +3456,6 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         }
     }
 
-    static const bool vsr_probe = std::getenv("BRP_FG_PROBE") != nullptr;
-    static double vsr_probe_at = 0.0;
-    if (vsr_probe && stream_active_ && vsr_quality_ > 0 && vsr_ready_ &&
-        clock_ - vsr_probe_at >= 1.0) {
-        vsr_probe_at = clock_;
-        std::fprintf(stderr, "[vsr] quality %d, %dx%d -> %dx%d, last %.2f ms\n", vsr_quality_,
-                     stream_frame_.width, stream_frame_.height, nv_vsr_.out_width(),
-                     nv_vsr_.out_height(), nv_vsr_.last_ms());
-    }
-
     static const bool decode_probe = std::getenv("BRP_DECODE_PROBE") != nullptr;
     static double decode_probe_at = 0.0;
     static session::Streaming::StreamStats last_stats{};
@@ -3745,10 +3469,10 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                 last_stats.elapsed > 0.0 ? last_stats.frames / last_stats.elapsed : 0.0;
             std::fprintf(
                 stderr,
-                "[app] fps %.1f dec=%s audio=%d vfg=%d vsr=%d | %0.f kbps lost %d | "
+                "[app] fps %.1f dec=%s audio=%d vfg=%d | %0.f kbps lost %d | "
                 "decode %.2f/%.2f ms | queue %d buf %d drops %d\n",
                 interval_fps, streaming_.decoder_name().c_str(), streaming_.audio_frames(),
-                frame_gen_, vsr_quality_, last_stats.kbps, last_stats.lost,
+                frame_gen_, last_stats.kbps, last_stats.lost,
                 last_stats.decode_ms_avg, last_stats.decode_ms_max, last_stats.queue,
                 last_stats.buffer, last_stats.buffer_drops);
         }
@@ -4834,11 +4558,11 @@ void App::RenderSettings(double t) {
                  12.0f, th::Rgba(th::kMuted));
     }
 
-    const wchar_t* tab_names[] = {L"Display", L"Upscaling", L"Performance", L"Neural", L"Legacy", L"Audio", L"Controller", L"Connection", L"Debug", L"About"};
+    const wchar_t* tab_names[] = {L"Display", L"Upscaling", L"Performance", L"Neural", L"Audio", L"Controller", L"Connection", L"Debug", L"About"};
     const Icon tab_icons[] = {Icon::Display, Icon::Upscaling, Icon::Performance, Icon::Neural,
-                              Icon::Legacy,  Icon::Audio,     Icon::Controller,  Icon::Connection,
+                              Icon::Audio,   Icon::Controller, Icon::Connection,
                               Icon::Debug,   Icon::About};
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 9; ++i) {
         const D2D1_RECT_F tab{48.0f, 148.0f + i * 54.0f, 300.0f, 148.0f + i * 54.0f + 44.0f};
         const bool selected = static_cast<int>(tab_) == i;
         const bool hovered = hover_ == Hit::Tab && hover_index_ == i;
@@ -5028,7 +4752,7 @@ void App::RenderSettings(double t) {
                          W_NeuralNr);
             y += row;
             DrawDropdown(L"Pipeline",
-                         {L"Upstream: NR -> SR", L"NVIDIA order: SR -> FG -> NR"},
+                         {L"Upstream: NR -> SR", L"NVIDIA order: SR -> NR"},
                          std::clamp(profile_.nr_order, 0, 1), y, W_NrOrder);
             y += row;
             DrawSlider(L"Render scale", profile_.nr_scale, 50, 100, 1, y, W_NrScale);
@@ -5072,7 +4796,7 @@ void App::RenderSettings(double t) {
                 ui_.Text(L"NR runtime missing: native\\nvngx.dll + nvngx_dlssnr.dll",
                          {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
                          th::Rgba(th::kMuted));
-            } else if (!nr_note_.empty()) {
+            } else if (profile_.neural_nr > 0 && !nr_note_.empty()) {
                 ui_.Text(nr_note_.c_str(), {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
                          th::Rgba(th::kMuted));
             } else {
@@ -5088,46 +4812,6 @@ void App::RenderSettings(double t) {
             break;
         }
 
-        case Tab::Legacy: {
-            ui_.Text(L"Legacy",
-                     {kContentX, y, w - 64.0f, y + 30.0f}, 16.0f, th::Rgba(th::kInk),
-                     DWRITE_FONT_WEIGHT_SEMI_BOLD);
-            y += 36.0f;
-            ui_.Text(
-                L"Not maintained any more, but still functional. These paths are kept for "
-                L"comparison and for machines where DLSS is unavailable.",
-                {kContentX, y + 2.0f, w - 64.0f, y + 46.0f}, 12.0f, th::Rgba(th::kMuted));
-            y += 50.0f;
-
-            DrawDropdown(L"Neural upscaling (RTX VSR)", VsrLabels(), VsrIndex(vsr_quality_), y,
-                         W_Vsr, VsrAvailable());
-            y += kRowH;
-
-            if (vsr_quality_ > 0 && vsr_ready_) {
-                wchar_t text[192];
-                swprintf_s(text, L"RTX VSR %s active  -  %dx%d  -  last %.1f ms",
-                           VsrQualityLabel(vsr_quality_), nv_vsr_.out_width(),
-                           nv_vsr_.out_height(), nv_vsr_.last_ms());
-                ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
-                         th::Rgba(th::kMuted));
-                y += 26.0f;
-            } else if (!VsrAvailable()) {
-                ui_.Text(L"VSR runtime missing: third_party\\nvidia-vfx\\runtime",
-                         {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
-                         th::Rgba(th::kMuted));
-                y += 26.0f;
-            } else if (!vsr_note_.empty()) {
-                ui_.Text(vsr_note_.c_str(), {kContentX, y + 2.0f, w - 64.0f, y + 26.0f},
-                         12.0f, th::Rgba(th::kMuted));
-                y += 26.0f;
-            }
-            y += 10.0f;
-
-            DrawButton(L"Neural Ultra preset (VSR Ultra + 2160p)",
-                       {kContentX, y + 6.0f, kContentX + 380.0f, y + 50.0f}, W_NeuralMax, false);
-            y += kRowH;
-            break;
-        }
         case Tab::Audio: {
             std::vector<std::wstring> devices;
             if (audio_devices_.empty()) {
@@ -5529,10 +5213,6 @@ void App::RenderStream(double t) {
                                profile_.dlss_mode == 5 ? L"DLAA %.1f ms   " : L"DLSS %.1f ms   ",
                                dlss_sr_.last_ms());
                     chain += part;
-                } else if (vsr_quality_ > 0 && vsr_ready_) {
-                    wchar_t part[96];
-                    swprintf_s(part, L"VSR %.1f ms   ", nv_vsr_.last_ms());
-                    chain += part;
                 } else if (frame_gen_ >= 2 && fg_ready_) {
                     wchar_t part[96];
                     swprintf_s(part, L"VFG %dx   ", frame_gen_);
@@ -5642,11 +5322,11 @@ void App::RenderStreamSettings(double t) {
 
     // The same categories as Settings; every control applies live.
     const wchar_t* tabs[] = {L"Stream", L"DLSS", L"Neural",
-                             L"Audio",  L"Controller", L"Legacy"};
+                             L"Audio",  L"Controller"};
     const Icon tab_icons[] = {Icon::Display, Icon::Upscaling, Icon::Neural,
-                              Icon::Audio,   Icon::Controller, Icon::Legacy};
+                              Icon::Audio,   Icon::Controller};
     float tx = kContentX;
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 5; ++i) {
         const D2D1_RECT_F r{tx, 132.0f, tx + 104.0f, 166.0f};
         const bool selected = overlay_tab_ == i;
         if (selected) {
@@ -5699,7 +5379,7 @@ void App::RenderStreamSettings(double t) {
                          y, W_NeuralNr);
             y += row;
             DrawDropdown(L"Pipeline",
-                         {L"Upstream: NR -> SR", L"NVIDIA order: SR -> FG -> NR"},
+                         {L"Upstream: NR -> SR", L"NVIDIA order: SR -> NR"},
                          std::clamp(profile_.nr_order, 0, 1), y, W_NrOrder);
             y += row;
             DrawSlider(L"Render scale", profile_.nr_scale, 50, 100, 1, y, W_NrScale);
@@ -5844,18 +5524,6 @@ void App::RenderStreamSettings(double t) {
             ui_.Text(PadStatus(pad_.snapshot()).c_str(), {kContentX, y, w - 64.0f, y + 24.0f},
                      12.0f, th::Rgba(th::kMuted));
             y += 24.0f;
-            break;
-        }
-        case 5: {  // Legacy
-            ui_.Text(L"Not maintained, still functional: RTX VSR and the VSR preset.",
-                     {kContentX, y + 2.0f, w - 64.0f, y + 40.0f}, 12.0f, th::Rgba(th::kMuted));
-            y += 44.0f;
-            DrawDropdown(L"Neural upscaling (RTX VSR)", VsrLabels(), VsrIndex(vsr_quality_), y,
-                         W_Vsr, VsrAvailable());
-            y += row;
-            DrawButton(L"Neural Ultra preset (VSR Ultra + 2160p)",
-                       {kContentX, y + 6.0f, kContentX + 380.0f, y + 46.0f}, W_NeuralMax, false);
-            y += row;
             break;
         }
         default: {  // Stream

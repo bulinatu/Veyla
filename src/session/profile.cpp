@@ -371,7 +371,6 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"frame_buffer\": " << profile.frame_buffer << ",\n";
     json << "  \"pad_rate_hz\": " << profile.pad_rate_hz << ",\n";
     json << "  \"frame_gen\": " << profile.frame_gen << ",\n";
-    json << "  \"vsr\": " << profile.vsr << ",\n";
     json << "  \"neural_sr\": " << profile.neural_sr << ",\n";
     json << "  \"dlss_preset\": " << profile.dlss_preset << ",\n";
     json << "  \"dlss_mode\": " << profile.dlss_mode << ",\n";
@@ -456,7 +455,6 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     if (ExtractNumber(json, "frame_buffer", number)) p.frame_buffer = static_cast<int>(number);
     if (ExtractNumber(json, "pad_rate_hz", number)) p.pad_rate_hz = static_cast<int>(number);
     if (ExtractNumber(json, "frame_gen", number)) p.frame_gen = static_cast<int>(number);
-    if (ExtractNumber(json, "vsr", number)) p.vsr = static_cast<int>(number);
     if (ExtractNumber(json, "neural_sr", number)) p.neural_sr = static_cast<int>(number);
     if (ExtractNumber(json, "dlss_preset", number)) p.dlss_preset = static_cast<int>(number);
     if (ExtractNumber(json, "dlss_mode", number)) p.dlss_mode = static_cast<int>(number);

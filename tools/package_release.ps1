@@ -77,11 +77,16 @@ Copy-Required (Join-Path $sm86 "runtime\nvngx_dlssg.dll") (Join-Path $sm86Dest "
 Copy-Required (Join-Path $sm86 "backend\sm86_backend.dll") (Join-Path $sm86Dest "backend")
 Copy-Required (Join-Path $sm86 "kernels\fg_kernels.dll") (Join-Path $sm86Dest "kernels")
 
-# --- optional NVIDIA VFX runtimes (RTX VSR / legacy VFG) -------------------
+# --- optional NVIDIA VFX runtime (legacy VFG only) --------------------------
 $vfx = Join-Path $root "third_party\nvidia-vfx\runtime"
 if (Test-Path $vfx) {
-    Copy-Item -LiteralPath $vfx -Destination (Join-Path $dest "nvidia-vfx\runtime") `
-        -Recurse -Force
+    $vfxDest = Join-Path $dest "nvidia-vfx\runtime"
+    Copy-Item -LiteralPath $vfx -Destination $vfxDest -Recurse -Force
+    # VSR was removed from the client; do not ship its model/runtime.
+    foreach ($vsrOnly in @("nvngx_vsr.dll", "nvVFXVideoSuperRes.dll")) {
+        Remove-Item -LiteralPath (Join-Path $vfxDest $vsrOnly) -Force `
+            -ErrorAction SilentlyContinue
+    }
 }
 
 # --- MSVC runtime -----------------------------------------------------------
@@ -136,8 +141,9 @@ Features and runtimes
 - nr\native\ contains the NeuralScreen NGX worker used for DLSSNR and the
   DLSS Frame Generation presenter.
 - nvngx_dlss.dll is the DLSS Super Resolution feature runtime.
-- nvidia-vfx\runtime\ contains the optional RTX VSR and legacy NVIDIA VFG
-  runtimes. These pages are marked Legacy and may be removed if not needed.
+- nvidia-vfx\runtime\ contains the optional legacy NVIDIA VFG runtime. RTX VSR
+  has been removed from the client; DLSS SR/DLAA, DLSS NR and DLSS Frame
+  Generation are the supported neural paths.
 - The app is not affiliated with Sony Interactive Entertainment. No Sony
   artwork, code, keys or fonts are included.
 

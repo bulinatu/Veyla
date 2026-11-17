@@ -54,8 +54,7 @@ struct Profile {
     int frame_buffer = 1;
     int pad_rate_hz = 250;
     int frame_gen = 0;  // 0 off, 2/3/4 NVIDIA VFG multiplier
-    int vsr = 0;        // 0 off, else RTX VSR quality level (1..4, 21, 23)
-    int neural_sr = 0;  // 1 = DLSS Super Resolution (D3D12), exclusive with VSR/VFG
+    int neural_sr = 0;  // 1 = DLSS Super Resolution (D3D12), exclusive with VFG
     int dlss_preset = 11;  // 11 K, 12 L, 13 M
     int dlss_mode = 4;     // 0 UP 33%, 1 Perf 50%, 2 Bal 58%, 3 Qual 66%, 4 UQ 77%, 5 DLAA
     int nr_order = 1;      // 0 NR before SR (upstream), 1 NR after SR (NVIDIA order)
