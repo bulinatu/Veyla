@@ -378,6 +378,7 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"nr_order\": " << profile.nr_order << ",\n";
     json << "  \"dlss_fg\": " << profile.dlss_fg << ",\n";
     json << "  \"reflex\": " << profile.reflex << ",\n";
+    json << "  \"hud_mask\": " << profile.hud_mask << ",\n";
     json << "  \"neural_nr\": " << profile.neural_nr << ",\n";
     json << "  \"nr_passes\": " << profile.nr_passes << ",\n";
     json << "  \"nr_scale\": " << profile.nr_scale << ",\n";
@@ -467,6 +468,7 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     if (ExtractNumber(json, "nr_order", number)) p.nr_order = static_cast<int>(number);
     if (ExtractNumber(json, "dlss_fg", number)) p.dlss_fg = static_cast<int>(number);
     if (ExtractNumber(json, "reflex", number)) p.reflex = static_cast<int>(number);
+    if (ExtractNumber(json, "hud_mask", number)) p.hud_mask = static_cast<int>(number);
     if (ExtractNumber(json, "nr_passes", number)) p.nr_passes = static_cast<int>(number);
     if (ExtractNumber(json, "nr_scale", number)) p.nr_scale = static_cast<int>(number);
     if (ExtractNumber(json, "nr_style", number)) p.nr_style = static_cast<int>(number);
@@ -484,6 +486,7 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     p.nr_order = std::clamp(p.nr_order, 0, 1);
     p.dlss_fg = std::clamp(p.dlss_fg, 0, 6);
     p.reflex = std::clamp(p.reflex, 0, 2);
+    p.hud_mask = std::clamp(p.hud_mask, 0, 31);
     if (ExtractNumber(json, "decoder", number)) p.decoder = static_cast<int>(number);
     if (ExtractNumber(json, "chroma", number)) p.chroma = static_cast<int>(number);
     if (ExtractNumber(json, "lightbar", number)) p.lightbar = static_cast<int>(number);

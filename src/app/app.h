@@ -59,7 +59,7 @@ public:
 
 private:
     enum class Screen { Home, Settings, Stream, StreamSettings };
-    enum class Tab { Display, Upscaling, Performance, Neural, Legacy, Audio, Controller, Connection, About };
+    enum class Tab { Display, Upscaling, Performance, Neural, Legacy, Audio, Controller, Connection, Debug, About };
 
     enum class Hit {
         None,
@@ -131,6 +131,7 @@ private:
     void StopPadThread();
     void PadThreadMain();
     void DisconnectStream();
+    void ToggleFullscreen();
 
     bool FrameGenAvailable() const;
     bool EnsureFrameGen();
@@ -317,6 +318,14 @@ private:
     bool reflex_loaded_ = false;
     int overlay_tab_ = 0;
     HWND fg_window_ = nullptr;
+    int fg_w_ = 0;
+    int fg_h_ = 0;
+    bool borderless_ = false;
+    RECT windowed_rect_{};
+    LONG_PTR windowed_style_ = 0;
+    LONG_PTR windowed_ex_style_ = 0;
+    std::deque<float> frame_ms_;
+    int frame_stutters_ = 0;
 
     // Connect flow: check the control port, wake the console if it is asleep,
     // then start the session.

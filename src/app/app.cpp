@@ -160,6 +160,12 @@ enum WidgetId {
     W_NrIntensity = 77,
     W_ResumeOverlay = 60,
     W_Legacy = 78,
+    W_HudFrames = 80,
+    W_HudGpu = 81,
+    W_HudPad = 82,
+    W_HudStream = 83,
+    W_HudNet = 84,
+    W_HudReset = 85,
 };
 
 constexpr float kContentX = 344.0f;
@@ -530,10 +536,7 @@ void App::HandleKey(int vk) {
         return;
     }
     if (vk == VK_F11) {
-        const bool target = !presenter_.is_fullscreen();
-        ui_.ReleaseTarget();
-        presenter_.SetFullscreen(target);
-        ui_.BindSwapchain(presenter_.backbuffer());
+        ToggleFullscreen();
         return;
     }
 
@@ -564,10 +567,10 @@ void App::HandleKey(int vk) {
             } else if (vk == 'S') {
                 screen_ = Screen::Home;
             } else if (vk == VK_TAB || vk == VK_RIGHT) {
-                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 1) % 9);
+                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 1) % 10);
                 open_dropdown_ = -1;
             } else if (vk == VK_LEFT) {
-                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 8) % 9);
+                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 9) % 10);
                 open_dropdown_ = -1;
             }
             break;
@@ -845,8 +848,31 @@ void App::ApplyDropdown(int id, int index) {
             }
             break;
         }
-        case W_Reflex: {
-            profile_.reflex = std::clamp(index, 0, 2);
+        case W_HudFrames:
+            profile_.hud_mask ^= 0x1;
+            SaveProfile();
+            break;
+        case W_HudGpu:
+            profile_.hud_mask ^= 0x2;
+            SaveProfile();
+            break;
+        case W_HudPad:
+            profile_.hud_mask ^= 0x4;
+            SaveProfile();
+            break;
+        case W_HudStream:
+            profile_.hud_mask ^= 0x8;
+            SaveProfile();
+            break;
+        case W_HudNet:
+            profile_.hud_mask ^= 0x10;
+            SaveProfile();
+            break;
+        case W_HudReset:
+            frame_ms_.clear();
+            frame_stutters_ = 0;
+            break;
+        case W_Reflex: {            profile_.reflex = std::clamp(index, 0, 2);
             ApplyReflex();
             SaveProfile();
             break;
@@ -2069,6 +2095,41 @@ void App::TickPendingConnect() {
         }
     }
 }
+void App::ToggleFullscreen() {
+    if (!window_) {
+        return;
+    }
+    HWND hwnd = window_->hwnd();
+    if (!borderless_) {
+        ::GetWindowRect(hwnd, &windowed_rect_);
+        windowed_style_ = ::GetWindowLongPtrW(hwnd, GWL_STYLE);
+        windowed_ex_style_ = ::GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        MONITORINFO mi{};
+        mi.cbSize = sizeof(mi);
+        const HMONITOR monitor = ::MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if (!::GetMonitorInfoW(monitor, &mi)) {
+            return;
+        }
+        ::SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        ::SetWindowLongPtrW(hwnd, GWL_EXSTYLE, windowed_ex_style_ & ~WS_EX_TOPMOST);
+        ::SetWindowPos(hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+                       mi.rcMonitor.right - mi.rcMonitor.left,
+                       mi.rcMonitor.bottom - mi.rcMonitor.top,
+                       SWP_FRAMECHANGED | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+        borderless_ = true;
+    } else {
+        ::SetWindowLongPtrW(hwnd, GWL_STYLE, windowed_style_);
+        ::SetWindowLongPtrW(hwnd, GWL_EXSTYLE, windowed_ex_style_);
+        ::SetWindowPos(hwnd, nullptr, windowed_rect_.left, windowed_rect_.top,
+                       windowed_rect_.right - windowed_rect_.left,
+                       windowed_rect_.bottom - windowed_rect_.top,
+                       SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOOWNERZORDER);
+        borderless_ = false;
+    }
+    // The swap chain follows the client size through WM_SIZE -> Resize(); the
+    // FG child window is re-fitted below when its size is checked in Frame().
+    ::SetForegroundWindow(hwnd);
+}
 void App::DisconnectStream() {
     StopPadThread();
     streaming_.Stop();
@@ -2186,6 +2247,19 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     last_time_ = time_seconds;
     dt = std::clamp(dt, 0.0, 0.1);
 
+    // Presentation interval history: the HUD shows the distribution, which is
+    // how a stutter is told apart from a low frame rate.
+    if (time_seconds > 0.0) {
+        const float ms = static_cast<float>(dt * 1000.0);
+        frame_ms_.push_back(ms);
+        if (ms > 25.0f) {
+            ++frame_stutters_;
+        }
+        while (frame_ms_.size() > 240) {
+            frame_ms_.pop_front();
+        }
+    }
+
     if (!pad_run_.load()) {
         pad_.Poll();
     }
@@ -2262,6 +2336,14 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         AttachFgWindow();
     }
     if (fg_window_) {
+        const int want_w = static_cast<int>(ui_w_ * ui_scale_);
+        const int want_h = static_cast<int>(ui_h_ * ui_scale_);
+        if (want_w != fg_w_ || want_h != fg_h_) {
+            ::SetWindowPos(fg_window_, HWND_TOP, 0, 0, want_w, want_h,
+                           SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+            fg_w_ = want_w;
+            fg_h_ = want_h;
+        }
         ::ShowWindow(fg_window_, screen_ == Screen::Stream ? SW_SHOW : SW_HIDE);
     }
 
@@ -3106,8 +3188,8 @@ void App::RenderSettings(double t) {
                  th::Rgba(th::kMuted));
     }
 
-    const wchar_t* tab_names[] = {L"Display", L"Upscaling", L"Performance", L"Neural", L"Legacy", L"Audio", L"Controller", L"Connection", L"About"};
-    for (int i = 0; i < 9; ++i) {
+    const wchar_t* tab_names[] = {L"Display", L"Upscaling", L"Performance", L"Neural", L"Legacy", L"Audio", L"Controller", L"Connection", L"Debug", L"About"};
+    for (int i = 0; i < 10; ++i) {
         const D2D1_RECT_F tab{48.0f, 148.0f + i * 54.0f, 300.0f, 148.0f + i * 54.0f + 44.0f};
         const bool selected = static_cast<int>(tab_) == i;
         const bool hovered = hover_ == Hit::Tab && hover_index_ == i;
@@ -3539,6 +3621,39 @@ void App::RenderSettings(double t) {
             break;
         }
 
+        case Tab::Debug: {
+            const float row = 52.0f;
+            ui_.Text(L"Debug overlay",
+                     {kContentX, y, w - 64.0f, y + 30.0f}, 16.0f, th::Rgba(th::kInk),
+                     DWRITE_FONT_WEIGHT_SEMI_BOLD);
+            y += 36.0f;
+            ui_.Text(L"These are the in-game HUD sections. They apply live and are saved.",
+                     {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 11.5f, th::Rgba(th::kMuted));
+            y += 30.0f;
+
+            DrawDropdown(L"Latency HUD (master)", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
+            y += row;
+            DrawDropdown(L"Frame times + stutters", {L"Off", L"On"},
+                         (profile_.hud_mask & 0x1) ? 1 : 0, y, W_HudFrames);
+            y += row;
+            DrawDropdown(L"GPU / render summary", {L"Off", L"On"},
+                         (profile_.hud_mask & 0x2) ? 1 : 0, y, W_HudGpu);
+            y += row;
+            DrawDropdown(L"Controller status", {L"Off", L"On"},
+                         (profile_.hud_mask & 0x4) ? 1 : 0, y, W_HudPad);
+            y += row;
+            DrawDropdown(L"Stream / chain timings", {L"Off", L"On"},
+                         (profile_.hud_mask & 0x8) ? 1 : 0, y, W_HudStream);
+            y += row;
+            DrawDropdown(L"Network / decoder line", {L"Off", L"On"},
+                         (profile_.hud_mask & 0x10) ? 1 : 0, y, W_HudNet);
+            y += row;
+
+            DrawButton(L"Reset frame statistics", {kContentX, y + 6.0f, kContentX + 280.0f,
+                                                   y + 50.0f},
+                       W_HudReset, false);
+            break;
+        }
         case Tab::About: {
             ui_.Text(L"BetterRemotePlay 0.3", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
                      th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
@@ -3569,64 +3684,101 @@ void App::RenderStream(double t) {
     const float w = ui_w_;
 
     if (hud_) {
-        ui_.FillLinearV({0.0f, 0.0f, w, 150.0f}, th::Rgba(0x000000, 0.55f),
-                        th::Rgba(0x000000, 0.0f));
-
-        const std::wstring summary = Widen(presenter_.Summary());
-        const D2D1_RECT_F chip{24.0f, 24.0f, 24.0f + 620.0f, 24.0f + 46.0f};
-        ui_.FillRounded(chip, 10.0f, th::Rgba(0x000000, 0.55f));
-        ui_.StrokeRounded(chip, 10.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
-        ui_.Text(summary.c_str(), {chip.left + 16.0f, chip.top, chip.right - 16.0f, chip.bottom},
-                 12.5f, th::Rgba(th::kInk, 0.92f));
-
-        if (pad_.state().connected) {
-            const D2D1_RECT_F pad_chip{24.0f, 78.0f, 24.0f + 420.0f, 78.0f + 36.0f};
-            ui_.FillRounded(pad_chip, 10.0f, th::Rgba(0x000000, 0.50f));
-            ui_.Text(PadStatus(pad_.state()).c_str(),
-                     {pad_chip.left + 14.0f, pad_chip.top, pad_chip.right - 14.0f,
-                      pad_chip.bottom},
-                     12.0f, th::Rgba(th::kInk, 0.9f));
+        const int mask = profile_.hud_mask;
+        float p50 = 0.0f;
+        float p95 = 0.0f;
+        float p99 = 0.0f;
+        float worst = 0.0f;
+        if (!frame_ms_.empty()) {
+            std::vector<float> sorted(frame_ms_.begin(), frame_ms_.end());
+            std::sort(sorted.begin(), sorted.end());
+            const auto pick = [&sorted](float q) {
+                const size_t index = static_cast<size_t>(q * (sorted.size() - 1));
+                return sorted[std::min(index, sorted.size() - 1)];
+            };
+            p50 = pick(0.50f);
+            p95 = pick(0.95f);
+            p99 = pick(0.99f);
+            worst = sorted.back();
         }
 
-        if (stream_active_) {
-            wchar_t stats[256];
-            wchar_t fg_text[64] = L"";
+        const bool show_pad = (mask & 0x4) != 0 && pad_.state().connected;
+        const bool show_gpu = (mask & 0x2) != 0;
+        const bool show_stream = (mask & 0x8) != 0 && stream_active_;
+        const bool show_net = (mask & 0x10) != 0 && stream_active_;
+        int rows = 0;
+        rows += (mask & 0x1) ? 1 : 0;
+        rows += show_gpu ? 1 : 0;
+        rows += show_pad ? 1 : 0;
+        rows += show_stream ? 1 : 0;
+        rows += show_net ? 1 : 0;
+
+        const D2D1_RECT_F panel{24.0f, 24.0f, 24.0f + 700.0f,
+                                24.0f + 20.0f + static_cast<float>(rows) * 22.0f};
+        ui_.FillRounded(panel, 12.0f, th::Rgba(0x08040F, 0.72f));
+        ui_.StrokeRounded(panel, 12.0f, th::Rgba(th::kAccent, 0.28f), 1.0f);
+
+        float row_y = panel.top + 10.0f;
+        auto line = [&](const std::wstring& text, float alpha) {
+            ui_.Text(text.c_str(), {panel.left + 14.0f, row_y, panel.right - 14.0f,
+                                    row_y + 22.0f},
+                     11.5f, th::Rgba(th::kInk, alpha));
+            row_y += 22.0f;
+        };
+
+        if (mask & 0x1) {
+            const float last_ms = frame_ms_.empty() ? 0.0f : frame_ms_.back();
+            wchar_t header[256];
+            swprintf_s(header,
+                       L"%.1f fps    frame  p50 %.1f   p95 %.1f   p99 %.1f   max %.1f ms    stutters %d",
+                       last_ms > 0.0f ? 1000.0f / last_ms : 0.0f, p50, p95, p99, worst,
+                       frame_stutters_);
+            line(header, 0.95f);
+        }
+        if (show_gpu) {
+            line(Widen(presenter_.Summary()), 0.88f);
+        }
+        if (show_pad) {
+            line(PadStatus(pad_.state()), 0.88f);
+        }
+        if (show_stream) {
+            std::wstring chain;
+            if (profile_.neural_nr > 0 && nr_ready_) {
+                wchar_t part[96];
+                swprintf_s(part, L"NR %.1f ms   ", nr_last_ms_);
+                chain += part;
+            }
             if (profile_.neural_sr > 0 && dlss_ready_) {
-                swprintf_s(fg_text, L"  -  DLSS SR %.1f ms", dlss_sr_.last_ms());
+                wchar_t part[96];
+                swprintf_s(part,
+                           profile_.dlss_mode == 5 ? L"DLAA %.1f ms   " : L"DLSS %.1f ms   ",
+                           dlss_sr_.last_ms());
+                chain += part;
             } else if (vsr_quality_ > 0 && vsr_ready_) {
-                swprintf_s(fg_text, L"  -  VSR %s %.1f ms", VsrQualityLabel(vsr_quality_),
-                           nv_vsr_.last_ms());
+                wchar_t part[96];
+                swprintf_s(part, L"VSR %.1f ms   ", nv_vsr_.last_ms());
+                chain += part;
             } else if (frame_gen_ >= 2 && fg_ready_) {
-                swprintf_s(fg_text, L"  -  VFG %dx gen %d", frame_gen_, fg_generated_);
+                wchar_t part[96];
+                swprintf_s(part, L"VFG %dx   ", frame_gen_);
+                chain += part;
             }
-            swprintf_s(stats, L"PS5  -  %.1f fps%s  -  audio %d  -  peak %.2f  -  %s",
-                       streaming_.fps(), fg_text, streaming_.audio_frames(), audio_.peak(),
+            wchar_t stream_line[320];
+            swprintf_s(stream_line, L"PS5 %.1f fps   %s audio peak %.2f   %s",
+                       streaming_.fps(), chain.c_str(), audio_.peak(),
                        Widen(streaming_.message()).c_str());
-            const D2D1_RECT_F live{24.0f, 132.0f, 24.0f + 620.0f, 132.0f + 34.0f};
-            ui_.FillRounded(live, 10.0f, th::Rgba(0x000000, 0.55f));
-            ui_.Text(stats, {live.left + 14.0f, live.top, live.right - 14.0f, live.bottom}, 12.0f,
-                     th::Rgba(th::kInk, 0.92f));
-
-            const std::wstring decoder = Widen(streaming_.decoder_name());
-            if (!decoder.empty()) {
-                const std::wstring text = L"Decoder: " + decoder;
-                const D2D1_RECT_F dec{24.0f, 174.0f, 24.0f + 300.0f, 174.0f + 30.0f};
-                ui_.FillRounded(dec, 9.0f, th::Rgba(0x000000, 0.50f));
-                ui_.Text(text.c_str(), {dec.left + 12.0f, dec.top, dec.right - 12.0f, dec.bottom},
-                         11.5f, th::Rgba(th::kInk, 0.9f));
+            line(stream_line, 0.88f);
+        }
+        if (show_net) {
+            std::wstring decoder = Widen(streaming_.decoder_name());
+            wchar_t tail[256];
+            if (decoder.empty()) {
+                decoder = L"-";
             }
-
-            // Live pacing telemetry: a rising buffer means jitter, lost > 0
-            // means network/FEC, drops are skipped stale frames.
-            wchar_t net[160];
-            swprintf_s(net, L"buf %d  -  drops %d  -  lost %d  -  %.0f kbps",
-                       stream_stats_.buffer, stream_stats_.buffer_drops, stream_stats_.lost,
-                       stream_stats_.kbps);
-            const D2D1_RECT_F net_chip{24.0f, 210.0f, 24.0f + 360.0f, 210.0f + 30.0f};
-            ui_.FillRounded(net_chip, 9.0f, th::Rgba(0x000000, 0.50f));
-            ui_.Text(net, {net_chip.left + 12.0f, net_chip.top, net_chip.right - 12.0f,
-                           net_chip.bottom},
-                     11.5f, th::Rgba(th::kInk, 0.9f));
+            swprintf_s(tail, L"decoder %s   buf %d   drops %d   lost %d   %.0f kbps",
+                       decoder.c_str(), stream_stats_.buffer, stream_stats_.buffer_drops,
+                       stream_stats_.lost, stream_stats_.kbps);
+            line(tail, 0.82f);
         }
 
         ui_.FillCircle(w - 40.0f, 44.0f, 5.0f, th::Rgba(th::kOnline));

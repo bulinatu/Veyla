@@ -102,6 +102,35 @@ works together with Frame Generation. On this machine the driver accepts it
   Neural / Audio / Controller / Legacy, sharing the same widgets (sliders
   included) and applying every change live while the stream runs.
 
+## Debug tab, HUD and fullscreen
+
+- `Settings > Debug` (new tab) controls every HUD section live: master HUD,
+  frame times + stutters, GPU/render summary, controller status, stream/chain
+  timings, network/decoder line, plus "Reset frame statistics". The switches
+  are stored in `hud_mask` and apply immediately.
+- The in-game HUD is a single panel with aligned rows: fps and the
+  presentation interval distribution (p50/p95/p99/max + stutter count),
+  presenter summary, controller, PS5/chain timings (NR, DLSS/DLAA/VSR/VFG,
+  audio) and the decoder/network line.
+- **Fullscreen is borderless** (F11): the window becomes WS_POPUP sized to the
+  monitor, the swap chain follows WM_SIZE, and the DLSS FG child window is
+  re-fitted on every size change. No exclusive mode switch.
+
+### Where the stutters came from (measured)
+
+With the new HUD counter, a 20-second stream in the NVIDIA order shows
+`p50 16.7, p95 17.1, p99 17.4, max 17.4 ms, stutters 1` - i.e. a locked 60 fps
+with no steady-state jitter. The spikes that were visible earlier line up with:
+
+1. window/swap-chain transitions (connect, render-target change, fullscreen):
+   one 60-70 ms frame, unavoidable while buffers are rebuilt;
+2. NR worker restarts (a settings change that alters the worker size): ~3 s,
+   during which the last frame is repeated;
+3. network: FEC failures at 50-77 Mbps produced 20-30 dropped frames and the
+   "stutter" bursts, not the render path;
+4. before the fence fix, DLSS SR's `Sleep(1)` poll rounded every frame to
+   15.6 ms, which read as constant hitching.
+
 ## DLSS Frame Generation (implemented)
 
 `Settings > Performance > DLSS Frame Generation`: **Off / 2x / 3x / 4x / 5x / 6x**.

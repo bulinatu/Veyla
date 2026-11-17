@@ -61,6 +61,7 @@ struct Profile {
     int nr_order = 1;      // 0 NR before SR (upstream), 1 NR after SR (NVIDIA order)
     int dlss_fg = 0;       // 0 off, 2/3/4 = DLSS Frame Generation multiplier in the worker presenter
     int reflex = 0;        // 0 off, 1 on, 2 on + boost (NVAPI low-latency)
+    int hud_mask = 31;     // debug HUD sections: frames/gpu/pad/stream/net
     int neural_nr = 0;     // DLSSNR on/off (NGX worker at stream size)
     int nr_passes = 1;     // cascade depth, 1..4, independent of the scale
     int nr_scale = 100;    // NGX work scale percent, 50..100 (slider)
