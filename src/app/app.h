@@ -7,6 +7,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -23,6 +24,7 @@
 #include "net/reachability.h"
 #include "platform/gamepad.h"
 #include "session/pairing.h"
+#include "session/discovery.h"
 #include "session/streaming.h"
 #include "session/profile.h"
 #include "ui/ui_renderer.h"
@@ -98,10 +100,14 @@ private:
     void RenderStream(double t);
     void RenderStreamSettings(double t);
     void RenderIntro(double t);
+    void RenderBoot(double t);
+
+    void BuildBootTasks();
+    void TickBoot(double t);
+    void BootWorkerMain();
 
     void RenderTopBar();
     void RenderWindowChrome();
-    void DrawConsoleCard();
     void DrawTile(const D2D1_RECT_F& rect, const GameEntry& game, float alpha, bool selected,
                   bool hovered);
     void DrawHints(const wchar_t* hints, float alpha = 1.0f);
@@ -161,6 +167,7 @@ private:
     void ApplyReflex();
     void ApplyDlssFrameGen();
     bool AttachFgWindow();
+    bool AttachFgWindowNow();
     void DetachFgWindow();
     std::wstring FindNrRuntime() const;
     void ApplyNrSettings();
@@ -236,6 +243,37 @@ private:
     int audio_buffer_ms_ = 20;
     bool audio_failed_ = false;
     bool audio_opened_ = false;
+
+    // startup / boot sequence
+    struct BootTask {
+        std::wstring label;
+        std::function<bool()> run;
+    };
+    bool booting_ = true;
+    bool boot_threads_started_ = false;
+    bool boot_finalized_ = false;
+    size_t boot_total_ = 0;
+    size_t boot_done_steps_ = 0;
+    double boot_started_ = -1.0;
+    double boot_done_at_ = -1.0;
+    double boot_last_ = -1.0;
+    double boot_target_ = 0.0;
+    double boot_shown_ = 0.0;
+    double boot_status_alpha_ = 0.0;
+    std::wstring boot_status_;
+    std::vector<BootTask> boot_tasks_;
+    std::thread boot_worker_;
+    std::mutex boot_mutex_;
+    std::atomic<bool> boot_cancel_{false};
+    size_t boot_worker_index_ = 0;
+    bool boot_worker_done_ = false;
+    bool boot_fg_present_started_ = false;
+    std::wstring boot_worker_label_;
+    std::thread discover_thread_;
+    std::atomic<bool> discover_done_{false};
+    std::mutex discover_mutex_;
+    std::vector<session::DiscoveredConsole> discovered_;
+    bool boot_discovery_applied_ = false;
 
     // intro
     bool intro_ = true;

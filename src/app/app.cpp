@@ -74,6 +74,132 @@ int VsrIndex(int quality) {
     return 0;
 }
 
+enum class Icon {
+    Gear,
+    Back,
+    Power,
+    Display,
+    Upscaling,
+    Performance,
+    Neural,
+    Legacy,
+    Audio,
+    Controller,
+    Connection,
+    Debug,
+    About,
+};
+
+// Small geometric icon set. Everything is drawn with D2D primitives so the
+// navigation stays crisp at every UI scale and no image assets are needed.
+void DrawIcon(ui::Renderer& ui, Icon icon, float cx, float cy, float s, D2D1_COLOR_F color) {
+    const float weight = std::max(1.2f, s * 0.16f);
+    switch (icon) {
+        case Icon::Gear:
+            // Standard gear silhouette: thick body ring, eight wide teeth and
+            // an inner hole. Thin radial rays read as a sun, so the teeth are
+            // short and nearly as thick as the body.
+            for (int i = 0; i < 8; ++i) {
+                const float angle = static_cast<float>(i) * 3.14159265f / 4.0f;
+                const float inner = s * 0.52f;
+                const float outer = s * 1.02f;
+                ui.Line({cx + std::cos(angle) * inner, cy + std::sin(angle) * inner},
+                        {cx + std::cos(angle) * outer, cy + std::sin(angle) * outer}, color,
+                        std::max(2.0f, s * 0.34f));
+            }
+            ui.StrokeCircle(cx, cy, s * 0.60f, color, std::max(2.2f, s * 0.34f));
+            ui.StrokeCircle(cx, cy, s * 0.27f, color, std::max(1.2f, s * 0.13f));
+            break;
+        case Icon::Back:
+            ui.Line({cx + s * 0.35f, cy - s * 0.55f}, {cx - s * 0.35f, cy}, color,
+                    std::max(1.4f, s * 0.20f));
+            ui.Line({cx - s * 0.35f, cy}, {cx + s * 0.35f, cy + s * 0.55f}, color,
+                    std::max(1.4f, s * 0.20f));
+            break;
+        case Icon::Power:
+            ui.StrokeArc(cx, cy, s * 0.72f, -1.047f, 5.236f, color, std::max(1.4f, s * 0.20f));
+            ui.Line({cx, cy - s * 0.95f}, {cx, cy - s * 0.20f}, color,
+                    std::max(1.4f, s * 0.20f));
+            break;
+        case Icon::Display:
+            ui.StrokeRounded({cx - s, cy - s * 0.72f, cx + s, cy + s * 0.42f}, s * 0.18f, color,
+                             weight);
+            ui.Line({cx, cy + s * 0.42f}, {cx, cy + s * 0.72f}, color, weight);
+            ui.Line({cx - s * 0.45f, cy + s * 0.72f}, {cx + s * 0.45f, cy + s * 0.72f}, color,
+                    weight);
+            break;
+        case Icon::Upscaling: {
+            const float l = s * 0.38f;
+            const float w = weight;
+            ui.Line({cx - s, cy - s + l}, {cx - s, cy - s}, color, w);
+            ui.Line({cx - s, cy - s}, {cx - s + l, cy - s}, color, w);
+            ui.Line({cx + s, cy - s + l}, {cx + s, cy - s}, color, w);
+            ui.Line({cx + s, cy - s}, {cx + s - l, cy - s}, color, w);
+            ui.Line({cx - s, cy + s - l}, {cx - s, cy + s}, color, w);
+            ui.Line({cx - s, cy + s}, {cx - s + l, cy + s}, color, w);
+            ui.Line({cx + s, cy + s - l}, {cx + s, cy + s}, color, w);
+            ui.Line({cx + s, cy + s}, {cx + s - l, cy + s}, color, w);
+            break;
+        }
+        case Icon::Performance:
+            ui.StrokeArc(cx, cy, s * 0.78f, 2.4f, 3.3f, color, std::max(1.4f, s * 0.20f));
+            ui.Line({cx, cy}, {cx + s * 0.45f, cy - s * 0.35f}, color, std::max(1.2f, s * 0.16f));
+            ui.FillCircle(cx, cy, s * 0.13f, color);
+            break;
+        case Icon::Neural:
+            ui.FillTriangle({cx, cy - s}, {cx + s * 0.25f, cy - s * 0.15f}, {cx, cy + s * 0.15f},
+                            color);
+            ui.FillTriangle({cx, cy - s}, {cx - s * 0.25f, cy - s * 0.15f}, {cx, cy + s * 0.15f},
+                            color);
+            ui.FillTriangle({cx - s, cy}, {cx - s * 0.15f, cy - s * 0.25f},
+                            {cx - s * 0.15f, cy + s * 0.25f}, color);
+            ui.FillTriangle({cx + s, cy}, {cx + s * 0.15f, cy - s * 0.25f},
+                            {cx + s * 0.15f, cy + s * 0.25f}, color);
+            break;
+        case Icon::Legacy:
+            ui.StrokeCircle(cx, cy, s * 0.78f, color, weight);
+            ui.Line({cx, cy}, {cx, cy - s * 0.45f}, color, weight);
+            ui.Line({cx, cy}, {cx + s * 0.35f, cy}, color, weight);
+            break;
+        case Icon::Audio:
+            ui.FillRect({cx - s * 0.78f, cy - s * 0.28f, cx - s * 0.38f, cy + s * 0.28f}, color);
+            ui.FillTriangle({cx - s * 0.38f, cy - s * 0.28f}, {cx, cy - s * 0.66f},
+                            {cx, cy + s * 0.66f}, color);
+            ui.StrokeArc(cx + s * 0.05f, cy, s * 0.42f, -0.9f, 1.8f, color, std::max(1.1f, s * 0.15f));
+            ui.StrokeArc(cx + s * 0.05f, cy, s * 0.70f, -0.9f, 1.8f, color, std::max(1.0f, s * 0.13f));
+            break;
+        case Icon::Controller:
+            ui.StrokeRounded({cx - s, cy - s * 0.58f, cx + s, cy + s * 0.58f}, s * 0.35f, color,
+                             weight);
+            ui.Line({cx - s * 0.55f, cy - s * 0.18f}, {cx - s * 0.55f, cy + s * 0.18f}, color,
+                    weight);
+            ui.Line({cx - s * 0.73f, cy}, {cx - s * 0.37f, cy}, color, weight);
+            ui.FillCircle(cx + s * 0.50f, cy - s * 0.14f, s * 0.12f, color);
+            ui.FillCircle(cx + s * 0.72f, cy + s * 0.14f, s * 0.12f, color);
+            break;
+        case Icon::Connection:
+            ui.FillCircle(cx, cy + s * 0.55f, s * 0.13f, color);
+            ui.StrokeArc(cx, cy + s * 0.55f, s * 0.42f, -2.2f, 1.25f, color,
+                         std::max(1.1f, s * 0.15f));
+            ui.StrokeArc(cx, cy + s * 0.55f, s * 0.72f, -2.2f, 1.25f, color,
+                         std::max(1.0f, s * 0.13f));
+            break;
+        case Icon::Debug:
+            ui.StrokeRounded({cx - s, cy - s * 0.70f, cx + s, cy + s * 0.70f}, s * 0.20f, color,
+                             std::max(1.2f, s * 0.14f));
+            ui.Line({cx - s * 0.55f, cy - s * 0.22f}, {cx - s * 0.20f, cy}, color, weight);
+            ui.Line({cx - s * 0.20f, cy}, {cx - s * 0.55f, cy + s * 0.22f}, color, weight);
+            ui.Line({cx - s * 0.02f, cy + s * 0.25f}, {cx + s * 0.45f, cy + s * 0.25f}, color,
+                    weight);
+            break;
+        case Icon::About:
+            ui.StrokeCircle(cx, cy, s * 0.80f, color, weight);
+            ui.FillCircle(cx, cy - s * 0.32f, s * 0.10f, color);
+            ui.Line({cx, cy - s * 0.05f}, {cx, cy + s * 0.45f}, color, weight);
+            break;
+    }
+}
+
 const wchar_t* VsrQualityLabel(int quality) {
     switch (quality) {
         case 1:
@@ -174,6 +300,8 @@ constexpr float kRowH = 66.0f;
 // Custom window chrome (windowed mode only; fullscreen draws none).
 constexpr float kTitleBarH = 48.0f;
 constexpr float kTitleBarButtonW = 46.0f;
+constexpr float kCornerButton = 44.0f;
+constexpr float kCornerMargin = 24.0f;
 // The app's own buttons stay clickable; everything left of this strip drags
 // the window through WM_NCHITTEST.
 constexpr float kTitleBarClientRight = 344.0f;
@@ -305,25 +433,6 @@ bool App::Init(Win32Window* window) {
     streaming_.SetMotionEnabled(motion_);
     th::SetHdr(hdr_);
 
-    // Prefer a console found on the LAN over the cached (often WAN) address.
-    const auto discovered = session::DiscoverLocal(1400);
-    if (!discovered.empty()) {
-        profile_.host = discovered.front().address;
-        if (profile_.target_id.empty()) profile_.target_id = discovered.front().target_id;
-        if (profile_.name.empty()) profile_.name = discovered.front().name;
-        std::string save_detail;
-        session::Save(profile_, session::DefaultProfilePath(), save_detail);
-    }
-
-    audio_devices_ = audio::Engine::Enumerate();
-    if (!profile_.audio_device_id.empty()) {
-        for (int i = 0; i < static_cast<int>(audio_devices_.size()); ++i) {
-            if (audio_devices_[i].id == profile_.audio_device_id) {
-                audio_device_ = i;
-                break;
-            }
-        }
-    }
     pad_.SetBackend(kInputBackends[input_source_]);
 
     PresenterConfig cfg{};
@@ -339,79 +448,16 @@ bool App::Init(Win32Window* window) {
     if (!presenter_.Init(window->hwnd(), cfg)) {
         return false;
     }
-    render_target_ = std::clamp(profile_.render_target, 0, 3);
-    ApplyRenderTarget();
-    ApplyReflex();
-    if (std::getenv("BRP_START_FULLSCREEN") != nullptr) {
-        ToggleFullscreen();
-    }
-    if (profile_.dlss_fg >= 2) {
-        ApplyDlssFrameGen();
-    }
-
-    frame_gen_ = profile_.frame_gen >= 2 ? 2 : 0;
-    nv_vfx_present_ = !FindFrameGenRuntime().empty();
-
-    // DLSS SR is the strongest neural path: it replaces VSR and VFG, which
-    // both consume the same decoded frame.
-    dlss_present_ = !FindDlssRuntime().empty();
-    if (profile_.neural_sr > 0) {
-        if (dlss_present_ && EnsureDlssSrForTarget()) {
-            vsr_quality_ = 0;
-            profile_.vsr = 0;
-            frame_gen_ = 0;
-            profile_.frame_gen = 0;
-        } else {
-            profile_.neural_sr = 0;
-        }
-    }
-
-    // RTX VSR and VFG both consume the decoded frame; VSR wins at startup and
-    // turns frame generation off, matching the UI exclusivity rule.
-    vsr_quality_ = profile_.neural_sr > 0 ? 0 : profile_.vsr;
-    bool valid_vsr = false;
-    for (int level : kVsrLevels) {
-        if (level != 0 && level == vsr_quality_) {
-            valid_vsr = true;
-        }
-    }
-    if (!valid_vsr) {
-        vsr_quality_ = 0;
-    }
-    vsr_present_ = !FindVsrRuntime().empty();
-    if (vsr_quality_ > 0) {
-        if (vsr_present_ && EnsureVsr()) {
-            // VSR replaces VFG: keep the persisted profile consistent.
-            frame_gen_ = 0;
-            profile_.frame_gen = 0;
-        } else {
-            vsr_quality_ = 0;
-            profile_.vsr = 0;
-        }
-    }
-    if (profile_.neural_sr > 0) {
-        frame_gen_ = 0;
-    }
-    if (frame_gen_ >= 2 && (!nv_vfx_present_ || !EnsureFrameGen())) {
-        frame_gen_ = 0;
-    }
-    nr_present_ = !FindNrRuntime().empty();
-    if (profile_.neural_nr > 0) {
-        if (nr_present_ && EnsureNr()) {
-            // NR is an enhancement stage; DLSS SR may run after it. VSR and
-            // frame generation still replace the whole chain.
-            DisableVsr();
-            profile_.vsr = 0;
-            frame_gen_ = 0;
-            profile_.frame_gen = 0;
-        } else {
-            profile_.neural_nr = 0;
-        }
-    }
     if (!ui_.Init(presenter_.device())) {
         return false;
     }
-    return ui_.BindSwapchain(presenter_.backbuffer());
+    if (!ui_.BindSwapchain(presenter_.backbuffer())) {
+        return false;
+    }
+
+    // The logo intro plays first. Discovery and the NVIDIA/NGX startup are
+    // kicked off when the boot screen appears, after the logo.
+    return true;
 }
 
 void App::Resize(int width, int height) {
@@ -425,6 +471,390 @@ void App::Resize(int width, int height) {
         return;
     }
     ui_.BindSwapchain(presenter_.backbuffer());
+}
+
+void App::BuildBootTasks() {
+    boot_tasks_.clear();
+
+    boot_tasks_.push_back({L"Preparing audio", [this] {
+        audio_devices_ = audio::Engine::Enumerate();
+        if (!profile_.audio_device_id.empty()) {
+            for (int i = 0; i < static_cast<int>(audio_devices_.size()); ++i) {
+                if (audio_devices_[i].id == profile_.audio_device_id) {
+                    audio_device_ = i;
+                    break;
+                }
+            }
+        }
+        return true;
+    }});
+
+    boot_tasks_.push_back({L"Bringing up the video path", [this] {
+        render_target_ = std::clamp(profile_.render_target, 0, 3);
+        ApplyRenderTarget();
+        ApplyReflex();
+        return true;
+    }});
+
+    boot_tasks_.push_back({L"Checking NVIDIA runtimes", [this] {
+        frame_gen_ = profile_.frame_gen >= 2 ? 2 : 0;
+        nv_vfx_present_ = !FindFrameGenRuntime().empty();
+        dlss_present_ = !FindDlssRuntime().empty();
+        vsr_present_ = !FindVsrRuntime().empty();
+        nr_present_ = !FindNrRuntime().empty();
+        return true;
+    }});
+
+    if (profile_.dlss_fg >= 2) {
+        boot_tasks_.push_back({L"Starting DLSS Frame Generation", [this] {
+            ApplyDlssFrameGen();
+            // The worker window is attached and hidden on the presentation
+            // thread as soon as it exists; SetParent stays off the worker.
+            {
+                std::lock_guard<std::mutex> lock(boot_mutex_);
+                boot_fg_present_started_ = nr_.present_mode();
+            }
+            return true;
+        }});
+    }
+
+    if (profile_.neural_sr > 0) {
+        boot_tasks_.push_back({L"Starting DLSS Super Resolution", [this] {
+            if (profile_.neural_sr > 0) {
+                if (dlss_present_ && EnsureDlssSrForTarget()) {
+                    vsr_quality_ = 0;
+                    profile_.vsr = 0;
+                    frame_gen_ = 0;
+                    profile_.frame_gen = 0;
+                } else {
+                    profile_.neural_sr = 0;
+                }
+            }
+            return true;
+        }});
+    }
+
+    if (profile_.vsr > 0 && profile_.neural_sr == 0 && profile_.dlss_fg < 2) {
+        boot_tasks_.push_back({L"Starting RTX VSR", [this] {
+            vsr_quality_ = profile_.neural_sr > 0 ? 0 : profile_.vsr;
+            bool valid_vsr = false;
+            for (int level : kVsrLevels) {
+                if (level != 0 && level == vsr_quality_) {
+                    valid_vsr = true;
+                }
+            }
+            if (!valid_vsr) {
+                vsr_quality_ = 0;
+            }
+            if (vsr_quality_ > 0) {
+                if (vsr_present_ && EnsureVsr()) {
+                    // VSR replaces VFG: keep the persisted profile consistent.
+                    frame_gen_ = 0;
+                    profile_.frame_gen = 0;
+                } else {
+                    vsr_quality_ = 0;
+                    profile_.vsr = 0;
+                }
+            }
+            return true;
+        }});
+    }
+
+    if (profile_.frame_gen >= 2 && profile_.dlss_fg < 2) {
+        boot_tasks_.push_back({L"Starting NVIDIA VFG", [this] {
+            if (profile_.neural_sr > 0) {
+                frame_gen_ = 0;
+            }
+            if (frame_gen_ >= 2 && (!nv_vfx_present_ || !EnsureFrameGen())) {
+                frame_gen_ = 0;
+            }
+            return true;
+        }});
+    }
+
+    if (profile_.neural_nr > 0) {
+        boot_tasks_.push_back({L"Starting Neural Rendering", [this] {
+            if (profile_.neural_nr > 0) {
+                if (nr_present_ && EnsureNr()) {
+                    // NR is an enhancement stage; DLSS SR may run after it. VSR
+                    // and frame generation still replace the whole chain.
+                    DisableVsr();
+                    profile_.vsr = 0;
+                    frame_gen_ = 0;
+                    profile_.frame_gen = 0;
+                } else {
+                    profile_.neural_nr = 0;
+                }
+            }
+            return true;
+        }});
+    }
+
+    boot_tasks_.push_back({L"Finishing up", [] { return true; }});
+    // +1 for the parallel LAN discovery step.
+    boot_total_ = boot_tasks_.size() + 1;
+}
+
+void App::TickBoot(double t) {
+    if (!boot_threads_started_) {
+        boot_threads_started_ = true;
+        boot_status_ = L"Loading session";
+
+        discover_thread_ = std::thread([this] {
+            std::vector<session::DiscoveredConsole> found = session::DiscoverLocal(1400);
+            {
+                std::lock_guard<std::mutex> lock(discover_mutex_);
+                discovered_ = std::move(found);
+            }
+            discover_done_.store(true);
+        });
+
+        // Device creation, NGX/NR startup and file I/O never run on the
+        // presentation thread; the boot screen keeps animating at full rate.
+        BuildBootTasks();
+        boot_worker_ = std::thread(&App::BootWorkerMain, this);
+    }
+
+    if (boot_started_ < 0.0) {
+        boot_started_ = t;
+        boot_last_ = t;
+        boot_target_ = 0.05;
+    }
+
+    const double dt = boot_last_ < 0.0 ? 1.0 / 60.0 : std::clamp(t - boot_last_, 0.0, 0.1);
+    boot_last_ = t;
+    boot_status_alpha_ = std::min(1.0, boot_status_alpha_ + dt / 0.20);
+    pad_.Poll();
+
+    size_t worker_index = 0;
+    bool worker_done = false;
+    bool fg_started = false;
+    std::wstring label;
+    {
+        std::lock_guard<std::mutex> lock(boot_mutex_);
+        worker_index = boot_worker_index_;
+        worker_done = boot_worker_done_;
+        fg_started = boot_fg_present_started_;
+        label = boot_worker_label_;
+    }
+
+    if (fg_started && !fg_window_) {
+        // The worker's presenter exists now. Re-parent and hide it here, on the
+        // UI thread, so it cannot flash over the boot screen.
+        AttachFgWindowNow();
+        if (fg_window_) {
+            ::ShowWindow(fg_window_, SW_HIDE);
+        }
+    }
+
+    const bool discovery_done = discover_done_.load() || (t - boot_started_ >= 6.0);
+    const size_t completed =
+        std::min(worker_index, boot_tasks_.size()) + (discovery_done ? 1 : 0);
+    boot_done_steps_ = std::max(boot_done_steps_, completed);
+
+    std::wstring status = label.empty() ? std::wstring(L"Loading session") : label;
+    if (worker_done && !discovery_done) {
+        status = L"Scanning for your console";
+    }
+    if (status != boot_status_) {
+        boot_status_ = status;
+        boot_status_alpha_ = 0.0;
+    }
+
+    if (!boot_finalized_) {
+        if (worker_done && discovery_done && t - boot_started_ >= 2.1) {
+            // The worker is done; joining is instant. The fade-out below keeps
+            // the loader on screen while the intro takes over.
+            if (boot_worker_.joinable()) {
+                boot_worker_.join();
+            }
+            if (!boot_discovery_applied_) {
+                boot_discovery_applied_ = true;
+                std::vector<session::DiscoveredConsole> found;
+                {
+                    std::lock_guard<std::mutex> lock(discover_mutex_);
+                    found = std::move(discovered_);
+                }
+                if (!found.empty()) {
+                    profile_.host = found.front().address;
+                    if (profile_.target_id.empty()) {
+                        profile_.target_id = found.front().target_id;
+                    }
+                    if (profile_.name.empty()) {
+                        profile_.name = found.front().name;
+                    }
+                    std::string save_detail;
+                    session::Save(profile_, session::DefaultProfilePath(), save_detail);
+                }
+            }
+            // Final FG presenter check, still on the UI thread.
+            if (nr_.present_mode() && !fg_window_) {
+                AttachFgWindowNow();
+            }
+            if (fg_window_) {
+                ::ShowWindow(fg_window_, SW_HIDE);
+            }
+            if (std::getenv("BRP_START_FULLSCREEN") != nullptr && !borderless_) {
+                ToggleFullscreen();
+            }
+            boot_done_at_ = t;
+            boot_target_ = 1.0;
+            boot_done_steps_ = boot_total_;
+            boot_status_ = L"Ready";
+            boot_status_alpha_ = 1.0;
+            boot_finalized_ = true;
+        } else {
+            const size_t total = std::max<size_t>(1, boot_total_);
+            const double fraction =
+                static_cast<double>(completed) / static_cast<double>(total);
+            boot_target_ = 0.06 + 0.86 * fraction;
+            if (completed < total) {
+                const double next = 0.06 + 0.86 * (static_cast<double>(completed + 1) /
+                                                   static_cast<double>(total));
+                boot_target_ = std::min(next - 0.02, boot_target_ + dt * 0.03);
+            }
+        }
+    }
+
+    if (boot_finalized_ && t - boot_done_at_ >= 0.45) {
+        if (boot_worker_.joinable()) {
+            boot_worker_.join();
+        }
+        booting_ = false;
+        // The logo intro already played before the boot screen; Home follows.
+        intro_ = false;
+        intro_start_ = -1.0;
+    }
+
+    const float k = 1.0f - std::exp(-7.0f * static_cast<float>(dt));
+    boot_shown_ += (boot_target_ - boot_shown_) * k;
+}
+
+void App::BootWorkerMain() {
+    for (size_t i = 0; i < boot_tasks_.size(); ++i) {
+        if (boot_cancel_.load()) {
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> lock(boot_mutex_);
+            boot_worker_index_ = i;
+            boot_worker_label_ = boot_tasks_[i].label;
+        }
+
+        // Give the presentation thread a moment to show this status before a
+        // heavy call (NGX init, worker process start).
+        std::this_thread::sleep_for(std::chrono::milliseconds(70));
+
+        bool done = false;
+        while (!done) {
+            if (boot_cancel_.load()) {
+                return;
+            }
+            done = boot_tasks_[i].run();
+            if (!done) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(16));
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(boot_mutex_);
+            boot_worker_index_ = i + 1;
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(boot_mutex_);
+        boot_worker_done_ = true;
+        boot_worker_label_ = L"Ready";
+    }
+}
+
+void App::RenderBoot(double t) {
+    const float w = ui_w_;
+    const float h = ui_h_;
+
+    const float fade_in = std::clamp(static_cast<float>((t - boot_started_) / 0.40), 0.0f, 1.0f);
+    const float fade_out =
+        boot_done_at_ < 0.0
+            ? 1.0f
+            : 1.0f - std::clamp(static_cast<float>((t - boot_done_at_) / 0.45), 0.0f, 1.0f);
+    const float alpha = fade_in * fade_out;
+
+    ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(th::kBgTop), th::Rgba(th::kBgBottom));
+    ui_.FillRadial(w * 0.5f, h * 0.42f, w * 0.60f, th::Rgba(0x6B32D9, 0.22f * alpha),
+                   th::Rgba(0x6B32D9, 0.0f));
+    ui_.FillRadial(w * 0.12f, h * 0.10f, w * 0.30f, th::Rgba(0x3E2170, 0.18f * alpha),
+                   th::Rgba(0x3E2170, 0.0f));
+
+    const float cx = w * 0.5f;
+    const float cy = h * 0.42f;
+    const float spin = static_cast<float>(t) * 1.15f;
+
+    ui_.FillCircle(cx, cy, 92.0f + 7.0f * std::sin(static_cast<float>(t) * 2.0f),
+                   th::Rgba(th::kAccent, 0.05f * alpha));
+    ui_.StrokeArc(cx, cy, 62.0f, spin, 4.55f, th::Rgba(th::kAccent, 0.90f * alpha), 2.4f);
+    ui_.StrokeArc(cx, cy, 76.0f, -spin * 0.65f + 0.8f, 2.15f, th::Rgba(th::kInk, 0.20f * alpha),
+                  1.2f);
+    ui_.StrokeCircle(cx, cy, 45.0f, th::Rgba(0xFFFFFF, 0.07f * alpha), 1.0f);
+
+    ui_.FillRounded({cx - 22.0f, cy - 22.0f, cx + 22.0f, cy + 22.0f}, 12.0f,
+                    th::Rgba(th::kAccent, 0.16f * alpha));
+    ui_.StrokeRounded({cx - 22.0f, cy - 22.0f, cx + 22.0f, cy + 22.0f}, 12.0f,
+                      th::Rgba(th::kAccent, 0.45f * alpha), 1.0f);
+    ui_.Text(L"BRP", {cx - 30.0f, cy - 17.0f, cx + 30.0f, cy + 17.0f}, 14.0f,
+             th::Rgba(th::kInk, 0.95f * alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+             DWRITE_TEXT_ALIGNMENT_CENTER);
+
+    ui_.Text(L"BETTERREMOTEPLAY", {cx - 300.0f, cy + 112.0f, cx + 300.0f, cy + 140.0f}, 17.0f,
+             th::Rgba(th::kInk, 0.96f * alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+             DWRITE_TEXT_ALIGNMENT_CENTER);
+    ui_.Text(L"REMOTE PLAY, BETTER", {cx - 300.0f, cy + 144.0f, cx + 300.0f, cy + 164.0f}, 10.5f,
+             th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+             DWRITE_TEXT_ALIGNMENT_CENTER);
+
+    const float bar_w = 460.0f;
+    const float bx = cx - bar_w * 0.5f;
+    const float by = cy + 194.0f;
+    ui_.FillRounded({bx, by, bx + bar_w, by + 4.0f}, 2.0f, th::Rgba(0xFFFFFF, 0.08f * alpha));
+    const float filled = bar_w * static_cast<float>(std::clamp(boot_shown_, 0.0, 1.0));
+    if (filled > 1.0f) {
+        ui_.FillRounded({bx, by, bx + filled, by + 4.0f}, 2.0f,
+                        th::Rgba(th::kAccent, 0.92f * alpha));
+        ui_.FillCircle(bx + filled, by + 2.0f, 3.2f, th::Rgba(th::kInk, 0.95f * alpha));
+        ui_.FillCircle(bx + filled, by + 2.0f, 11.0f, th::Rgba(th::kAccent, 0.12f * alpha));
+    }
+
+    ui_.Text(boot_status_.c_str(), {bx, by + 18.0f, bx + bar_w - 54.0f, by + 40.0f}, 12.0f,
+             th::Rgba(th::kInk,
+                      0.85f * alpha * std::max(0.60f, static_cast<float>(boot_status_alpha_))));
+    wchar_t percent[16];
+    swprintf_s(percent, L"%.0f%%", boot_shown_ * 100.0);
+    ui_.Text(percent, {bx + bar_w - 52.0f, by + 18.0f, bx + bar_w, by + 40.0f}, 12.0f,
+             th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
+             DWRITE_TEXT_ALIGNMENT_TRAILING);
+
+    if (boot_total_ > 0) {
+        const float spacing = 12.0f;
+        const float start = cx - spacing * (static_cast<float>(boot_total_) - 1.0f) * 0.5f;
+        for (size_t i = 0; i < boot_total_; ++i) {
+            const bool done = i < boot_done_steps_;
+            const bool current = i == boot_done_steps_;
+            const float pulse = current ? 2.6f + 0.9f * std::sin(static_cast<float>(t) * 6.0f)
+                                        : 2.2f;
+            ui_.FillCircle(start + spacing * static_cast<float>(i), by + 52.0f, pulse,
+                           th::Rgba(done ? th::kAccent : th::kInk,
+                                    (done ? 0.75f : 0.14f) * alpha));
+        }
+    }
+
+    wchar_t footer[96];
+    swprintf_s(footer, L"BetterRemotePlay 0.3");
+    ui_.Text(footer, {48.0f, h - 56.0f, 420.0f, h - 32.0f}, 11.0f,
+             th::Rgba(th::kMuted, 0.65f * alpha));
+    swprintf_s(footer, L"DISPLAY %d Hz", refresh_hz_);
+    ui_.Text(footer, {w - 420.0f, h - 56.0f, w - 48.0f, h - 32.0f}, 11.0f,
+             th::Rgba(th::kMuted, 0.65f * alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+             DWRITE_TEXT_ALIGNMENT_TRAILING);
 }
 
 bool App::Contains(const D2D1_RECT_F& rect, int x, int y) const {
@@ -560,6 +990,12 @@ void App::DispatchClick() {
 void App::HandleKey(int vk) {
     if (intro_) {
         intro_ = false;
+        return;
+    }
+    if (booting_) {
+        if (vk == VK_ESCAPE) {
+            quit_ = true;
+        }
         return;
     }
     if (vk == VK_F12) {
@@ -1523,6 +1959,15 @@ void App::DetachFgWindow() {
 }
 
 bool App::AttachFgWindow() {
+    // Win32 window re-parenting must stay on the UI thread; the boot worker
+    // prepares the presenter but the normal frame attaches it after boot.
+    if (booting_) {
+        return false;
+    }
+    return AttachFgWindowNow();
+}
+
+bool App::AttachFgWindowNow() {
     if (!nr_.present_mode() || nr_.worker_pid() == 0 || !window_) {
         return false;
     }
@@ -1885,6 +2330,13 @@ void App::ApplyNrSettings() {
 }
 
 App::~App() {
+    boot_cancel_.store(true);
+    if (boot_worker_.joinable()) {
+        boot_worker_.join();
+    }
+    if (discover_thread_.joinable()) {
+        discover_thread_.join();
+    }
     StopNrThread();
     StopPadThread();
 }
@@ -2304,8 +2756,8 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         last_mouse_y_ = pointer.y;
     }
 
-    // Startup logo animation. Runs before any other UI and is skippable with a
-    // click or a key; the window is shown only after its first frame.
+    // Startup logo animation. Runs first and is skippable with a click or a key;
+    // the window is shown only after its first frame.
     if (intro_) {
         if (intro_start_ < 0.0) {
             intro_start_ = clock_;
@@ -2325,6 +2777,29 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         intro_ = false;
         pointer_.clicked = false;  // a skip click must not hit the Home UI
         mouse_active_at_ = clock_;
+    }
+
+    // Boot sequence: everything the app needs is prepared while this screen
+    // animates, after the logo and before Home.
+    if (booting_) {
+        TickBoot(time_seconds);
+        ui_.BeginFrame();
+        RenderBoot(time_seconds);
+        RenderWindowChrome();
+        ui_.EndFrame();
+
+        if (window_) {
+            window_->set_hand_cursor(hover_ != Hit::None);
+        }
+        if (pointer_.clicked) {
+            DispatchClick();
+        }
+        presenter_.PresentNow(true);
+        if (!window_shown_) {
+            window_->Show();
+            window_shown_ = true;
+        }
+        return;
     }
 
     double dt = last_time_ < 0.0 ? 1.0 / 60.0 : time_seconds - last_time_;
@@ -2822,17 +3297,15 @@ void App::RenderTopBar() {
     // Below the title bar in windowed mode, and at its original height in
     // fullscreen. The clock/avatar decorations were removed: the custom frame
     // already shows the app identity and the window state.
-    const float button_y = borderless_ ? 28.0f : kTitleBarH + 8.0f;
-    const D2D1_RECT_F settings_rect{w - kTitleBarClientRight, button_y,
-                                    w - kTitleBarClientRight + 100.0f, button_y + 36.0f};
+    const float button_y = borderless_ ? 28.0f : kTitleBarH + 12.0f;
+    const D2D1_RECT_F gear{w - kCornerMargin - kCornerButton, button_y, w - kCornerMargin,
+                           button_y + kCornerButton};
     const bool settings_hover = hover_ == Hit::SettingsButton;
-    ui_.FillRounded(settings_rect, 18.0f, th::Rgba(0xFFFFFF, settings_hover ? 0.12f : 0.06f));
-    ui_.StrokeRounded(settings_rect, 18.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
-    ui_.Text(L"Settings",
-             {settings_rect.left, settings_rect.top, settings_rect.right, settings_rect.bottom},
-             13.0f, th::Rgba(th::kInk, 0.9f), DWRITE_FONT_WEIGHT_NORMAL,
-             DWRITE_TEXT_ALIGNMENT_CENTER);
-    AddHit(Hit::SettingsButton, -1, settings_rect);
+    ui_.FillRounded(gear, 14.0f, th::Rgba(0xFFFFFF, settings_hover ? 0.14f : 0.06f));
+    ui_.StrokeRounded(gear, 14.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
+    DrawIcon(ui_, Icon::Gear, gear.left + 22.0f, gear.top + 22.0f, 10.0f,
+             th::Rgba(th::kInk, settings_hover ? 1.0f : 0.88f));
+    AddHit(Hit::SettingsButton, -1, gear);
 }
 
 void App::RenderWindowChrome() {
@@ -2903,66 +3376,6 @@ void App::RenderWindowChrome() {
 
         AddHit(buttons[i], i, rect);
     }
-}
-
-void App::DrawConsoleCard() {
-    const float w = ui_w_;
-    const D2D1_RECT_F card{w - 392.0f, 96.0f, w - 40.0f, 96.0f + 156.0f};
-
-    ui_.FillRounded(card, 18.0f, th::Rgba(0xFFFFFF, 0.05f));
-    ui_.StrokeRounded(card, 18.0f, th::Rgba(0xFFFFFF, 0.09f), 1.0f);
-
-    ui_.Text(L"CONSOLE", {card.left + 20.0f, card.top + 14.0f, card.right - 20.0f,
-                          card.top + 34.0f},
-             10.5f, th::Rgba(th::kMuted, 0.9f), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-
-    const std::wstring name =
-        profile_.has_console() ? Widen(profile_.display_name()) : std::wstring(L"No console");
-    ui_.Text(name.c_str(), {card.left + 20.0f, card.top + 34.0f, card.right - 20.0f,
-                            card.top + 68.0f},
-             21.0f, th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-
-    uint32_t dot = th::kOffline;
-    std::wstring status;
-    switch (probe_.state()) {
-        case net::ProbeState::Checking:
-            dot = th::kAccent;
-            status = L"Checking the control port...";
-            break;
-        case net::ProbeState::Reachable:
-            dot = th::kOnline;
-            status = L"Reachable";
-            break;
-        case net::ProbeState::Unreachable:
-            dot = th::kOffline;
-            status = L"No answer on the control port";
-            break;
-        case net::ProbeState::NoAddress:
-            dot = th::kMuted;
-            status = L"No address configured";
-            break;
-        case net::ProbeState::Idle:
-        default:
-            status = stream_note_.empty() ? Widen(profile_.status_line())
-                                          : Widen(stream_note_);
-            break;
-    }
-
-    ui_.FillCircle(card.left + 26.0f, card.top + 88.0f, 4.0f, th::Rgba(dot));
-    ui_.Text(status.c_str(), {card.left + 38.0f, card.top + 76.0f, card.right - 160.0f,
-                              card.top + 100.0f},
-             12.0f, th::Rgba(th::kMuted));
-
-    if (!profile_.host.empty()) {
-        ui_.Text(Widen(profile_.host).c_str(),
-                 {card.left + 20.0f, card.top + 104.0f, card.right - 160.0f, card.top + 126.0f},
-                 11.0f, th::Rgba(th::kMuted, 0.75f));
-    }
-
-    const bool checking = probe_.state() == net::ProbeState::Checking;
-    DrawButton(checking ? L"Checking" : L"Connect",
-               {card.right - 148.0f, card.top + 102.0f, card.right - 16.0f, card.top + 142.0f},
-               W_Probe, true);
 }
 
 void App::DrawTile(const D2D1_RECT_F& rect, const GameEntry& game, float alpha, bool selected,
@@ -3214,7 +3627,9 @@ void App::RenderIntro(double t) {
     const float size2 = size1 * 0.62f;
     const float gap = size2 * 0.30f;
 
-    const float w_remote = ui_.TextWidth(L"RemotePlay", size1, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const float w_remote_word = ui_.TextWidth(L"Remote", size1, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const float w_play_word = ui_.TextWidth(L"Play", size1, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const float w_remote = w_remote_word + w_play_word;
     const float w_better = ui_.TextWidth(L"Better", size2, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     const float w_but = ui_.TextWidth(L"but", size2, DWRITE_FONT_WEIGHT_SEMI_BOLD);
 
@@ -3223,9 +3638,13 @@ void App::RenderIntro(double t) {
     const float y1 = h * 0.5f - step * 0.5f + (1.0f - remote) * 10.0f;
     const float y2 = y1 + step + (1.0f - but) * 12.0f;
 
-    ui_.Text(L"RemotePlay",
-             {w * 0.5f - w_remote * 0.5f, y1 - size1, w * 0.5f + w_remote * 0.5f, y1 + size1},
-             size1, th::Rgba(th::kInk, remote * fade), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const float x_remote = w * 0.5f - w_remote * 0.5f;
+    ui_.Text(L"Remote",
+             {x_remote, y1 - size1, x_remote + w_remote_word, y1 + size1}, size1,
+             th::Rgba(th::kInk, remote * fade), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    ui_.Text(L"Play",
+             {x_remote + w_remote_word, y1 - size1, x_remote + w_remote, y1 + size1}, size1,
+             th::Rgba(th::kAccent, remote * fade), DWRITE_FONT_WEIGHT_SEMI_BOLD);
 
     // Width-weighted centring: as each word appears the line stays centred.
     const float wb = w_but * but;
@@ -3357,13 +3776,13 @@ void App::RenderSettings(double t) {
     ui_.FillRadial(w * 0.5f, -h * 0.1f, w * 0.7f, th::Rgba(0x5A2E9E, 0.28f),
                    th::Rgba(0x5A2E9E, 0.0f));
 
-    const float back_y = borderless_ ? 28.0f : kTitleBarH + 8.0f;
-    const D2D1_RECT_F back{w - kTitleBarClientRight, back_y,
-                           w - kTitleBarClientRight + 100.0f, back_y + 36.0f};
-    ui_.FillRounded(back, 18.0f, th::Rgba(0xFFFFFF, hover_ == Hit::Back ? 0.12f : 0.06f));
-    ui_.StrokeRounded(back, 18.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
-    ui_.Text(L"Back", {back.left, back.top, back.right, back.bottom}, 13.0f,
-             th::Rgba(th::kInk, 0.9f), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER);
+    const float back_y = borderless_ ? 28.0f : kTitleBarH + 12.0f;
+    const D2D1_RECT_F back{w - kCornerMargin - kCornerButton, back_y, w - kCornerMargin,
+                           back_y + kCornerButton};
+    ui_.FillRounded(back, 14.0f, th::Rgba(0xFFFFFF, hover_ == Hit::Back ? 0.14f : 0.06f));
+    ui_.StrokeRounded(back, 14.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
+    DrawIcon(ui_, Icon::Back, back.left + 22.0f, back.top + 22.0f, 9.5f,
+             th::Rgba(th::kInk, hover_ == Hit::Back ? 1.0f : 0.88f));
     AddHit(Hit::Back, -1, back);
 
     const float header_y = borderless_ ? 44.0f : kTitleBarH + 16.0f;
@@ -3375,6 +3794,9 @@ void App::RenderSettings(double t) {
     }
 
     const wchar_t* tab_names[] = {L"Display", L"Upscaling", L"Performance", L"Neural", L"Legacy", L"Audio", L"Controller", L"Connection", L"Debug", L"About"};
+    const Icon tab_icons[] = {Icon::Display, Icon::Upscaling, Icon::Performance, Icon::Neural,
+                              Icon::Legacy,  Icon::Audio,     Icon::Controller,  Icon::Connection,
+                              Icon::Debug,   Icon::About};
     for (int i = 0; i < 10; ++i) {
         const D2D1_RECT_F tab{48.0f, 148.0f + i * 54.0f, 300.0f, 148.0f + i * 54.0f + 44.0f};
         const bool selected = static_cast<int>(tab_) == i;
@@ -3387,8 +3809,10 @@ void App::RenderSettings(double t) {
             ui_.FillRounded({tab.left + 2.0f, tab.top + 9.0f, tab.left + 6.0f, tab.bottom - 9.0f},
                             2.0f, th::Rgba(th::kAccent, 0.95f));
         }
-        ui_.Text(tab_names[i], {tab.left + 26.0f, tab.top, tab.right - 10.0f, tab.bottom}, 15.0f,
-                 th::Rgba(selected ? th::kInk : th::kInkDim));
+        DrawIcon(ui_, tab_icons[i], tab.left + 26.0f, (tab.top + tab.bottom) * 0.5f, 8.5f,
+                 th::Rgba(selected ? th::kInk : th::kMuted, selected ? 0.95f : 0.85f));
+        ui_.Text(tab_names[i], {tab.left + 48.0f, tab.top, tab.right - 10.0f, tab.bottom},
+                 14.5f, th::Rgba(selected ? th::kInk : th::kInkDim));
         AddHit(Hit::Tab, i, tab);
     }
 
@@ -4005,25 +4429,26 @@ void App::RenderStream(double t) {
         stream_active_ ? std::clamp((3.0f - idle) / 0.35f, 0.0f, 1.0f) : 1.0f;
 
     if (chrome_alpha > 0.01f) {
-        const D2D1_RECT_F back{w - 132.0f, 78.0f, w - 40.0f, 114.0f};
-        ui_.FillRounded(back, 18.0f,
+        const float chip = kCornerButton;
+        const D2D1_RECT_F back{w - kCornerMargin - chip, 70.0f, w - kCornerMargin,
+                               70.0f + chip};
+        ui_.FillRounded(back, 14.0f,
                         th::Rgba(0xFFFFFF, (hover_ == Hit::Back ? 0.16f : 0.08f) * chrome_alpha));
-        ui_.Text(L"Back", {back.left, back.top, back.right, back.bottom}, 13.0f,
-                 th::Rgba(th::kInk, 0.9f * chrome_alpha), DWRITE_FONT_WEIGHT_NORMAL,
-                 DWRITE_TEXT_ALIGNMENT_CENTER);
+        DrawIcon(ui_, Icon::Back, back.left + chip * 0.5f, back.top + chip * 0.5f, 9.0f,
+                 th::Rgba(th::kInk, 0.9f * chrome_alpha));
         if (chrome_alpha > 0.5f) {
             AddHit(Hit::Back, -1, back);
         }
 
         if (stream_active_) {
-            const D2D1_RECT_F quit{w - 300.0f, 78.0f, w - 148.0f, 114.0f};
+            const D2D1_RECT_F quit{w - kCornerMargin - chip * 2.0f - 12.0f, 70.0f,
+                                   w - kCornerMargin - chip - 12.0f, 70.0f + chip};
             const bool quit_hover = hover_ == Hit::Button && hover_index_ == W_Disconnect;
-            ui_.FillRounded(quit, 18.0f,
-                            th::Rgba(0xFF6B6B, (quit_hover ? 0.30f : 0.18f) * chrome_alpha));
-            ui_.StrokeRounded(quit, 18.0f, th::Rgba(0xFF6B6B, 0.85f * chrome_alpha), 1.0f);
-            ui_.Text(L"Disconnect", {quit.left, quit.top, quit.right, quit.bottom}, 12.5f,
-                     th::Rgba(th::kInk, 0.95f * chrome_alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                     DWRITE_TEXT_ALIGNMENT_CENTER);
+            ui_.FillRounded(quit, 14.0f,
+                            th::Rgba(0xFF6B6B, (quit_hover ? 0.30f : 0.16f) * chrome_alpha));
+            ui_.StrokeRounded(quit, 14.0f, th::Rgba(0xFF6B6B, 0.85f * chrome_alpha), 1.0f);
+            DrawIcon(ui_, Icon::Power, quit.left + chip * 0.5f, quit.top + chip * 0.5f, 9.0f,
+                     th::Rgba(th::kInk, 0.95f * chrome_alpha));
             if (chrome_alpha > 0.5f) {
                 AddHit(Hit::Button, W_Disconnect, quit);
             }
@@ -4049,6 +4474,8 @@ void App::RenderStreamSettings(double t) {
     // The same categories as Settings; every control applies live.
     const wchar_t* tabs[] = {L"Stream", L"DLSS", L"Neural",
                              L"Audio",  L"Controller", L"Legacy"};
+    const Icon tab_icons[] = {Icon::Display, Icon::Upscaling, Icon::Neural,
+                              Icon::Audio,   Icon::Controller, Icon::Legacy};
     float tx = kContentX;
     for (int i = 0; i < 6; ++i) {
         const D2D1_RECT_F r{tx, 132.0f, tx + 104.0f, 166.0f};
@@ -4056,9 +4483,10 @@ void App::RenderStreamSettings(double t) {
         if (selected) {
             ui_.FillRounded(r, 10.0f, th::Rgba(th::kAccent, 0.22f));
         }
-        ui_.Text(tabs[i], {r.left, r.top, r.right, r.bottom}, 12.5f,
-                 th::Rgba(selected ? th::kInk : th::kInkDim), DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                 DWRITE_TEXT_ALIGNMENT_CENTER);
+        DrawIcon(ui_, tab_icons[i], r.left + 16.0f, (r.top + r.bottom) * 0.5f, 7.5f,
+                 th::Rgba(selected ? th::kInk : th::kMuted, selected ? 0.95f : 0.85f));
+        ui_.Text(tabs[i], {r.left + 29.0f, r.top, r.right - 6.0f, r.bottom}, 11.5f,
+                 th::Rgba(selected ? th::kInk : th::kInkDim), DWRITE_FONT_WEIGHT_SEMI_BOLD);
         AddHit(Hit::OverlayTab, i, r);
         tx += 112.0f;
     }

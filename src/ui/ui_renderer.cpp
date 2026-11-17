@@ -153,6 +153,46 @@ void Renderer::Line(D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_COLOR_F color, float 
     dc_->DrawLine(a, b, brush_.Get(), stroke);
 }
 
+void Renderer::StrokeCircle(float cx, float cy, float radius, D2D1_COLOR_F color, float stroke) {
+    brush_->SetColor(color);
+    dc_->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), radius, radius), brush_.Get(), stroke);
+}
+
+void Renderer::StrokeArc(float cx, float cy, float radius, float start_radians, float sweep_radians,
+                         D2D1_COLOR_F color, float stroke) {
+    ComPtr<ID2D1PathGeometry> path;
+    if (FAILED(factory_->CreatePathGeometry(&path))) {
+        return;
+    }
+    ComPtr<ID2D1GeometrySink> sink;
+    if (FAILED(path->Open(&sink))) {
+        return;
+    }
+
+    const D2D1_POINT_2F start =
+        D2D1::Point2F(cx + std::cos(start_radians) * radius,
+                      cy + std::sin(start_radians) * radius);
+    const float end_angle = start_radians + sweep_radians;
+    const D2D1_POINT_2F end =
+        D2D1::Point2F(cx + std::cos(end_angle) * radius, cy + std::sin(end_angle) * radius);
+
+    sink->BeginFigure(start, D2D1_FIGURE_BEGIN_HOLLOW);
+    const D2D1_ARC_SEGMENT arc{
+        end,
+        D2D1::SizeF(radius, radius),
+        0.0f,
+        sweep_radians >= 0.0f ? D2D1_SWEEP_DIRECTION_CLOCKWISE
+                              : D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
+        std::fabs(sweep_radians) > 3.14159265f ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL,
+    };
+    sink->AddArc(arc);
+    sink->EndFigure(D2D1_FIGURE_END_OPEN);
+    sink->Close();
+
+    brush_->SetColor(color);
+    dc_->DrawGeometry(path.Get(), brush_.Get(), stroke, nullptr);
+}
+
 void Renderer::FillTriangle(D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_POINT_2F c,
                             D2D1_COLOR_F color) {
     ComPtr<ID2D1PathGeometry> path;

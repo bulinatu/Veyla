@@ -108,6 +108,11 @@ add_executable(brp
     src/session/discovery.cpp
     src/session/streaming.cpp
 )
+# GUI subsystem: no console window on launch. main() is still the entry point.
+set_target_properties(brp PROPERTIES WIN32_EXECUTABLE TRUE)
+if (MSVC)
+    target_link_options(brp PRIVATE /ENTRY:mainCRTStartup)
+endif()
 target_link_libraries(brp PRIVATE brp_ui brp_decode brp_session hid setupapi xinput ole32 avrt uuid ws2_32)
 
 # The NGX feature DLL must sit next to the executable for Magpie-style NGX

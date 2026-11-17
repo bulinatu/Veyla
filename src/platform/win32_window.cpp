@@ -75,6 +75,10 @@ bool Win32Window::Create(const wchar_t* title, int width, int height) {
     }
 
     ApplyWindowAppearance();
+    // Force the first WM_NCCALCSIZE before reading the client size; without
+    // this, Windows reports the framed client (1584x861) for one frame.
+    ::SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     UpdateRefreshRate();
     monitor_ = ::MonitorFromWindow(hwnd_, MONITOR_DEFAULTTOPRIMARY);
 

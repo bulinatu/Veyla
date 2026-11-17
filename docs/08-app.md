@@ -37,6 +37,20 @@ Every setting is a **dropdown** (or a button), not a key cycle. Dropdowns open a
 
 ![Settings — Connection after a probe](images/app-settings-connection.png)
 
+### Boot sequence
+
+There is no console window: the executable is linked as a Windows GUI
+subsystem, so it opens straight into the in-app logo intro, followed by the boot
+screen before Home. The boot screen shows the BRP mark in a rotating double ring,
+the app name, a progress bar, the current stage ("Preparing audio", "Starting
+DLSS Frame Generation", ...), step dots and the current display refresh rate.
+
+Session load, LAN discovery, audio enumeration, NVIDIA runtime detection and the
+DLSS SR / VSR / VFG / NR worker startup all run on background threads. The
+presentation thread only animates and presents the boot screen, so the loader
+stays at the monitor refresh rate (240 Hz here) even while NGX or the NR worker
+starts. `BRP_LOOP_PROBE=1` logs the measured loop rate.
+
 ### Startup
 
 The window stays hidden until the first frame is presented, so there is no white
@@ -59,6 +73,10 @@ stays on if enabled.
 
 ### Window chrome and pacing
 
+- Navigation is icon-led: the Home `Settings` pill is now a gear button (an
+  8-tooth ring modeled on the Lucide settings silhouette, not thin sun rays),
+  the Settings sidebar has an icon for every category, the stream overlay tabs
+  carry icons, and `Back` / `Disconnect` are chevron / power buttons.
 - The OS title bar is gone (`WM_NCCALCSIZE` returns 0). The app draws its own
   bar with the brand and minimize / maximize-restore / close buttons, including
   hover states.

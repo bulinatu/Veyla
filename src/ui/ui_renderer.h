@@ -43,6 +43,9 @@ public:
     void FillCircle(float cx, float cy, float radius, D2D1_COLOR_F color);
     void FillTriangle(D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_POINT_2F c, D2D1_COLOR_F color);
     void Line(D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_COLOR_F color, float stroke);
+    void StrokeCircle(float cx, float cy, float radius, D2D1_COLOR_F color, float stroke);
+    void StrokeArc(float cx, float cy, float radius, float start_radians, float sweep_radians,
+                   D2D1_COLOR_F color, float stroke);
 
     void FillLinearV(const D2D1_RECT_F& rect, D2D1_COLOR_F top, D2D1_COLOR_F bottom);
     void FillRadial(float cx, float cy, float radius, D2D1_COLOR_F inner, D2D1_COLOR_F outer);
