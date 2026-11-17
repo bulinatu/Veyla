@@ -124,6 +124,45 @@ void WorkSize(int full_w, int full_h, float scale, int* work_w, int* work_h) {
 
 }  // namespace
 
+namespace {
+
+bool InjectProxy(HANDLE process, const std::wstring& dll_path, std::string& detail) {
+    const std::wstring path = std::filesystem::absolute(dll_path).wstring();
+    const SIZE_T bytes = (path.size() + 1) * sizeof(wchar_t);
+    void* remote = ::VirtualAllocEx(process, nullptr, bytes, MEM_COMMIT | MEM_RESERVE,
+                                    PAGE_READWRITE);
+    if (!remote) {
+        detail = "proxy alloc failed (" + std::to_string(::GetLastError()) + ")";
+        return false;
+    }
+    bool ok = ::WriteProcessMemory(process, remote, path.c_str(), bytes, nullptr) != FALSE;
+    if (ok) {
+        const HMODULE kernel = ::GetModuleHandleW(L"kernel32.dll");
+        const auto load =
+            reinterpret_cast<LPTHREAD_START_ROUTINE>(::GetProcAddress(kernel, "LoadLibraryW"));
+        HANDLE thread = load ? ::CreateRemoteThread(process, nullptr, 0, load, remote, 0, nullptr)
+                             : nullptr;
+        if (!thread) {
+            ok = false;
+            detail = "proxy thread failed (" + std::to_string(::GetLastError()) + ")";
+        } else {
+            ::WaitForSingleObject(thread, 10000);
+            DWORD result = 0;
+            ::GetExitCodeThread(thread, &result);
+            ::CloseHandle(thread);
+            ok = result != 0;
+            if (!ok) {
+                detail = "proxy LoadLibrary returned 0";
+            }
+        }
+    } else {
+        detail = "proxy write failed (" + std::to_string(::GetLastError()) + ")";
+    }
+    ::VirtualFreeEx(process, remote, 0, MEM_RELEASE);
+    return ok;
+}
+
+}  // namespace
 NvDlssnr::~NvDlssnr() {
     Stop();
 }
@@ -344,6 +383,19 @@ bool NvDlssnr::Start(const std::wstring& worker_exe, const std::wstring& working
     }
     ::ResumeThread(pi.hThread);
     ::CloseHandle(pi.hThread);
+
+    // Optional DLSSG-SM86 proxy (user-supplied): it raises the Frame
+    // Generation multiplier ceiling on non-RTX-50 cards. Injection happens
+    // right after the process starts, long before the FG runtime is loaded.
+    const std::wstring proxy = working_dir + L"\\fg\\winmm.dll";
+    if (std::filesystem::exists(proxy)) {
+        std::string proxy_detail;
+        if (InjectProxy(process_, proxy, proxy_detail)) {
+            std::fprintf(stderr, "[nr] FG proxy injected\n");
+        } else {
+            std::fprintf(stderr, "[nr] FG proxy not injected: %s\n", proxy_detail.c_str());
+        }
+    }
 
     int work_w = width;
     int work_h = height;

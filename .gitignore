@@ -59,3 +59,6 @@ third_party/nvidia-ngx/runtime/
 # NeuralScreen NGX NR worker runtime (user-supplied, not redistributed)
 third_party/neuralscreen/
 
+
+# User-provided mod archives (not redistributed)
+*.rar

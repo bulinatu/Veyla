@@ -852,7 +852,7 @@ void App::ApplyDropdown(int id, int index) {
             break;
         }
         case W_DlssFg: {
-            profile_.dlss_fg = index >= 1 ? 2 : 0;
+            profile_.dlss_fg = index <= 0 ? 0 : std::clamp(index + 1, 2, 6);
             if (profile_.dlss_fg >= 2) {
                 frame_gen_ = 0;
                 profile_.frame_gen = 0;
@@ -1079,9 +1079,11 @@ void App::ApplyRenderTarget() {
         }
     }
     if (profile_.neural_sr > 0) {
-        if (!EnsureDlssSrForTarget()) {
-            profile_.neural_sr = 0;
-            dlss_ready_ = false;
+        // Keep the selection even when the feature cannot be created right
+        // now (DLAA on an odd size, a driver hiccup): the user must always be
+        // able to switch modes, and the loop retries.
+        dlss_ready_ = EnsureDlssSrForTarget();
+        if (!dlss_ready_) {
             dlss_sr_.Shutdown();
         }
     }
@@ -1294,6 +1296,7 @@ bool App::EnsureDlssSr(int in_width, int in_height) {
         return false;
     }
     dlss_ready_ = true;
+    dlss_dlaa_ = false;
     dlss_in_w_ = in_width;
     dlss_in_h_ = in_height;
     dlss_note_ = L"DLSS SR ready";
@@ -1314,9 +1317,8 @@ void App::ApplyNeuralSettings() {
         profile_.frame_gen = 0;
         fg_queue_.clear();
         fg_last_ = {};
-        if (!EnsureDlssSrForTarget()) {
-            profile_.neural_sr = 0;
-            dlss_ready_ = false;
+        dlss_ready_ = EnsureDlssSrForTarget();
+        if (!dlss_ready_) {
             dlss_sr_.Shutdown();
         }
     } else {
@@ -1405,12 +1407,43 @@ void App::DlssInputSize(int src_w, int src_h, int* in_w, int* in_h) const {
     *in_h = std::min(h, src_h);
 }
 
+bool App::EnsureDlssDlaa(int width, int height) {
+    if (width <= 0 || height <= 0) {
+        dlss_note_ = L"DLAA size is invalid";
+        return false;
+    }
+    std::string detail;
+    if (!dlss_sr_.runtime_loaded()) {
+        const std::wstring dir = FindDlssRuntime();
+        if (dir.empty()) {
+            dlss_note_ = L"DLSS runtime missing: nvngx_dlss.dll";
+            return false;
+        }
+        if (!dlss_sr_.LoadRuntime(dir, detail)) {
+            dlss_note_ = L"DLSS runtime: " + Widen(detail);
+            return false;
+        }
+    }
+    // DLAA is DLSS at 100%: the feature runs at the frame's own size and the
+    // network does the anti-aliasing, there is no upscale.
+    if (!dlss_sr_.Initialize(presenter_.device(), presenter_.context(), width, height, width,
+                             height, profile_.dlss_preset,
+                             media::NvDlssSr::PerfQuality::Dlaa, detail)) {
+        dlss_note_ = L"DLAA init: " + Widen(detail);
+        std::fprintf(stderr, "[app] DLAA init failed: %s\n", detail.c_str());
+        return false;
+    }
+    dlss_ready_ = true;
+    dlss_dlaa_ = true;
+    dlss_in_w_ = width;
+    dlss_in_h_ = height;
+    dlss_note_ = L"DLAA ready";
+    return true;
+}
 bool App::EnsureDlssSrForTarget() {
     if (profile_.dlss_mode == 5) {
-        // DLAA is native-resolution AA: there is nothing to upscale in a
-        // 1080p stream, so the feature is not created.
-        dlss_note_ = L"DLAA needs a native-resolution render; a 1080p stream has none";
-        return false;
+        return EnsureDlssDlaa(profile_.width > 0 ? profile_.width : 1920,
+                              profile_.height > 0 ? profile_.height : 1080);
     }
     int in_w = 0;
     int in_h = 0;
@@ -1773,11 +1806,11 @@ void App::ApplyNrSettings() {
         fg_last_ = {};
         // DLSS SR is not a rival of NR: it can run on the NR result. Keep the
         // selected upscaler and make sure its feature matches this geometry.
-        if (profile_.neural_sr > 0 && DlssAvailable() &&
-            !EnsureDlssSrForTarget()) {
-            profile_.neural_sr = 0;
-            dlss_ready_ = false;
-            dlss_sr_.Shutdown();
+        if (profile_.neural_sr > 0 && DlssAvailable()) {
+            dlss_ready_ = EnsureDlssSrForTarget();
+            if (!dlss_ready_) {
+                dlss_sr_.Shutdown();
+            }
         }
         if (!ReconfigureNr()) {
             profile_.neural_nr = 0;
@@ -1937,7 +1970,6 @@ void App::StartStream() {
     if (profile_.neural_sr > 0) {
         if (!EnsureDlssSrForTarget()) {
             const std::wstring note = dlss_note_;
-            profile_.neural_sr = 0;
             dlss_ready_ = false;
             dlss_sr_.Shutdown();
             SaveProfile();
@@ -2293,16 +2325,38 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                     SaveProfile();
                 }
             } else {
-            const bool sr_wanted = profile_.neural_sr > 0 && profile_.dlss_mode != 5;
-            const bool sr_stage = sr_wanted && DlssAvailable();
+            const bool dlaa = profile_.neural_sr > 0 && profile_.dlss_mode == 5;
+            const bool sr_wanted = profile_.neural_sr > 0;
+            const bool sr_stage = sr_wanted && !dlaa && DlssAvailable();
             const bool nr_on = profile_.neural_nr > 0 && nr_ready_;
             const bool nvidia_order = profile_.nr_order == 1 && sr_stage;
+            const bool sr_on_raw = sr_wanted && (!nr_on || nvidia_order);
 
             // Stage 3: DLSS SR, with the mode's input scale. When the mode asks
             // for fewer pixels than the stream has, the frame is downscaled
             // first - that is what the NVIDIA percentage means.
             bool sr_presented = false;
-            if (sr_wanted) {
+            if (sr_on_raw && dlaa) {
+                const int dw = stream_frame_.width;
+                const int dh = stream_frame_.height;
+                if (!dlss_ready_ || !dlss_dlaa_ || dlss_in_w_ != dw || dlss_in_h_ != dh) {
+                    dlss_ready_ = EnsureDlssDlaa(dw, dh);
+                }
+                std::string detail;
+                if (dlss_ready_ &&
+                    dlss_sr_.Process(stream_frame_.rgba.data(), dw, dh, dlss_frame_, detail)) {
+                    sr_presented = true;
+                    presenter_.SetSourceView(dlss_frame_.srv.Get(), dw, dh, stream_frame_.pq);
+                    // DLAA runs at the frame size: the upscaler still takes it
+                    // to the target.
+                    presenter_.SetSourceFinal(false);
+                } else if (dlss_ready_) {
+                    dlss_note_ = L"DLAA: " + Widen(detail);
+                    std::fprintf(stderr, "[app] DLAA failed: %s\n", detail.c_str());
+                    dlss_ready_ = false;
+                    dlss_sr_.Shutdown();
+                }
+            } else if (sr_on_raw) {
                 int in_w = 0;
                 int in_h = 0;
                 DlssInputSize(stream_frame_.width, stream_frame_.height, &in_w, &in_h);
@@ -2327,7 +2381,6 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                 } else if (dlss_ready_) {
                     dlss_note_ = L"DLSS SR: " + Widen(detail);
                     std::fprintf(stderr, "[app] DLSS SR failed: %s\n", detail.c_str());
-                    profile_.neural_sr = 0;
                     dlss_ready_ = false;
                     dlss_sr_.Shutdown();
                     SaveProfile();
@@ -2372,20 +2425,29 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                         presenter_.SetSourceFrame(nr_out_.data(), nr_w, nr_h, nr_pq);
                         presenter_.SetSourceFinal(true);
                     } else {
-                        const bool want_sr =
-                            profile_.neural_sr > 0 && profile_.dlss_mode != 5;
-                        int in_w = 0;
-                        int in_h = 0;
-                        DlssInputSize(nr_w, nr_h, &in_w, &in_h);
+                        const bool want_sr = profile_.neural_sr > 0;
+                        const bool nr_dlaa = want_sr && profile_.dlss_mode == 5;
+                        int in_w = nr_w;
+                        int in_h = nr_h;
                         const uint8_t* sr_input = nr_out_.data();
-                        if (in_w != nr_w || in_h != nr_h) {
-                            sr_scaled_.resize(static_cast<size_t>(in_w) * in_h * 4);
-                            media::DownscaleRgba(nr_out_.data(), nr_w, nr_h,
-                                                 sr_scaled_.data(), in_w, in_h, scale_tmp_);
-                            sr_input = sr_scaled_.data();
+                        if (want_sr && !nr_dlaa) {
+                            DlssInputSize(nr_w, nr_h, &in_w, &in_h);
+                            if (in_w != nr_w || in_h != nr_h) {
+                                sr_scaled_.resize(static_cast<size_t>(in_w) * in_h * 4);
+                                media::DownscaleRgba(nr_out_.data(), nr_w, nr_h,
+                                                     sr_scaled_.data(), in_w, in_h,
+                                                     scale_tmp_);
+                                sr_input = sr_scaled_.data();
+                            }
                         }
-                        if (want_sr && (!dlss_ready_ || dlss_in_w_ != in_w ||
-                                        dlss_in_h_ != in_h)) {
+                        if (want_sr && nr_dlaa) {
+                            if (!dlss_ready_ || !dlss_dlaa_ || dlss_in_w_ != nr_w ||
+                                dlss_in_h_ != nr_h) {
+                                dlss_ready_ = EnsureDlssDlaa(nr_w, nr_h);
+                            }
+                        } else if (want_sr &&
+                                   (!dlss_ready_ || dlss_dlaa_ || dlss_in_w_ != in_w ||
+                                    dlss_in_h_ != in_h)) {
                             dlss_ready_ = EnsureDlssSr(in_w, in_h);
                         }
                         std::string sr_detail;
@@ -2393,17 +2455,15 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                             want_sr && dlss_ready_ &&
                             dlss_sr_.Process(sr_input, in_w, in_h, dlss_frame_, sr_detail);
                         if (sr_ok) {
-                            presenter_.SetSourceView(
-                                dlss_frame_.srv.Get(), dlss_sr_.out_width(),
-                                dlss_sr_.out_height(), nr_pq);
-                            presenter_.SetSourceFinal(true);
+                            presenter_.SetSourceView(dlss_frame_.srv.Get(), dlss_sr_.out_width(),
+                                                     dlss_sr_.out_height(), nr_pq);
+                            presenter_.SetSourceFinal(!nr_dlaa);
                         } else {
                             if (want_sr && dlss_ready_) {
-                                dlss_note_ = L"DLSS SR: " + Widen(sr_detail);
-                                profile_.neural_sr = 0;
+                                dlss_note_ = (nr_dlaa ? L"DLAA: " : L"DLSS SR: ") +
+                                             Widen(sr_detail);
                                 dlss_ready_ = false;
                                 dlss_sr_.Shutdown();
-                                SaveProfile();
                             }
                             presenter_.SetSourceFinal(false);
                             presenter_.SetSourceFrame(nr_out_.data(), nr_w, nr_h, nr_pq);
@@ -3105,7 +3165,8 @@ void App::RenderSettings(double t) {
             }
             y += kRowH;
             DrawDropdown(L"DLSS Frame Generation",
-                         {L"Off", L"2x (worker presenter)"}, profile_.dlss_fg >= 2 ? 1 : 0, y,
+                         {L"Off", L"2x", L"3x", L"4x", L"5x", L"6x"},
+                         profile_.dlss_fg >= 2 ? std::clamp(profile_.dlss_fg - 1, 1, 5) : 0, y,
                          W_DlssFg);
             y += kRowH;
             DrawDropdown(L"Frame buffer",
@@ -3152,7 +3213,7 @@ void App::RenderSettings(double t) {
             DrawDropdown(L"DLSS mode",
                          {L"Ultra Performance (33%)", L"Performance (50%)",
                           L"Balanced (58%)", L"Quality (66%)", L"Ultra Quality (77%)",
-                          L"DLAA (100% - no upscale)"},
+                          L"DLAA (100% - AI anti-aliasing)"},
                          std::clamp(profile_.dlss_mode, 0, 5), y, W_DlssMode,
                          dlss && profile_.neural_sr > 0);
             y += kRowH;
@@ -3163,7 +3224,8 @@ void App::RenderSettings(double t) {
 
             ui_.Text(L"The percentage is the resolution DLSS receives, taken from the output. "
                      L"Below the 1080p stream it downscales first (faster, softer); above it the "
-                     L"stream is the limit.",
+                     L"stream is the limit. DLAA runs at the frame size with AI AA, then the "
+                     L"upscaler takes it to the target.",
                      {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 11.5f, th::Rgba(th::kMuted));
             y += 30.0f;
 
@@ -3650,7 +3712,7 @@ void App::RenderStreamSettings(double t) {
             DrawDropdown(L"DLSS mode",
                          {L"Ultra Performance (33%)", L"Performance (50%)",
                           L"Balanced (58%)", L"Quality (66%)", L"Ultra Quality (77%)",
-                          L"DLAA (100% - no upscale)"},
+                          L"DLAA (100% - AI anti-aliasing)"},
                          std::clamp(profile_.dlss_mode, 0, 5), y, W_DlssMode,
                          DlssAvailable() && profile_.neural_sr > 0);
             y += row;
@@ -3758,8 +3820,9 @@ void App::RenderStreamSettings(double t) {
                              W_FrameGen, available);
             }
             y += row;
-            DrawDropdown(L"DLSS Frame Generation", {L"Off", L"2x (worker presenter)"},
-                         profile_.dlss_fg >= 2 ? 1 : 0, y, W_DlssFg);
+            DrawDropdown(L"DLSS Frame Generation", {L"Off", L"2x", L"3x", L"4x", L"5x", L"6x"},
+                         profile_.dlss_fg >= 2 ? std::clamp(profile_.dlss_fg - 1, 1, 5) : 0,
+                         y, W_DlssFg);
             y += row;
             DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
             y += row;

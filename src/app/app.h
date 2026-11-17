@@ -144,6 +144,7 @@ private:
     bool DlssAvailable() const;
     bool EnsureDlssSr(int in_width, int in_height);
     bool EnsureDlssSrForTarget();
+    bool EnsureDlssDlaa(int width, int height);
     std::wstring FindDlssRuntime() const;
     void ApplyNeuralSettings();
 
@@ -272,6 +273,7 @@ private:
     bool dlss_present_ = false;
     bool dlss_ready_ = false;
     int dlss_in_w_ = 0;
+    bool dlss_dlaa_ = false;
     int dlss_in_h_ = 0;
     std::wstring dlss_note_;
     media::NvDlssSr::Frame dlss_frame_;

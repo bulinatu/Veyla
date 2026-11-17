@@ -92,8 +92,10 @@ works together with Frame Generation. On this machine the driver accepts it
 - **DLSS mode** now mirrors NVIDIA's ladder: Ultra Performance 33%, Performance
   50%, Balanced 58%, Quality 66%, Ultra Quality 77%, DLAA 100%. The percentage
   is the resolution DLSS receives relative to the output; the app downscales
-  the 1080p stream first when the mode asks for fewer pixels. DLAA cannot
-  upscale a 1080p source, so choosing it turns SR off with a note.
+  the 1080p stream first when the mode asks for fewer pixels. **DLAA** is
+  DLSS at 100%: the feature is created with input == output (the frame
+  size), the network does the anti-aliasing and the regular upscaler takes
+  the result to the target. It no longer falls back to FSR.
 - **Legacy settings page** (between Neural and Audio): RTX VSR and the Neural
   Ultra preset, with "not maintained any more, but still functional".
 - **Overlay** rebuilt as categories like the settings screen: Stream / DLSS /
@@ -101,7 +103,7 @@ works together with Frame Generation. On this machine the driver accepts it
 
 ## DLSS Frame Generation (implemented)
 
-`Settings > Performance > DLSS Frame Generation`: **Off / 2x (worker presenter)**.
+`Settings > Performance > DLSS Frame Generation`: **Off / 2x / 3x / 4x / 5x / 6x**.
 
 This is the real DLSS-G runtime, not a re-label of VFG:
 
@@ -119,6 +121,17 @@ This is the real DLSS-G runtime, not a re-label of VFG:
 - Live result: `[fg] displayed 120.0 FPS (real + generated, 2x)` with the
   stream at 60 fps, while NR stays enabled inside the worker (`direct feature
   18 ready`, NR then FG).
+- **Up to 6x.** The worker alone reports a 2x multiplier ceiling on RTX 40.
+  The `DLSSG SM86` mod (Aion2 package: `winmm.dll` proxy + `dlssg_sm86\\`
+  backend/kernels/runtime, `MaxGeneratedFrames=6`) raises it: the app injects
+  the proxy into the worker right after CreateProcess, the worker then logs
+  `the runtime reports a 6x multiplier ceiling` and runs
+  `[fg] 6x enabled ... displayed ~170 FPS (real + generated, 6x)`.
+  The proxy is user-supplied and lives in `third_party/neuralscreen/native/fg`
+  (gitignored); without it the ceiling stays at 2x and the UI simply does
+  nothing above it.
+- The multiplier the user picks is sent in the frame flags (bits 9-10 plus
+  bit 15); the worker steps down if the runtime refuses a value.
 
 Constraints, stated in the UI and here:
 
