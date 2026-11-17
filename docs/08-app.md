@@ -11,7 +11,7 @@ Status: **v0.5 — live.** Pairing, streaming (video + audio), categorized setti
 - Horizontal game rail, spring-animated selection, dynamic accent glow.
 - **Console card** (top right): console name, status, address, and a `Connect` button.
 - `Stream` opens the stream screen for the selected game.
-- Bottom-left shows the connected controller.
+- The connected controller is shown under the console status in the main card.
 
 ![Home](images/app-home.png)
 
@@ -66,17 +66,24 @@ fade-out.
 
 ### In-stream idle
 
-While a session is live, 3 s without mouse movement hides the `Back` and
-`Disconnect` buttons, the key hints, and the OS cursor. Moving the mouse brings
-them back immediately; the fade takes 0.35 s. The stats HUD is independent and
-stays on if enabled.
+While a session is live, 3 s without mouse movement hides the `Disconnect`
+button and the OS cursor. Moving the mouse brings it back immediately; the fade
+takes 0.35 s. The stats HUD is independent and stays on if enabled. With DLSS Frame Generation the worker's child window sits above the UI:
+moving the pointer into the top strip reveals the chrome, and it stays revealed
+for 2 s after leaving that strip so the Disconnect button can be reached.
 
 ### Window chrome and pacing
 
 - Navigation is icon-led: the Home `Settings` pill is now a gear button (an
   8-tooth ring modeled on the Lucide settings silhouette, not thin sun rays),
   the Settings sidebar has an icon for every category, the stream overlay tabs
-  carry icons, and `Back` / `Disconnect` are chevron / power buttons.
+  carry icons, the stream chrome has a power button for Disconnect, and the
+  Settings screen uses a chevron for Back. The in-stream Back button is gone.
+- Typography is a pairing: Noto Sans Display for headings and Noto Sans for
+  body/small text, both bundled (SIL OFL). Sony's SST is proprietary, so Noto
+  Sans - the open family used in PlayStation's OSS stack - is the closest
+  distributable match. The fallback on systems without the font folder is Segoe
+  UI Variable Display/Text.
 - The OS title bar is gone (`WM_NCCALCSIZE` returns 0). The app draws its own
   bar with the brand and minimize / maximize-restore / close buttons, including
   hover states.
@@ -92,8 +99,8 @@ stays on if enabled.
   no longer dictates the UI cadence.
 - With DLSS Frame Generation active the worker's child presenter covers the
   client. Moving the pointer into the top strip temporarily hides that child, so
-  the title bar, `Back`/`Disconnect` and HUD are visible and clickable; moving
-  away restores the clean stream.
+  the title bar, `Disconnect` button and HUD are visible and clickable; it stays
+  hidden for 2 s after leaving the strip, then the clean stream returns.
 
 ### Display scaling
 

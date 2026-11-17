@@ -85,6 +85,9 @@ private:
     std::vector<LayerEntry> layers_;
 
     std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<IDWriteTextFormat>> formats_;
+    Microsoft::WRL::ComPtr<IDWriteFontCollection> font_collection_;
+    std::wstring body_font_ = L"Noto Sans";
+    std::wstring display_font_ = L"Noto Sans Display";
     float scale_ = 1.0f;
 };
 

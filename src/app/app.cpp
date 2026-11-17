@@ -846,15 +846,6 @@ void App::RenderBoot(double t) {
                                     (done ? 0.75f : 0.14f) * alpha));
         }
     }
-
-    wchar_t footer[96];
-    swprintf_s(footer, L"BetterRemotePlay 0.3");
-    ui_.Text(footer, {48.0f, h - 56.0f, 420.0f, h - 32.0f}, 11.0f,
-             th::Rgba(th::kMuted, 0.65f * alpha));
-    swprintf_s(footer, L"DISPLAY %d Hz", refresh_hz_);
-    ui_.Text(footer, {w - 420.0f, h - 56.0f, w - 48.0f, h - 32.0f}, 11.0f,
-             th::Rgba(th::kMuted, 0.65f * alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
-             DWRITE_TEXT_ALIGNMENT_TRAILING);
 }
 
 bool App::Contains(const D2D1_RECT_F& rect, int x, int y) const {
@@ -2868,6 +2859,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     // used.
     bool fg_covering = false;
     if (fg_window_) {
+        if (screen_ != Screen::Stream) {
+            fg_reveal_until_ = 0.0;
+        }
         const int want_w = static_cast<int>(ui_w_ * ui_scale_);
         const int want_h = static_cast<int>(ui_h_ * ui_scale_);
         if (want_w != fg_w_ || want_h != fg_h_) {
@@ -2882,14 +2876,22 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         ::ScreenToClient(window_->hwnd(), &cursor);
         RECT client{};
         ::GetClientRect(window_->hwnd(), &client);
-        const float trigger = (borderless_ ? 24.0f : kTitleBarH) * ui_scale_;
-        const bool reveal = screen_ == Screen::Stream && cursor.x >= 0 && cursor.y >= 0 &&
-                            cursor.x < client.right && cursor.y < static_cast<LONG>(trigger);
-        if (reveal) {
-            // The child window swallows mouse moves while it is visible, so the
-            // normal idle timer would keep the stream chrome faded out.
+
+        const float chrome_trigger = 124.0f * ui_scale_;
+        const bool inside = cursor.x >= 0 && cursor.y >= 0 && cursor.x < client.right &&
+                            cursor.y < client.bottom;
+        const bool in_chrome = inside && cursor.y < static_cast<LONG>(chrome_trigger);
+
+        if (in_chrome) {
+            // Keep the chrome reachable: leaving the header starts a 2 s grace
+            // period, so the pointer can travel from the title bar to the
+            // Disconnect button without the FG child covering it again.
             mouse_active_at_ = clock_;
+            fg_reveal_until_ = clock_ + 2.0;
         }
+
+        const bool reveal =
+            screen_ == Screen::Stream && inside && (in_chrome || clock_ < fg_reveal_until_);
         fg_covering = screen_ == Screen::Stream && !reveal;
         ::ShowWindow(fg_window_, fg_covering ? SW_SHOW : SW_HIDE);
     }
@@ -3416,13 +3418,7 @@ void App::DrawTile(const D2D1_RECT_F& rect, const GameEntry& game, float alpha, 
     }
 }
 
-void App::DrawHints(const wchar_t* hints, float alpha) {
-    ui_.Text(hints, {0.0f, ui_h_ - 40.0f,
-                     ui_w_,
-                     ui_h_ - 14.0f},
-             12.0f, th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
-             DWRITE_TEXT_ALIGNMENT_CENTER);
-}
+
 
 void App::DrawSettingLabel(const wchar_t* label, float y, bool enabled) {
     ui_.Text(label, {kContentX, y, kContentX + 460.0f, y + 56.0f}, 16.0f,
@@ -3729,6 +3725,13 @@ void App::RenderHome(double t) {
     ui_.Text(address.c_str(), {x0 + 36.0f, y0 + 158.0f, x0 + card_w - 36.0f, y0 + 182.0f}, 12.5f,
              th::Rgba(th::kMuted));
 
+    const PadState home_pad = pad_.snapshot();
+    ui_.FillCircle(x0 + 42.0f, y0 + 201.0f, 4.0f,
+                   th::Rgba(home_pad.connected ? th::kOnline : th::kMuted));
+    ui_.Text(home_pad.connected ? Widen(home_pad.name).c_str() : L"No controller",
+             {x0 + 56.0f, y0 + 188.0f, x0 + card_w - 36.0f, y0 + 214.0f}, 12.5f,
+             th::Rgba(th::kMuted));
+
     const float button_y = y0 + 224.0f;
     DrawButton(probe_.state() == net::ProbeState::Checking ? L"Checking..." : L"Connect",
                {x0 + 36.0f, button_y, x0 + 196.0f, button_y + 52.0f}, W_Probe, true);
@@ -3757,14 +3760,6 @@ void App::RenderHome(double t) {
              {x0 + 36.0f, y0 + 288.0f, x0 + card_w - 36.0f, y0 + 316.0f}, 11.5f,
              th::Rgba(th::kMuted, 0.85f));
 
-    const PadState home_pad = pad_.snapshot();
-    if (home_pad.connected) {
-        ui_.FillCircle(52.0f, h - 70.0f, 4.0f, th::Rgba(th::kOnline));
-        ui_.Text(Widen(home_pad.name).c_str(), {64.0f, h - 82.0f, 420.0f, h - 58.0f}, 12.0f,
-                 th::Rgba(th::kMuted));
-    }
-
-    DrawHints(L"Connect   reachability check      Pair   Settings > Connection      Esc   quit");
 }
 
 void App::RenderSettings(double t) {
@@ -4298,8 +4293,6 @@ void App::RenderSettings(double t) {
 
     DrawPopup();
 
-    DrawHints(L"Click a category, then a dropdown      Tab / Left / Right   switch category"
-              L"      Esc   back");
 }
 
 void App::RenderStream(double t) {
@@ -4416,11 +4409,6 @@ void App::RenderStream(double t) {
                        stream_stats_.lost, stream_stats_.kbps);
             line(tail, 0.82f);
         }
-
-        ui_.FillCircle(w - 40.0f, 44.0f, 5.0f, th::Rgba(th::kOnline));
-        ui_.Text(L"DEMO", {w - 118.0f, 30.0f, w - 54.0f, 58.0f}, 12.0f,
-                 th::Rgba(th::kInk, 0.85f), DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                 DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
 
     // Chrome fades out after 3 s of mouse inactivity and returns on movement.
@@ -4430,19 +4418,10 @@ void App::RenderStream(double t) {
 
     if (chrome_alpha > 0.01f) {
         const float chip = kCornerButton;
-        const D2D1_RECT_F back{w - kCornerMargin - chip, 70.0f, w - kCornerMargin,
-                               70.0f + chip};
-        ui_.FillRounded(back, 14.0f,
-                        th::Rgba(0xFFFFFF, (hover_ == Hit::Back ? 0.16f : 0.08f) * chrome_alpha));
-        DrawIcon(ui_, Icon::Back, back.left + chip * 0.5f, back.top + chip * 0.5f, 9.0f,
-                 th::Rgba(th::kInk, 0.9f * chrome_alpha));
-        if (chrome_alpha > 0.5f) {
-            AddHit(Hit::Back, -1, back);
-        }
 
         if (stream_active_) {
-            const D2D1_RECT_F quit{w - kCornerMargin - chip * 2.0f - 12.0f, 70.0f,
-                                   w - kCornerMargin - chip - 12.0f, 70.0f + chip};
+            const D2D1_RECT_F quit{w - kCornerMargin - chip, 70.0f, w - kCornerMargin,
+                                   70.0f + chip};
             const bool quit_hover = hover_ == Hit::Button && hover_index_ == W_Disconnect;
             ui_.FillRounded(quit, 14.0f,
                             th::Rgba(0xFF6B6B, (quit_hover ? 0.30f : 0.16f) * chrome_alpha));
@@ -4454,8 +4433,6 @@ void App::RenderStream(double t) {
             }
         }
 
-        DrawHints(L"Tab   settings      Esc   disconnect      H   HUD      1..5   upscaler",
-                  chrome_alpha);
     }
 }
 
@@ -4738,6 +4715,5 @@ void App::RenderStreamSettings(double t) {
                W_ResumeOverlay, true);
     DrawButton(L"Disconnect", {kContentX + 220.0f, y + 6.0f, kContentX + 420.0f, y + 50.0f},
                W_Disconnect, false);
-    DrawHints(L"Tab / Esc   resume      categories above      everything applies live", 1.0f);
     DrawPopup();
 }

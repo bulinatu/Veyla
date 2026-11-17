@@ -114,6 +114,12 @@ if (MSVC)
     target_link_options(brp PRIVATE /ENTRY:mainCRTStartup)
 endif()
 target_link_libraries(brp PRIVATE brp_ui brp_decode brp_session hid setupapi xinput ole32 avrt uuid ws2_32)
+if(EXISTS "${CMAKE_SOURCE_DIR}/assets/fonts/NotoSans-Regular.ttf")
+    add_custom_command(TARGET brp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/fonts"
+            "$<TARGET_FILE_DIR:brp>/fonts")
+endif()
 
 # The NGX feature DLL must sit next to the executable for Magpie-style NGX
 # feature discovery. The runtime is user-supplied and gitignored.

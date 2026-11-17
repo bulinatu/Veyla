@@ -110,7 +110,6 @@ private:
     void RenderWindowChrome();
     void DrawTile(const D2D1_RECT_F& rect, const GameEntry& game, float alpha, bool selected,
                   bool hovered);
-    void DrawHints(const wchar_t* hints, float alpha = 1.0f);
 
     void DrawSettingLabel(const wchar_t* label, float y, bool enabled = true);
     void DrawInfoRow(const wchar_t* label, const std::wstring& value, float y);
@@ -282,6 +281,7 @@ private:
 
     // stream chrome idle state
     double mouse_active_at_ = -1.0;
+    double fg_reveal_until_ = 0.0;
     int last_mouse_x_ = -100000;
     int last_mouse_y_ = -100000;
     bool cursor_hidden_ = false;

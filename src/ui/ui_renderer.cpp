@@ -1,11 +1,13 @@
 #include "ui/ui_renderer.h"
 
 #include <d2d1_1helper.h>
+#include <dwrite_3.h>
 
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <filesystem>
 
 using Microsoft::WRL::ComPtr;
 
@@ -58,7 +60,88 @@ bool Renderer::Init(ID3D11Device* device) {
 
     hr = ::DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
                                reinterpret_cast<IUnknown**>(dwrite_.ReleaseAndGetAddressOf()));
-    return SUCCEEDED(hr);
+    if (FAILED(hr)) {
+        return false;
+    }
+
+    // PlayStation's own SST typeface is proprietary. Use the bundled Noto Sans
+    // pairing instead: Display for headings, Text for body and small copy.
+    // Noto Sans is the open family used in PlayStation's OSS stack. SST itself
+    // is not redistributable, so this is the honest closest match.
+    ComPtr<IDWriteFactory5> factory5;
+    const HRESULT f5hr = dwrite_.As(&factory5);
+    if (SUCCEEDED(f5hr)) {
+        ComPtr<IDWriteFontSetBuilder1> builder;
+        const HRESULT bhr = factory5->CreateFontSetBuilder(&builder);
+        if (SUCCEEDED(bhr)) {
+            wchar_t exe_path[MAX_PATH] = {};
+            ::GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+            const std::filesystem::path font_dir =
+                std::filesystem::path(exe_path).parent_path() / L"fonts";
+
+            bool added = false;
+            const wchar_t* files[] = {
+                L"NotoSans-Regular.ttf",         L"NotoSans-Medium.ttf",
+                L"NotoSans-SemiBold.ttf",        L"NotoSans-Bold.ttf",
+                L"NotoSansDisplay-Regular.ttf",  L"NotoSansDisplay-Medium.ttf",
+                L"NotoSansDisplay-SemiBold.ttf", L"NotoSansDisplay-Bold.ttf"};
+            for (const wchar_t* name : files) {
+                const std::wstring path = (font_dir / name).wstring();
+                ComPtr<IDWriteFontFile> file;
+                const HRESULT fhr = factory5->CreateFontFileReference(path.c_str(), nullptr, &file);
+                const HRESULT ahr = SUCCEEDED(fhr) ? builder->AddFontFile(file.Get()) : fhr;
+                if (SUCCEEDED(ahr)) {
+                    added = true;
+                }
+            }
+
+            if (added) {
+                ComPtr<IDWriteFontSet> set;
+                ComPtr<IDWriteFontCollection1> collection;
+                const HRESULT sethr = builder->CreateFontSet(&set);
+                const HRESULT colhr =
+                    SUCCEEDED(sethr)
+                        ? factory5->CreateFontCollectionFromFontSet(set.Get(), &collection)
+                        : sethr;
+                if (SUCCEEDED(colhr)) {
+                    UINT32 body_index = 0;
+                    UINT32 display_index = 0;
+                    BOOL body_found = FALSE;
+                    BOOL display_found = FALSE;
+                    collection->FindFamilyName(L"Noto Sans", &body_index, &body_found);
+                    collection->FindFamilyName(L"Noto Sans Display", &display_index,
+                                               &display_found);
+                    if (body_found && display_found) {
+                        font_collection_ = collection;
+                        body_font_ = L"Noto Sans";
+                        display_font_ = L"Noto Sans Display";
+                    }
+                }
+            }
+        }
+    }
+
+    if (!font_collection_) {
+        // Development builds without the copied font folder: fall back to the
+        // closest modern system pairing instead of failing to draw text.
+        ComPtr<IDWriteFontCollection> system;
+        if (SUCCEEDED(dwrite_->GetSystemFontCollection(&system, FALSE))) {
+            UINT32 index = 0;
+            BOOL found = FALSE;
+            if (SUCCEEDED(system->FindFamilyName(L"Segoe UI Variable Text", &index, &found)) &&
+                found) {
+                body_font_ = L"Segoe UI Variable Text";
+            }
+            if (SUCCEEDED(system->FindFamilyName(L"Segoe UI Variable Display", &index, &found)) &&
+                found) {
+                display_font_ = L"Segoe UI Variable Display";
+            }
+        }
+    }
+
+    std::fprintf(stderr, "d2d: fonts %ls / %ls (%s)\n", body_font_.c_str(),
+                 display_font_.c_str(), font_collection_ ? "bundled" : "system");
+    return true;
 }
 
 void Renderer::ReleaseTarget() {
@@ -265,8 +348,10 @@ IDWriteTextFormat* Renderer::Format(float size, DWRITE_FONT_WEIGHT weight,
     }
 
     ComPtr<IDWriteTextFormat> format;
-    if (FAILED(dwrite_->CreateTextFormat(L"Segoe UI", nullptr, weight, DWRITE_FONT_STYLE_NORMAL,
-                                         DWRITE_FONT_STRETCH_NORMAL, size, L"en-us", &format))) {
+    const wchar_t* family = size >= 22.0f ? display_font_.c_str() : body_font_.c_str();
+    if (FAILED(dwrite_->CreateTextFormat(family, font_collection_.Get(), weight,
+                                         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                                         size, L"en-us", &format))) {
         return nullptr;
     }
     format->SetTextAlignment(align);
