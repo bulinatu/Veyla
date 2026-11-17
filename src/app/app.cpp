@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -297,6 +298,11 @@ enum WidgetId {
     W_PsnPaste,
     W_PsnSave,
     W_PsnCancel,
+    W_AddressOpen = 100,
+    W_AddressDiscover,
+    W_AddressPaste,
+    W_AddressSave,
+    W_AddressCancel,
 };
 
 constexpr float kContentX = 344.0f;
@@ -885,6 +891,21 @@ void App::DispatchClick() {
             }
         }
 
+        if (address_modal_) {
+            const bool modal_hit =
+                it->hit == Hit::AddressField || it->hit == Hit::AddressResult ||
+                it->hit == Hit::AddressPanel ||
+                (it->hit == Hit::Button &&
+                 (it->index == W_AddressDiscover || it->index == W_AddressPaste ||
+                  it->index == W_AddressSave || it->index == W_AddressCancel)) ||
+                it->hit == Hit::Minimize || it->hit == Hit::Maximize ||
+                it->hit == Hit::Close;
+            if (!modal_hit) {
+                CloseAddressModal();
+                return;
+            }
+        }
+
         if (open_dropdown_ >= 0 && it->hit != Hit::DropdownItem) {
             if (it->hit == Hit::Dropdown) {
                 open_dropdown_ = (open_dropdown_ == it->index) ? -1 : it->index;
@@ -979,6 +1000,16 @@ void App::DispatchClick() {
                     SubmitPsnLogin();
                 } else if (it->index == W_PsnCancel) {
                     ClosePsnModal();
+                } else if (it->index == W_AddressOpen) {
+                    OpenAddressModal();
+                } else if (it->index == W_AddressDiscover) {
+                    DiscoverConsoles();
+                } else if (it->index == W_AddressPaste) {
+                    PasteAddressClipboard();
+                } else if (it->index == W_AddressSave) {
+                    SaveConsoleAddress();
+                } else if (it->index == W_AddressCancel) {
+                    CloseAddressModal();
                 } else {
                     // Buttons whose whole action lives in the widget switch
                     // (overlay pages, the Neural Ultra preset). Without this a
@@ -995,6 +1026,25 @@ void App::DispatchClick() {
                 break;
             case Hit::PsnPanel:
                 break;
+            case Hit::AddressField:
+                address_focus_ = true;
+                break;
+            case Hit::AddressPanel:
+                break;
+            case Hit::AddressResult: {
+                std::lock_guard<std::mutex> lock(address_mutex_);
+                if (it->index >= 0 &&
+                    it->index < static_cast<int>(address_results_.size())) {
+                    const session::DiscoveredConsole& found = address_results_[it->index];
+                    address_input_ = found.address;
+                    address_selected_ = it->index;
+                    address_focus_ = true;
+                    address_note_ = L"Selected " +
+                                    Widen(found.name.empty() ? found.address : found.name) +
+                                    L". Press Save address.";
+                }
+                break;
+            }
             case Hit::Minimize:
                 if (window_) {
                     window_->Minimize();
@@ -1018,6 +1068,9 @@ void App::DispatchClick() {
     if (psn_modal_) {
         ClosePsnModal();
     }
+    if (address_modal_) {
+        CloseAddressModal();
+    }
     open_dropdown_ = -1;
     pin_focus_ = false;
 }
@@ -1030,6 +1083,16 @@ void App::HandleKey(int vk) {
     if (booting_) {
         if (vk == VK_ESCAPE) {
             quit_ = true;
+        }
+        return;
+    }
+    if (address_modal_) {
+        if (vk == VK_ESCAPE) {
+            CloseAddressModal();
+        } else if (vk == VK_RETURN) {
+            SaveConsoleAddress();
+        } else if (vk == 'V' && (::GetKeyState(VK_CONTROL) & 0x8000) != 0) {
+            PasteAddressClipboard();
         }
         return;
     }
@@ -2389,6 +2452,9 @@ App::~App() {
     if (psn_thread_.joinable()) {
         psn_thread_.join();
     }
+    if (address_thread_.joinable()) {
+        address_thread_.join();
+    }
     StopNrThread();
     StopPadThread();
 }
@@ -2503,8 +2569,15 @@ void App::SaveProfile() {
 }
 
 void App::ConnectConsole() {
-    if (!profile_.has_console() || profile_.needs_pairing() || profile_.host.empty()) {
-        StartProbe();
+    if (profile_.host.empty()) {
+        stream_note_ = "Set the console address first.";
+        OpenAddressModal();
+        return;
+    }
+    if (profile_.needs_pairing()) {
+        screen_ = Screen::Settings;
+        tab_ = Tab::Connection;
+        stream_note_ = "Pair the console first (8-digit code from the PS5).";
         return;
     }
 
@@ -2881,7 +2954,19 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     if (window_) {
         const int ch = window_->ConsumeChar();
         if (ch != 0) {
-            if (psn_modal_) {
+            if (address_modal_) {
+                if (!address_busy_) {
+                    if (ch == 8) {
+                        if (!address_input_.empty()) {
+                            address_input_.pop_back();
+                            address_selected_ = -1;
+                        }
+                    } else if (ch >= 32 && ch < 127 && address_input_.size() < 255) {
+                        address_input_.push_back(static_cast<char>(ch));
+                        address_selected_ = -1;
+                    }
+                }
+            } else if (psn_modal_) {
                 if (!psn_busy_) {
                     if (ch == 8) {
                         if (!psn_url_input_.empty()) {
@@ -2904,6 +2989,7 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     }
 
     TickPsnLogin();
+    TickAddress();
 
     pairing_.Poll();
     if (pairing_.state() == session::PairState::Success) {
@@ -3000,6 +3086,8 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         }
         if (psn_modal_) {
             RenderPsnModal();
+        } else if (address_modal_) {
+            RenderAddressModal();
         }
         RenderWindowChrome();
         ui_.EndFrame();
@@ -3372,6 +3460,7 @@ void App::StartPsnLogin() {
         return;
     }
     psn_modal_ = true;
+    address_modal_ = false;
     psn_url_focus_ = true;
     psn_url_input_.clear();
     psn_note_.clear();
@@ -3394,17 +3483,12 @@ void App::ClosePsnModal() {
     psn_url_focus_ = false;
 }
 
-void App::PastePsnClipboard() {
-    if (!window_) {
-        return;
-    }
-    if (!::OpenClipboard(window_->hwnd())) {
-        psn_note_ = L"Could not open the clipboard. Try again.";
-        psn_note_ok_ = false;
-        return;
+bool App::ReadClipboardText(std::string& text) {
+    text.clear();
+    if (!window_ || !::OpenClipboard(window_->hwnd())) {
+        return false;
     }
 
-    std::string text;
     if (HANDLE data = ::GetClipboardData(CF_UNICODETEXT)) {
         if (auto* wide = static_cast<const wchar_t*>(::GlobalLock(data))) {
             const int size = ::WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr,
@@ -3421,15 +3505,40 @@ void App::PastePsnClipboard() {
 
     const auto first = text.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) {
+        text.clear();
+        return false;
+    }
+    const auto last = text.find_last_not_of(" \t\r\n");
+    text = text.substr(first, last - first + 1);
+    return true;
+}
+
+void App::PastePsnClipboard() {
+    std::string text;
+    if (!ReadClipboardText(text)) {
         psn_note_ = L"Clipboard is empty.";
         psn_note_ok_ = false;
         return;
     }
-    const auto last = text.find_last_not_of(" \t\r\n");
-    psn_url_input_ = text.substr(first, last - first + 1);
+    psn_url_input_ = std::move(text);
     psn_url_focus_ = true;
     psn_note_ = L"Link pasted. Press Save to fetch the account ID.";
     psn_note_ok_ = false;
+}
+
+void App::PasteAddressClipboard() {
+    if (address_busy_) {
+        return;
+    }
+    std::string text;
+    if (!ReadClipboardText(text)) {
+        address_note_ = L"Clipboard is empty.";
+        return;
+    }
+    address_input_ = std::move(text);
+    address_selected_ = -1;
+    address_focus_ = true;
+    address_note_ = L"Address pasted. Press Save address.";
 }
 
 void App::SubmitPsnLogin() {
@@ -3587,6 +3696,249 @@ void App::RenderPsnModal() {
     DrawButton(L"Cancel",
                {panel.left + 276.0f, buttons_y, panel.left + 420.0f, buttons_y + 44.0f},
                W_PsnCancel, false);
+}
+
+void App::OpenAddressModal() {
+    address_modal_ = true;
+    psn_modal_ = false;
+    address_focus_ = true;
+    address_selected_ = -1;
+    address_input_ = profile_.host;
+    address_note_ = profile_.host.empty()
+                        ? L"Enter the console IP address or press Discover."
+                        : L"";
+    pin_focus_ = false;
+    open_dropdown_ = -1;
+}
+
+void App::CloseAddressModal() {
+    address_modal_ = false;
+    address_focus_ = false;
+}
+
+void App::DiscoverConsoles() {
+    if (address_busy_) {
+        return;
+    }
+    if (address_thread_.joinable()) {
+        address_thread_.join();
+    }
+    address_busy_ = true;
+    address_done_.store(false);
+    address_selected_ = -1;
+    {
+        std::lock_guard<std::mutex> lock(address_mutex_);
+        address_results_.clear();
+    }
+    address_note_ = L"Scanning the LAN for PS5/PS4 consoles...";
+
+    address_thread_ = std::thread([this] {
+        std::vector<session::DiscoveredConsole> found = session::DiscoverLocal(2500);
+        {
+            std::lock_guard<std::mutex> lock(address_mutex_);
+            address_results_ = std::move(found);
+        }
+        address_done_.store(true);
+    });
+}
+
+void App::TickAddress() {
+    if (!address_busy_ || !address_done_.load()) {
+        return;
+    }
+    if (address_thread_.joinable()) {
+        address_thread_.join();
+    }
+    address_busy_ = false;
+    address_done_.store(false);
+
+    std::vector<session::DiscoveredConsole> found;
+    {
+        std::lock_guard<std::mutex> lock(address_mutex_);
+        found = address_results_;
+    }
+
+    if (found.empty()) {
+        address_note_ = L"No console answered. Enter its IP manually "
+                        L"(PS5: Settings > Network).";
+    } else if (found.size() == 1) {
+        address_input_ = found.front().address;
+        address_selected_ = 0;
+        address_note_ = L"Found " + Widen(found.front().name.empty() ? found.front().address
+                                                                     : found.front().name) +
+                        L" at " + Widen(found.front().address) + L". Press Save address.";
+    } else {
+        address_note_ = L"Found " + std::to_wstring(found.size()) +
+                        L" consoles. Pick one below, then Save address.";
+    }
+}
+
+void App::SaveConsoleAddress() {
+    if (address_busy_) {
+        return;
+    }
+    std::string host = address_input_;
+    const auto first = host.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        address_note_ = L"Enter the console IP address first.";
+        return;
+    }
+    const auto last = host.find_last_not_of(" \t\r\n");
+    host = host.substr(first, last - first + 1);
+
+    for (const char* prefix : {"http://", "https://"}) {
+        const size_t length = std::strlen(prefix);
+        if (host.rfind(prefix, 0) == 0) {
+            host.erase(0, length);
+        }
+    }
+    const size_t slash = host.find('/');
+    if (slash != std::string::npos) {
+        host.erase(slash);
+    }
+    if (host.empty()) {
+        address_note_ = L"Enter the console IP address first.";
+        return;
+    }
+
+    if (address_selected_ >= 0) {
+        std::lock_guard<std::mutex> lock(address_mutex_);
+        if (address_selected_ < static_cast<int>(address_results_.size())) {
+            const session::DiscoveredConsole& found = address_results_[address_selected_];
+            if (!found.name.empty()) {
+                profile_.name = found.name;
+            }
+            if (!found.target_id.empty()) {
+                profile_.target_id = found.target_id;
+            }
+            if (!found.device_type.empty()) {
+                profile_.device_type = found.device_type;
+            }
+        }
+    }
+
+    profile_.host = host;
+    SaveProfile();
+    probe_.Start(host, 9295);
+    stream_note_ = "Console address saved: " + host + ". Checking the control port...";
+    CloseAddressModal();
+}
+
+void App::RenderAddressModal() {
+    const float w = ui_w_;
+    const float h = ui_h_;
+    ui_.FillRect({0.0f, 0.0f, w, h}, th::Rgba(0x000000, 0.62f));
+
+    const float panel_w = 720.0f;
+    const float panel_h = 580.0f;
+    const D2D1_RECT_F panel{(w - panel_w) * 0.5f, (h - panel_h) * 0.5f,
+                            (w + panel_w) * 0.5f, (h + panel_h) * 0.5f};
+    ui_.FillRounded(panel, 18.0f, th::Rgba(0x120A20, 0.98f));
+    ui_.StrokeRounded(panel, 18.0f, th::Rgba(0xFFFFFF, 0.12f), 1.0f);
+    AddHit(Hit::AddressPanel, -1, panel);
+
+    ui_.Text(L"Console connection", {panel.left + 36.0f, panel.top + 24.0f,
+                                     panel.right - 36.0f, panel.top + 58.0f},
+             24.0f, th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    ui_.Text(L"PS5: Settings > Network > View Connection Status shows the console IP.",
+             {panel.left + 36.0f, panel.top + 64.0f, panel.right - 36.0f, panel.top + 86.0f},
+             12.5f, th::Rgba(th::kMuted));
+    ui_.Text(L"The PC and console must be on the same network. VPNs or guest Wi-Fi can "
+             L"hide discovery.",
+             {panel.left + 36.0f, panel.top + 88.0f, panel.right - 36.0f, panel.top + 110.0f},
+             12.5f, th::Rgba(th::kMuted));
+
+    ui_.Text(L"Console address (IP or hostname)",
+             {panel.left + 36.0f, panel.top + 122.0f, panel.right - 36.0f,
+              panel.top + 142.0f},
+             10.5f, th::Rgba(th::kMuted, 0.9f), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+
+    const D2D1_RECT_F field{panel.left + 36.0f, panel.top + 146.0f, panel.right - 36.0f,
+                            panel.top + 192.0f};
+    ui_.FillRounded(field, 10.0f,
+                    th::Rgba(0xFFFFFF, address_focus_ ? 0.10f : 0.06f));
+    ui_.StrokeRounded(field, 10.0f,
+                      th::Rgba(address_focus_ ? th::kAccent : 0xFFFFFF,
+                               address_focus_ ? 0.55f : 0.10f),
+                      1.0f);
+    AddHit(Hit::AddressField, -1, field);
+
+    if (address_input_.empty()) {
+        ui_.Text(L"192.168.1.21 or console hostname",
+                 {field.left + 14.0f, field.top, field.right - 14.0f, field.bottom}, 12.0f,
+                 th::Rgba(th::kMuted, 0.75f));
+    } else {
+        ui_.Text(Widen(address_input_).c_str(),
+                 {field.left + 14.0f, field.top, field.right - 14.0f, field.bottom}, 12.0f,
+                 th::Rgba(th::kInk, 0.95f));
+    }
+    if (address_focus_ && !address_busy_ && std::fmod(clock_, 1.0) < 0.55) {
+        const float caret_x =
+            std::min(field.right - 12.0f,
+                     field.left + 14.0f + ui_.TextWidth(Widen(address_input_).c_str(), 12.0f));
+        ui_.Line({caret_x, field.top + 9.0f}, {caret_x, field.bottom - 9.0f},
+                 th::Rgba(th::kAccent, 0.9f), 1.2f);
+    }
+
+    DrawButton(L"Discover", {panel.left + 36.0f, panel.top + 202.0f,
+                             panel.left + 176.0f, panel.top + 246.0f},
+               W_AddressDiscover, false);
+    DrawButton(L"Paste IP", {panel.left + 192.0f, panel.top + 202.0f,
+                             panel.left + 322.0f, panel.top + 246.0f},
+               W_AddressPaste, false);
+
+    std::vector<session::DiscoveredConsole> results;
+    {
+        std::lock_guard<std::mutex> lock(address_mutex_);
+        results = address_results_;
+    }
+
+    float list_y = panel.top + 260.0f;
+    if (address_busy_) {
+        ui_.StrokeArc(panel.right - 56.0f, panel.top + 170.0f, 10.0f,
+                      static_cast<float>(clock_ * 5.0), 4.6f,
+                      th::Rgba(th::kAccent, 0.9f), 2.0f);
+        ui_.Text(L"Scanning UDP 9302/987...",
+                 {panel.left + 36.0f, list_y, panel.right - 36.0f, list_y + 32.0f}, 12.0f,
+                 th::Rgba(th::kMuted));
+    } else if (results.empty()) {
+        ui_.Text(L"No discovered console. Enter the IP manually or press Discover.",
+                 {panel.left + 36.0f, list_y, panel.right - 36.0f, list_y + 32.0f}, 12.0f,
+                 th::Rgba(th::kMuted, 0.8f));
+    } else {
+        ui_.Text(L"Discovered consoles",
+                 {panel.left + 36.0f, list_y, panel.right - 36.0f, list_y + 22.0f}, 10.5f,
+                 th::Rgba(th::kMuted, 0.9f), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        list_y += 26.0f;
+        for (size_t i = 0; i < results.size() && i < 4; ++i) {
+            const D2D1_RECT_F row{panel.left + 36.0f, list_y, panel.right - 36.0f,
+                                  list_y + 36.0f};
+            const bool selected = static_cast<int>(i) == address_selected_;
+            if (selected) {
+                ui_.FillRounded(row, 8.0f, th::Rgba(th::kAccent, 0.18f));
+            }
+            const std::wstring label =
+                Widen(results[i].name.empty() ? results[i].address : results[i].name) +
+                L"   " + Widen(results[i].address);
+            ui_.Text(label.c_str(), {row.left + 12.0f, row.top, row.right - 12.0f,
+                                     row.bottom},
+                     12.0f, th::Rgba(th::kInk, selected ? 0.98f : 0.82f));
+            AddHit(Hit::AddressResult, static_cast<int>(i), row);
+            list_y += 40.0f;
+        }
+    }
+
+    ui_.Text(address_note_.c_str(), {panel.left + 36.0f, panel.bottom - 132.0f,
+                                     panel.right - 36.0f, panel.bottom - 82.0f},
+             12.0f, th::Rgba(th::kMuted, 0.95f));
+
+    const float buttons_y = panel.bottom - 68.0f;
+    DrawButton(address_busy_ ? L"Scanning..." : L"Save address",
+               {panel.left + 36.0f, buttons_y, panel.left + 248.0f, buttons_y + 44.0f},
+               W_AddressSave, true);
+    DrawButton(L"Cancel",
+               {panel.left + 264.0f, buttons_y, panel.left + 404.0f, buttons_y + 44.0f},
+               W_AddressCancel, false);
 }
 
 void App::RenderTopBar() {
@@ -4035,7 +4387,10 @@ void App::RenderHome(double t) {
              th::Rgba(th::kMuted));
 
     const float button_y = y0 + 224.0f;
-    DrawButton(probe_.state() == net::ProbeState::Checking ? L"Checking..." : L"Connect",
+    const bool no_host = profile_.host.empty();
+    DrawButton(no_host ? L"Find console"
+                       : (probe_.state() == net::ProbeState::Checking ? L"Checking..."
+                                                                    : L"Connect"),
                {x0 + 36.0f, button_y, x0 + 196.0f, button_y + 52.0f}, W_Probe, true);
 
     const D2D1_RECT_F pair_rect{x0 + 212.0f, button_y, x0 + 372.0f, button_y + 52.0f};
@@ -4057,8 +4412,11 @@ void App::RenderHome(double t) {
              DWRITE_TEXT_ALIGNMENT_CENTER);
     AddHit(Hit::Stream, -1, preview_rect);
 
-    ui_.Text(L"Connect checks the console control port (9295). Pairing uses the 8-digit code "
-             L"from Settings > System > Remote Play > Link Device.",
+    ui_.Text(no_host
+                 ? L"No console address yet. Click Find console to scan the LAN or enter the "
+                   L"console IP manually."
+                 : L"Connect checks the console control port (9295). Pairing uses the 8-digit "
+                   L"code from Settings > System > Remote Play > Link Device.",
              {x0 + 36.0f, y0 + 288.0f, x0 + card_w - 36.0f, y0 + 316.0f}, 11.5f,
              th::Rgba(th::kMuted, 0.85f));
 
@@ -4483,7 +4841,18 @@ void App::RenderSettings(double t) {
                                                : std::wstring(L"None"),
                         y);
             y += kRowH;
-            DrawInfoRow(L"Address", profile_.host.empty() ? L"Not set" : Widen(profile_.host), y);
+            DrawSettingLabel(L"Address", y, true);
+            {
+                const float right = w - 64.0f;
+                ui_.TextEllipsis(profile_.host.empty() ? L"Not set"
+                                                       : Widen(profile_.host).c_str(),
+                                 {right - 620.0f, y, right - 260.0f, y + 56.0f}, 15.0f,
+                                 th::Rgba(th::kInkDim), DWRITE_FONT_WEIGHT_NORMAL,
+                                 DWRITE_TEXT_ALIGNMENT_TRAILING);
+                DrawButton(profile_.host.empty() ? L"Find console" : L"Change address",
+                           {right - 240.0f, y + 8.0f, right, y + 52.0f}, W_AddressOpen,
+                           profile_.host.empty());
+            }
             y += kRowH;
             DrawInfoRow(L"Pairing",
                         profile_.needs_pairing() ? L"Needed (8-digit console code)" : L"Paired", y);

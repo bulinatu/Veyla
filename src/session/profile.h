@@ -83,7 +83,7 @@ struct Profile {
     int console_triggers = 1;
     int motion = 1;
 
-    bool has_console() const { return !target_id.empty(); }
+    bool has_console() const { return !target_id.empty() || !host.empty(); }
     bool needs_pairing() const { return !credentials.present(); }
     std::string display_name() const;
     std::string status_line() const;

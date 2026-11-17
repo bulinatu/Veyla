@@ -80,6 +80,9 @@ private:
         PinField,
         PsnUrlField,
         PsnPanel,
+        AddressField,
+        AddressResult,
+        AddressPanel,
         Minimize,
         Maximize,
         Close,
@@ -130,6 +133,15 @@ private:
     void ClosePsnModal();
     void PastePsnClipboard();
     void TickPsnLogin();
+
+    void OpenAddressModal();
+    void DiscoverConsoles();
+    void SaveConsoleAddress();
+    void CloseAddressModal();
+    void PasteAddressClipboard();
+    void TickAddress();
+    void RenderAddressModal();
+    bool ReadClipboardText(std::string& out);
 
     void AddHit(Hit hit, int index, const D2D1_RECT_F& rect);
     void DispatchClick();
@@ -411,6 +423,18 @@ private:
     std::mutex psn_mutex_;
     session::PsnAccount psn_result_;
     std::string psn_detail_;
+
+    // Console address modal / on-demand LAN discovery
+    bool address_modal_ = false;
+    bool address_focus_ = true;
+    bool address_busy_ = false;
+    int address_selected_ = -1;
+    std::string address_input_;
+    std::wstring address_note_;
+    std::vector<session::DiscoveredConsole> address_results_;
+    std::thread address_thread_;
+    std::atomic<bool> address_done_{false};
+    std::mutex address_mutex_;
 };
 
 }  // namespace brp

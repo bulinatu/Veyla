@@ -116,7 +116,10 @@ First run
 2. PSN account: click "Sign in with PSN", sign in in the browser, copy the
    redirect URL from the blank page, paste it into the app and save. This stores
    only your PSN account id in %APPDATA%\BetterRemotePlay\session.json.
-3. Enter the console the LAN discovery found, or type its address.
+3. Console address: usually found automatically at startup. If it is not:
+   Settings > Connection > Address > Find console, press Discover, or enter the
+   IP shown on the PS5 under Settings > Network > View Connection Status.
+   Then Save address.
 4. On the console: Settings > System > Remote Play > Link Device. Type the
    8-digit code into Pairing PIN, then click Pair.
 5. Go back to Home and click Connect.

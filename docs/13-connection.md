@@ -25,6 +25,36 @@ not TCP 9295.
 
 ---
 
+## Console address and LAN discovery
+
+The app runs a LAN discovery pass during the boot screen: a UDP `SRCH` packet to
+the PS5 discovery port `9302` (and PS4 `987`). A console that answers is saved
+automatically with its address, name and host id, so the normal first run starts
+with the console already filled in.
+
+If discovery is blocked (different subnet, VPN, guest Wi-Fi, firewall or a
+console that is fully off), use the manual path:
+
+- **Settings > Connection > Address > Find console / Change address** opens the
+  console connection dialog.
+- **Discover** runs the same LAN scan on demand and lists every console that
+  answered. Click a result, then **Save address**.
+- **Paste IP** accepts an address from the clipboard; you can also type it.
+- On the PS5 the address is shown at **Settings > Network > View Connection
+  Status**. On the PS4: **Settings > Network > View Connection Status**.
+- **Save address** probes TCP 9295 immediately, so the Connection tab reports
+  whether the console answered on the control port.
+
+On Home, when no address is stored, the main button becomes **Find console** and
+opens this dialog. Once an address exists, **Connect** checks reachability, wakes
+a rest-mode console if needed, and starts the stream.
+
+Discovery is intentionally limited to the local broadcast domain. If the console
+is on another VLAN, enter its routed IP manually; the stream itself is a normal
+TCP/UDP connection over the LAN or a routed network.
+
+---
+
 ## PSN account ID (browser sign-in)
 
 Pairing needs the 8-byte PSN account ID, not the decimal number users see.
