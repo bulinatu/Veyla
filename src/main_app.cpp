@@ -90,7 +90,8 @@ int main() {
         // software timer and the monitor, which was showing up as an
         // occasional 8.3 ms frame at 240 Hz.
         const bool swapchain_clock = app.present_waitable() != nullptr;
-        if (swapchain_clock) {
+        const bool covered = app.present_covered();
+        if (swapchain_clock && !covered) {
             const int hz = std::max(24, app.present_hz());
             const DWORD timeout =
                 static_cast<DWORD>(std::clamp(2000 / hz, 8, 40));
@@ -179,9 +180,10 @@ int main() {
         }
 
         // Without a swapchain waitable, pace the loop explicitly at the
-        // monitor's refresh rate. With one, Present(1) is the limiter and a
-        // second timer only reintroduces jitter.
-        if (!swapchain_clock) {
+        // monitor's refresh rate. Same when the FG worker covers the parent:
+        // it owns the visible swapchain, so there is no present to wait for
+        // and an 8 ms waitable timeout would cap the UI loop at 112 fps.
+        if (!swapchain_clock || covered) {
             const auto budget = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 std::chrono::duration<double>(1.0 / app.present_hz()));
             next_frame += budget;

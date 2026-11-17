@@ -65,6 +65,15 @@ public:
     HANDLE frame_waitable() const { return frame_waitable_; }
     bool WaitForFrame(DWORD timeout_ms);
 
+    // Frames that DXGI reported as presented but whose refresh count advanced
+    // by more than the present count: i.e. the scanout repeated a frame.
+    unsigned long long present_misses() const { return present_misses_; }
+    bool present_stats_available() const { return have_present_stats_; }
+    // Refresh counter from the last Present. Consecutive new-source presents
+    // differ by the exact number of vblanks the previous source frame stayed
+    // on screen.
+    UINT present_refresh_count() const { return last_present_refresh_; }
+
     void SetUpscaleMode(int mode);
     int upscale_mode() const { return cfg_.upscale_mode; }
 
@@ -136,6 +145,7 @@ private:
     bool tearing_ = false;
     bool external_source_ = false;
     bool CreateSwapchainForFormat();
+    UINT swapchain_flags_ = 0;
 
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
@@ -144,6 +154,11 @@ private:
     Microsoft::WRL::ComPtr<IDXGISwapChain2> swapchain2_;
     HANDLE frame_waitable_ = nullptr;
     bool waitable_ = false;
+    DXGI_FRAME_STATISTICS last_present_stats_{};
+    bool have_present_stats_ = false;
+    bool present_stats_logged_ = false;
+    unsigned long long present_misses_ = 0;
+    UINT last_present_refresh_ = 0;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> backbuffer_;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv_;
 

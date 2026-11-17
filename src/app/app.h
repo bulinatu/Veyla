@@ -4,6 +4,7 @@
 
 #include <d2d1_1.h>
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -59,6 +60,7 @@ public:
 
     // Presentation cadence: the monitor's refresh rate.
     int present_hz() const;
+    bool present_covered() const { return present_covered_; }
 
     // vblank-aligned frame clock exposed by the swapchain. Null means the
     // caller must pace the loop itself.
@@ -165,7 +167,7 @@ private:
     void ConnectConsole();
     void StartStream();
     void TickPendingConnect();
-    double VideoPace() const;
+    bool VideoPaced() const;
     void SaveProfile();
     void StartPadThread();
     void StopPadThread();
@@ -386,8 +388,7 @@ private:
     double nr_last_ms_ = 0.0;
     std::vector<uint8_t> sr_readback_;
     std::vector<uint8_t> sr_scaled_;
-    std::vector<uint16_t> scale_tmp_;
-    media::NvReflex reflex_;
+    std::vector<uint16_t> scale_tmp_;    media::NvReflex reflex_;
     bool reflex_loaded_ = false;
     int overlay_tab_ = 0;
     HWND fg_window_ = nullptr;
@@ -410,6 +411,36 @@ private:
     int stat_stalls_ = 0;
     double stat_at_ = -1.0;
     double frame_work_ms_ = 0.0;
+    double phase_render_ms_ = 0.0;
+    double phase_ui_ms_ = 0.0;
+    double phase_source_ms_ = 0.0;
+
+    // Live reading from the DLSS Frame Generation worker's own log. NVIDIA's
+    // worker tells us how many frames it actually displayed; without that
+    // number a 6x setting that only reaches 165 fps looks like it works.
+    double fg_worker_fps_ = 0.0;
+    int fg_worker_mult_ = 0;
+    double fg_worker_at_ = -1.0;
+    void SampleFgWorker();
+
+    // Video cadence: how many refreshes each selected source frame actually
+    // held. This is the number the eye sees, independent of the UI loop.
+    std::array<uint8_t, 120> video_holds_{};
+    int video_hold_pos_ = 0;
+    int video_hold_fill_ = 0;
+    std::array<uint8_t, 120> screen_holds_{};
+    int screen_hold_pos_ = 0;
+    int screen_hold_fill_ = 0;
+    double video_phase_ = 0.0;
+    double next_source_at_ = 0.0;
+    bool source_updated_ = false;
+    UINT last_source_refresh_ = 0;
+    double last_source_at_ = -1.0;
+    double video_probe_at_ = -1.0;
+    unsigned long long last_present_misses_ = 0;
+    bool present_covered_ = false;
+    void NoteSourceFrame();
+    void LogVideoCadence();
 
     // The stream HUD used to reformat five strings (and lay them out) on every
     // 240 Hz frame. The numbers are unreadable above ~10 Hz, so the text is

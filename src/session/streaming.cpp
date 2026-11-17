@@ -10,6 +10,7 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -199,8 +200,6 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
     buffer_target_.store(1);
     buffer_drops_.store(0);
     primed_ = false;
-    next_emit_ = 0.0;
-    pace_started_ = false;
     last_drought_ = -100.0;
     last_recovery_ = 0.0;
     last_queue_ = 0;
@@ -210,6 +209,10 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
     stats_decode_count_.store(0);
     stats_decode_max_us_.store(0);
     stats_bytes_.store(0);
+    stats_arrival_us_.store(0);
+    stats_arrival_count_.store(0);
+    stats_arrival_outliers_.store(0);
+    have_last_decoded_ = false;
     {
         std::lock_guard<std::mutex> lock(frame_mutex_);
         frames_.clear();
@@ -348,6 +351,25 @@ void Streaming::DecodeThreadMain() {
         media::DecodedFrame frame;
         int decoded = 0;
         while (decoder_.Receive(frame)) {
+            const auto arrived = std::chrono::steady_clock::now();
+            if (have_last_decoded_) {
+                const double dt_ms = std::chrono::duration<double, std::milli>(
+                                         arrived - last_decoded_at_)
+                                         .count();
+                // Ignore pathological gaps (session start, keyframe wait);
+                // they are counted as lost/recovery elsewhere.
+                if (dt_ms > 4.0 && dt_ms < 50.0) {
+                    stats_arrival_us_.fetch_add(
+                        static_cast<long long>(std::llround(dt_ms * 1000.0)));
+                    stats_arrival_count_.fetch_add(1);
+                    if (dt_ms < 13.5 || dt_ms > 20.0) {
+                        stats_arrival_outliers_.fetch_add(1);
+                    }
+                }
+            }
+            last_decoded_at_ = arrived;
+            have_last_decoded_ = true;
+
             {
                 std::lock_guard<std::mutex> lock(frame_mutex_);
                 frames_.push_back(std::move(frame));
@@ -569,7 +591,7 @@ std::string Streaming::message() const {
     return message_;
 }
 
-bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, double pace_interval) {
+bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, bool paced) {
     std::lock_guard<std::mutex> lock(frame_mutex_);
     const auto now = std::chrono::steady_clock::now();
     const double seconds =
@@ -594,29 +616,18 @@ bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, double pace_inte
         return false;
     }
 
-    if (pace_interval > 0.0) {
-        // Fixed grid: 60 fps on a 240 Hz panel becomes exactly four refreshes
-        // per frame instead of 3/4/5 depending on when the decoder finished.
-        // The newest frame wins if the queue built up, so pacing never adds
-        // more than one interval of latency.
-        if (!pace_started_) {
-            pace_started_ = true;
-            next_emit_ = 0.0;
-        }
-        if (next_emit_ > 0.0 && seconds < next_emit_ - pace_interval * 0.20) {
-            return false;
-        }
-        while (frames_.size() > 1) {
+    if (paced) {
+        // The presentation loop owns the cadence (see App::video_phase_): it
+        // calls this only on a frame slot, so all this has to do is hand over
+        // the oldest frame and keep at most one spare. Emitting the oldest
+        // preserves order; any deeper queue is latency without benefit.
+        while (frames_.size() > 2) {
             frames_.pop_front();
             buffer_drops_.fetch_add(1);
         }
         out = std::move(frames_.front());
         frames_.pop_front();
         last_queue_ = static_cast<int>(frames_.size());
-        if (next_emit_ <= 0.0 || seconds - next_emit_ > pace_interval) {
-            next_emit_ = seconds;
-        }
-        next_emit_ += pace_interval;
         return true;
     }
 
@@ -671,6 +682,12 @@ Streaming::StreamStats Streaming::ConsumeStats() {
     stats.decode_ms_max = static_cast<double>(max_us) / 1000.0;
     stats.kbps = stats.elapsed > 0.0 ? static_cast<double>(bytes) * 8.0 / stats.elapsed / 1000.0
                                      : 0.0;
+    const int arrivals = stats_arrival_count_.exchange(0);
+    const long long arrival_us = stats_arrival_us_.exchange(0);
+    stats.arrival_ms = arrivals > 0
+                           ? static_cast<double>(arrival_us) / arrivals / 1000.0
+                           : 0.0;
+    stats.arrival_outliers = stats_arrival_outliers_.exchange(0);
     stats.buffer = buffer_target_.load();
     stats.buffer_drops = buffer_drops_.exchange(0);
     {

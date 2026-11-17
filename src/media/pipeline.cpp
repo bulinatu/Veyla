@@ -274,14 +274,30 @@ bool Presenter::Resize(int width, int height) {
     rtv_.Reset();
     backbuffer_.Reset();
 
-    const UINT flags = (tearing_ && cfg_.allow_tearing) ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+    // ResizeBuffers validates the flags against the ones the swapchain was
+    // created with. The frame-latency waitable flag is part of that set, so
+    // omitting it fails with E_INVALIDARG (the previous build could not enter
+    // fullscreen at all).
+    const UINT flags = swapchain_flags_;
     HRESULT hr = swapchain_->ResizeBuffers(0, static_cast<UINT>(width), static_cast<UINT>(height),
                                            DXGI_FORMAT_UNKNOWN, flags);
     std::fprintf(stderr, "[presenter] resize %dx%d -> %dx%d hr=0x%08lX\n", cfg_.output_width,
                  cfg_.output_height, width, height, static_cast<unsigned long>(hr));
     if (FAILED(hr)) {
-        std::fprintf(stderr, "ResizeBuffers failed: 0x%08lX\n", static_cast<unsigned long>(hr));
-        return false;
+        // Some drivers reject the waitable flag in ResizeBuffers even though
+        // they accepted it at creation. Recreate the swapchain instead of
+        // leaving the window stuck at the old size.
+        std::fprintf(stderr, "[presenter] recreating swapchain %dx%d\n", width, height);
+        cfg_.output_width = width;
+        cfg_.output_height = height;
+        rtv_.Reset();
+        backbuffer_.Reset();
+        swapchain2_.Reset();
+        swapchain_.Reset();
+        if (!CreateSwapchainForFormat() || !CreateBackbufferViews()) {
+            return false;
+        }
+        return CreateTargetViews();
     }
 
     cfg_.output_width = width;
@@ -440,6 +456,7 @@ bool Presenter::CreateSwapchainForFormat() {
                      static_cast<unsigned long>(hr));
         return false;
     }
+    swapchain_flags_ = desc.Flags;
 
     if (SUCCEEDED(swapchain_.As(&swapchain2_))) {
         // One queued frame: lowest latency, and the waitable handle signals
@@ -629,6 +646,28 @@ void Presenter::PresentNow(bool vsync) {
         (tearing_ && cfg_.allow_tearing && !vsync) ? DXGI_PRESENT_ALLOW_TEARING : 0;
     swapchain_->Present(vsync ? 1 : 0, present_flags);
 
+    // Ground truth for scanout: if the refresh counter advances faster than
+    // the present counter, the display repeated a frame even though the CPU
+    // loop looked perfect.
+    DXGI_FRAME_STATISTICS stats{};
+    const HRESULT stats_hr = swapchain_->GetFrameStatistics(&stats);
+    if (SUCCEEDED(stats_hr)) {
+        have_present_stats_ = true;
+        if (have_present_stats_ && last_present_stats_.PresentCount != 0) {
+            const UINT presents = stats.PresentCount - last_present_stats_.PresentCount;
+            const UINT refreshes = stats.PresentRefreshCount - last_present_stats_.PresentRefreshCount;
+            if (refreshes > presents) {
+                present_misses_ += refreshes - presents;
+            }
+        }
+        last_present_stats_ = stats;
+        last_present_refresh_ = stats.PresentRefreshCount;
+    } else if (!present_stats_logged_) {
+        present_stats_logged_ = true;
+        std::fprintf(stderr, "[presenter] frame statistics unavailable (0x%08lX)\n",
+                     static_cast<unsigned long>(stats_hr));
+    }
+
     CollectTiming();
     ++frames_;
 }
@@ -726,27 +765,18 @@ std::string Presenter::Summary() const {
     const double p95 = Percentile(gpu_ms_, 0.95);
     const double cpu = cpu_ms_.empty() ? 0.0 : cpu_ms_.back();
 
-    double fps = 0.0;
-    if (frames_ > 1) {
-        const double dt =
-            std::chrono::duration<double>(now - start_time_).count();
-        if (dt > 0.0) {
-            fps = static_cast<double>(frames_ - 1) / dt;
-        }
-    }
-
     char buf[400];
     if (target_tex_) {
         std::snprintf(buf, sizeof(buf),
-                      "gpu p50 %.2f  p95 %.2f ms | cpu %.2f ms | %.1f fps | %dx%d, render "
+                      "gpu p50 %.2f  p95 %.2f ms | cpu %.2f ms | %dx%d, render "
                       "%dx%d <- %dx%d | mode %d",
-                      p50, p95, cpu, fps, cfg_.output_width, cfg_.output_height,
+                      p50, p95, cpu, cfg_.output_width, cfg_.output_height,
                       cfg_.render_width, cfg_.render_height, cfg_.source_width,
                       cfg_.source_height, cfg_.upscale_mode);
     } else {
         std::snprintf(buf, sizeof(buf),
-                      "gpu p50 %.2f  p95 %.2f ms | cpu %.2f ms | %.1f fps | %dx%d <- %dx%d | mode %d",
-                      p50, p95, cpu, fps, cfg_.output_width, cfg_.output_height,
+                      "gpu p50 %.2f  p95 %.2f ms | cpu %.2f ms | %dx%d <- %dx%d | mode %d",
+                      p50, p95, cpu, cfg_.output_width, cfg_.output_height,
                       cfg_.source_width, cfg_.source_height, cfg_.upscale_mode);
     }
 

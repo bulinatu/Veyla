@@ -48,10 +48,9 @@ public:
     // Adaptive jitter buffer: `buffer` is the maximum number of decoded frames
     // to hold. The target starts at one frame (low latency), rises on an empty
     // queue while streaming, and falls back after a stable period.
-    // `pace_interval` > 0 delivers frames on a fixed grid (1/fps) so a 60 fps
-    // stream lands on a steady number of display refreshes instead of showing
-    // each frame as soon as it happens to decode.
-    bool TakeFrame(media::DecodedFrame& out, int buffer, double pace_interval = 0.0);
+    // `paced` is used when the caller already decides the display cadence: the
+    // frame is taken from the front and at most two frames of latency are kept.
+    bool TakeFrame(media::DecodedFrame& out, int buffer, bool paced = false);
     int buffer_target() const { return buffer_target_.load(); }
     int buffer_drops() const { return buffer_drops_.load(); }
     int video_queue_drops() const { return video_queue_drops_.load(); }
@@ -65,6 +64,11 @@ public:
         int queue = 0;
         int buffer = 0;
         int buffer_drops = 0;
+        // Interval between decoded frames: this is the source cadence the
+        // presentation grid has to follow. `arrival_outliers` counts frames
+        // that arrived more than ~3.5 ms off the nominal 16.7 ms.
+        double arrival_ms = 0.0;
+        int arrival_outliers = 0;
         double elapsed = 0.0;
     };
     // Returns the counters collected since the previous call and resets them.
@@ -139,8 +143,6 @@ private:
     int last_queue_ = 0;
     double last_drought_ = -100.0;
     double last_recovery_ = 0.0;
-    double next_emit_ = 0.0;
-    bool pace_started_ = false;
 
     // per-interval video telemetry
     std::atomic<int> stats_frames_{0};
@@ -149,6 +151,11 @@ private:
     std::atomic<int> stats_decode_count_{0};
     std::atomic<long long> stats_decode_max_us_{0};
     std::atomic<long long> stats_bytes_{0};
+    std::atomic<long long> stats_arrival_us_{0};
+    std::atomic<int> stats_arrival_count_{0};
+    std::atomic<int> stats_arrival_outliers_{0};
+    std::chrono::steady_clock::time_point last_decoded_at_{};
+    bool have_last_decoded_ = false;
     std::chrono::steady_clock::time_point stats_started_{};
 
     std::atomic<int> frame_count_{0};

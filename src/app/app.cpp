@@ -12,6 +12,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -1729,15 +1731,125 @@ bool App::WaitForPresent(int timeout_ms) {
     return presenter_.WaitForFrame(static_cast<DWORD>(timeout_ms));
 }
 
-double App::VideoPace() const {
-    // Buffer 0 is the explicit "lowest latency" choice: show a frame the
-    // moment it decodes. Otherwise deliver on the console's 60 Hz grid so the
-    // image holds for an even number of refreshes. Frame generation produces
-    // its own cadence and must never be starved by this grid.
-    if (stream_buffer_ <= 0 || profile_.dlss_fg >= 2 || frame_gen_ >= 2) {
-        return 0.0;
+void App::NoteSourceFrame() {
+    source_updated_ = true;
+    if (last_source_at_ > 0.0) {
+        const double ms = (clock_ - last_source_at_) * 1000.0;
+        if (ms > 1.0 && ms < 250.0) {
+            int vblanks = static_cast<int>(std::lround(ms * present_hz() / 1000.0));
+            vblanks = std::clamp(vblanks, 1, 11);
+            video_holds_[video_hold_pos_] = static_cast<uint8_t>(vblanks);
+            video_hold_pos_ = (video_hold_pos_ + 1) % static_cast<int>(video_holds_.size());
+            if (video_hold_fill_ < static_cast<int>(video_holds_.size())) {
+                ++video_hold_fill_;
+            }
+        }
     }
-    return 1.0 / static_cast<double>(std::clamp(profile_.fps, 24, 120));
+    last_source_at_ = clock_;
+}
+
+void App::SampleFgWorker() {
+    if (profile_.dlss_fg < 2 || !stream_active_) {
+        fg_worker_fps_ = 0.0;
+        fg_worker_mult_ = 0;
+        return;
+    }
+    if (clock_ - fg_worker_at_ < 1.0) {
+        return;
+    }
+    fg_worker_at_ = clock_;
+
+    wchar_t exe_path[MAX_PATH] = {};
+    if (::GetModuleFileNameW(nullptr, exe_path, MAX_PATH) == 0) {
+        return;
+    }
+    const std::filesystem::path log =
+        std::filesystem::path(exe_path).parent_path() / L"nr-worker.log";
+
+    // Only trust a fresh line: the worker keeps the last value in its log
+    // after the session ends, and showing that as a live reading is a lie.
+    std::error_code ec;
+    const auto modified = std::filesystem::last_write_time(log, ec);
+    if (ec || std::filesystem::file_time_type::clock::now() - modified >
+                  std::chrono::seconds(3)) {
+        fg_worker_fps_ = 0.0;
+        return;
+    }
+
+    std::ifstream file(log, std::ios::binary);
+    if (!file) {
+        return;
+    }
+    file.seekg(0, std::ios::end);
+    const std::streamoff size = file.tellg();
+    const std::streamoff start = size > 8192 ? size - 8192 : 0;
+    file.seekg(start);
+    const std::string text((std::istreambuf_iterator<char>(file)),
+                           std::istreambuf_iterator<char>());
+    const size_t pos = text.rfind("[fg] displayed ");
+    if (pos == std::string::npos) {
+        return;
+    }
+    double fps = 0.0;
+    int multiplier = 0;
+    if (std::sscanf(text.c_str() + pos, "[fg] displayed %lf FPS (real + generated, %dx)",
+                    &fps, &multiplier) == 2) {
+        fg_worker_fps_ = fps;
+        fg_worker_mult_ = multiplier;
+    }
+}
+
+void App::LogVideoCadence() {
+    static const bool probe = std::getenv("BRP_FRAME_PROBE") != nullptr;
+    if (!probe || !stream_active_) {
+        return;
+    }
+    if (video_probe_at_ < 0.0) {
+        video_probe_at_ = clock_;
+    }
+    if (clock_ - video_probe_at_ < 2.0) {
+        return;
+    }
+    video_probe_at_ = clock_;
+
+    int counts[12] = {};
+    for (int i = 0; i < video_hold_fill_; ++i) {
+        ++counts[video_holds_[i]];
+    }
+    int screen_counts[12] = {};
+    for (int i = 0; i < screen_hold_fill_; ++i) {
+        ++screen_counts[screen_holds_[i]];
+    }
+    const int n = std::max(1, video_hold_fill_);
+    const int sn = std::max(1, screen_hold_fill_);
+    const auto pct = [&](int v) { return counts[v] * 100 / n; };
+    const auto spct = [&](int v) { return screen_counts[v] * 100 / sn; };
+    const double source_fps = stream_stats_.elapsed > 0.0
+                                  ? static_cast<double>(stream_stats_.frames) /
+                                        stream_stats_.elapsed
+                                  : 0.0;
+    const unsigned long long misses = presenter_.present_misses();
+    std::fprintf(stderr,
+                 "[video] src %.1f fps  select 3v %d%%  4v %d%%  5v %d%%  |  screen 3v %d%%  "
+                 "4v %d%%  5v %d%%  (n=%d, stats=%s)  |  arrival %.1f ms outliers %d  |  "
+                 "present misses +%llu (total %llu)  |  render %.2f ui %.2f src %.2f ms\n",
+                 source_fps, pct(3), pct(4), pct(5), spct(3), spct(4), spct(5),
+                 screen_hold_fill_, presenter_.present_stats_available() ? "yes" : "no",
+                 stream_stats_.arrival_ms, stream_stats_.arrival_outliers,
+                 misses - last_present_misses_, misses, phase_render_ms_, phase_ui_ms_,
+                 phase_source_ms_);
+    last_present_misses_ = misses;
+}
+
+bool App::VideoPaced() const {
+    // Buffer 0 is the explicit "lowest latency" choice: show a frame the
+    // moment it decodes. Otherwise the presentation loop gates frames on the
+    // display's own tick counter (4 ticks per 60 fps frame at 240 Hz), which
+    // is exact and immune to the drift of a wall-clock grid. DLSS Frame
+    // Generation also gets a paced source: the generator expects a steady
+    // 60 Hz input, not network jitter. The legacy NVIDIA VFG path has its own
+    // generated queue and is fed as fast as it asks.
+    return stream_buffer_ > 0 && frame_gen_ < 2;
 }
 
 std::wstring App::FindFrameGenRuntime() const {
@@ -2677,6 +2789,19 @@ void App::StartStream() {
     std::string error;
     if (streaming_.Start(profile_, profile_.width, profile_.height, profile_.bitrate_kbps, error)) {
         stream_active_ = true;
+        video_holds_.fill(0);
+        video_hold_pos_ = 0;
+        video_hold_fill_ = 0;
+        screen_holds_.fill(0);
+        screen_hold_pos_ = 0;
+        screen_hold_fill_ = 0;
+        video_phase_ = 0.0;
+        next_source_at_ = 0.0;
+        source_updated_ = false;
+        last_source_refresh_ = 0;
+        last_source_at_ = -1.0;
+        video_probe_at_ = clock_;
+        last_present_misses_ = presenter_.present_misses();
         StartPadThread();
         mouse_active_at_ = clock_;
         cursor_hidden_ = false;
@@ -2804,6 +2929,9 @@ void App::DisconnectStream() {
     stream_active_ = false;
     streaming_.Stop();
     pending_connect_ = PendingConnect::None;
+    last_source_at_ = -1.0;
+    last_source_refresh_ = 0;
+    video_phase_ = 0.0;
     feedback_version_ = 0;
     pad_.SetConsoleFeedback(PadConsoleFeedback{});
     fg_queue_.clear();
@@ -2902,6 +3030,7 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         pointer_.y = static_cast<int>(std::lround(pointer.y / ui_scale_));
     }
     clock_ = time_seconds;
+    source_updated_ = false;
     hits_.clear();
     hover_ = Hit::None;
     hover_index_ = -1;
@@ -3029,6 +3158,7 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
 
     TickPsnLogin();
     TickAddress();
+    SampleFgWorker();
 
     pairing_.Poll();
     if (pairing_.state() == session::PairState::Success) {
@@ -3104,10 +3234,22 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         }
     }
 
+    const bool reflex_active = profile_.reflex > 0 && reflex_.markers_available() &&
+                               stream_active_ && screen_ == Screen::Stream;
+    const auto render_started = std::chrono::steady_clock::now();
     if (!fg_covering) {
+        if (reflex_active) {
+            // Markers keep the driver informed, but NvAPI_D3D_Sleep is not
+            // called: it targets a game-style simulation window and, measured
+            // here, sleeps into the next vblank (4 ms/frame, 56+ missed
+            // refreshes/s). The swapchain clock is the pacer.
+            reflex_.BeginFrame(presenter_.device());
+            reflex_.EndSimulation(presenter_.device());
+            reflex_.RenderSubmitStart(presenter_.device());
+        }
         if (screen_ == Screen::Stream || screen_ == Screen::StreamSettings) {
-            // Reflex low-latency sleep, right before the frame is submitted.
-            reflex_.Sleep(presenter_.device());
+            // NvAPI_D3D_Sleep is only called above, between SIMULATION_END and
+            // RENDERSUBMIT_START. Without markers it is not called at all.
             presenter_.Render(time_seconds);
         } else if (screen_ != Screen::Home && screen_ != Screen::Settings) {
             const float bg[4] = {0.010f, 0.016f, 0.028f, 1.0f};
@@ -3116,6 +3258,10 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         // Home and Settings paint an opaque full-window gradient themselves;
         // clearing the backbuffer first would be a second full-screen write.
 
+        const auto ui_started = std::chrono::steady_clock::now();
+        phase_render_ms_ = std::chrono::duration<double, std::milli>(
+                               ui_started - render_started)
+                               .count();
         ui_.BeginFrame();
         switch (screen_) {
             case Screen::Home:
@@ -3138,7 +3284,14 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         }
         RenderWindowChrome();
         ui_.EndFrame();
+        if (reflex_active) {
+            reflex_.RenderSubmitEnd(presenter_.device());
+        }
+        phase_ui_ms_ = std::chrono::duration<double, std::milli>(
+                           std::chrono::steady_clock::now() - ui_started)
+                           .count();
     }
+    const auto source_started = std::chrono::steady_clock::now();
 
     if (window_) {
         window_->set_hand_cursor(hover_ != Hit::None);
@@ -3165,10 +3318,50 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         // source frames per second. Pulling a source frame on every tick would
         // drain the decoder and make the adaptive buffer grow for no reason, so
         // VFG requests a new source only when its generated queue is low.
+        const bool video_paced = VideoPaced();
+        bool video_due = true;
+        if (video_paced) {
+            if (fg_covering) {
+                // The FG worker presents in its own window and the parent no
+                // longer presents, so the swapchain tick is not a valid clock
+                // here. Feed the worker on a plain 60 Hz wall-clock grid.
+                const double interval =
+                    1.0 / std::clamp(static_cast<double>(profile_.fps), 24.0, 240.0);
+                if (next_source_at_ <= 0.0) {
+                    next_source_at_ = clock_;
+                }
+                video_due = clock_ >= next_source_at_;
+                if (video_due) {
+                    next_source_at_ += interval;
+                }
+                if (next_source_at_ < clock_ - interval) {
+                    next_source_at_ = clock_ + interval;
+                }
+            } else {
+                next_source_at_ = 0.0;
+                // The swapchain waitable gives this loop exactly one iteration
+                // per refresh. Advance a rational phase by fps/refresh: at
+                // 240 Hz and 60 fps that is a frame slot every fourth tick,
+                // with no wall-clock drift and no 3-refresh snap when a tick
+                // lands early.
+                const double source_fps =
+                    std::clamp(static_cast<double>(profile_.fps), 24.0, 240.0);
+                video_phase_ += source_fps / static_cast<double>(present_hz());
+                if (video_phase_ >= 1.0 - 1e-9) {
+                    video_phase_ -= 1.0;
+                } else {
+                    video_due = false;
+                }
+                if (video_phase_ < 0.0) {
+                    video_phase_ = 0.0;
+                }
+            }
+        }
         const bool vfg_active = frame_gen_ >= 2 && fg_ready_;
         if (vfg_active) {
             if (fg_queue_.size() <= 2 &&
                 streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
+                NoteSourceFrame();
                 std::vector<media::NvVfx::Frame> sequence;
                 std::string detail;
                 if (nv_vfx_.PushFrame(stream_frame_.rgba.data(), stream_frame_.width,
@@ -3192,7 +3385,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                                               stream_frame_.height, stream_frame_.pq);
                 }
             }
-        } else if (streaming_.TakeFrame(stream_frame_, stream_buffer_, VideoPace())) {
+        } else if (video_due &&
+                   streaming_.TakeFrame(stream_frame_, stream_buffer_, video_paced)) {
+            NoteSourceFrame();
             if (profile_.dlss_fg >= 2 && nr_ready_ && nr_.present_mode()) {
                 // DLSS Frame Generation: the worker presents NR + generated
                 // frames in its own window; we only feed it. Keep a copy in the
@@ -3407,6 +3602,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
             screen_ = Screen::Home;
         }
     }
+    phase_source_ms_ = std::chrono::duration<double, std::milli>(
+                           std::chrono::steady_clock::now() - source_started)
+                           .count();
 
     static const bool fg_probe = std::getenv("BRP_FG_PROBE") != nullptr;
     static double fg_probe_at = 0.0;
@@ -3497,7 +3695,47 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     frame_work_ms_ = std::chrono::duration<double, std::milli>(
                          std::chrono::steady_clock::now() - frame_started)
                          .count();
-    presenter_.PresentNow(true);
+
+    // When the DLSS FG worker covers the client there is nothing of ours to
+    // show. Presenting a stale parent frame every vblank would still enter DWM
+    // composition and compete with the worker's own swapchain for scanout.
+    const bool parent_covered = stream_active_ && fg_covering;
+    present_covered_ = parent_covered;
+    if (!parent_covered) {
+        if (reflex_active) {
+            reflex_.PresentStart(presenter_.device());
+        }
+        presenter_.PresentNow(true);
+        if (reflex_active) {
+            reflex_.PresentEnd(presenter_.device());
+        }
+
+        // Ground truth: the refresh counter difference between two new-source
+        // presents is exactly how many vblanks the previous source frame was on
+        // screen. This catches judder from the GPU/compositor even when the CPU
+        // loop is perfectly paced.
+        if (stream_active_ && presenter_.present_stats_available()) {
+            const UINT refresh = presenter_.present_refresh_count();
+            if (refresh != 0) {
+                if (source_updated_ && last_source_refresh_ != 0 &&
+                    refresh > last_source_refresh_) {
+                    const UINT delta = refresh - last_source_refresh_;
+                    const int vblanks = std::clamp(static_cast<int>(delta), 1, 11);
+                    screen_holds_[screen_hold_pos_] = static_cast<uint8_t>(vblanks);
+                    screen_hold_pos_ =
+                        (screen_hold_pos_ + 1) % static_cast<int>(screen_holds_.size());
+                    if (screen_hold_fill_ < static_cast<int>(screen_holds_.size())) {
+                        ++screen_hold_fill_;
+                    }
+                }
+                if (source_updated_) {
+                    last_source_refresh_ = refresh;
+                }
+            }
+        }
+    }
+
+    LogVideoCadence();
     if (!window_shown_) {
         window_->Show();
         window_shown_ = true;
@@ -4580,6 +4818,32 @@ void App::RenderSettings(double t) {
                            60 * frame_gen_, nv_vfx_.last_generate_ms());
                 ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
                          th::Rgba(th::kMuted));
+            } else if (profile_.dlss_fg >= 2) {
+                const double target =
+                    std::min<double>(present_hz(), 60.0 * profile_.dlss_fg);
+                wchar_t text[256];
+                if (!stream_active_) {
+                    swprintf_s(text, L"DLSS FG %dx selected  -  starts with the next session",
+                               profile_.dlss_fg);
+                } else if (fg_worker_fps_ > 0.0) {
+                    swprintf_s(text, L"DLSS FG worker: %.0f fps displayed  -  requested %dx "
+                                     L"(%.0f fps)",
+                               fg_worker_fps_, profile_.dlss_fg, target);
+                } else {
+                    swprintf_s(text, L"DLSS FG %dx requested  -  waiting for the first "
+                                     L"generated frames",
+                               profile_.dlss_fg);
+                }
+                const bool limited =
+                    fg_worker_fps_ > 0.0 && fg_worker_fps_ < target * 0.95;
+                ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
+                         th::Rgba(limited ? 0xFFC145 : th::kMuted, 0.95f));
+                if (profile_.dlss_fg > 2) {
+                    ui_.Text(L"This GPU sustains about 120 fps of output: 2x is the clean "
+                             L"240 Hz setting, 3x-6x land between refreshes.",
+                             {kContentX, y + 28.0f, w - 64.0f, y + 54.0f}, 11.5f,
+                             th::Rgba(th::kMuted));
+                }
             } else if (!FrameGenAvailable()) {
                 ui_.Text(L"NVIDIA VFX runtime not found: third_party\\nvidia-vfx\\runtime",
                          {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
@@ -4590,6 +4854,12 @@ void App::RenderSettings(double t) {
             } else {
                 ui_.Text(L"NVIDIA VFG ready - select a multiplier to enable",
                          {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
+            }
+            if (profile_.reflex > 0) {
+                ui_.Text(L"Reflex markers are active. Its sleep stage is not used: it "
+                         L"targets a game-style simulation window and fights vblank pacing.",
+                         {kContentX, y + 58.0f, w - 64.0f, y + 84.0f}, 11.5f,
                          th::Rgba(th::kMuted));
             }
             break;
@@ -5115,6 +5385,10 @@ void App::RenderStream(double t) {
             }
 
             if ((mask & 0x8) && stream_active_) {
+                const double source_fps =
+                    stream_stats_.elapsed > 0.0
+                        ? static_cast<double>(stream_stats_.frames) / stream_stats_.elapsed
+                        : 0.0;
                 std::wstring chain;
                 if (profile_.neural_nr > 0 && nr_ready_) {
                     wchar_t part[96];
@@ -5135,12 +5409,39 @@ void App::RenderStream(double t) {
                     wchar_t part[96];
                     swprintf_s(part, L"VFG %dx   ", frame_gen_);
                     chain += part;
+                } else if (profile_.dlss_fg >= 2) {
+                    wchar_t part[96];
+                    if (fg_worker_fps_ > 0.0) {
+                        swprintf_s(part, L"FG %.0f fps   ", fg_worker_fps_);
+                    } else {
+                        swprintf_s(part, L"FG %dx   ", profile_.dlss_fg);
+                    }
+                    chain += part;
                 }
                 wchar_t stream_line[320];
                 swprintf_s(stream_line, L"PS5 %.1f fps   %s audio peak %.2f   %s",
-                           streaming_.fps(), chain.c_str(), audio_.peak(),
+                           source_fps, chain.c_str(), audio_.peak(),
                            Widen(streaming_.message()).c_str());
                 add_line(stream_line, 0.88f);
+
+                int counts[12] = {};
+                const bool have_screen = screen_hold_fill_ > 0;
+                const auto& ring = have_screen ? screen_holds_ : video_holds_;
+                const int ring_fill = have_screen ? screen_hold_fill_ : video_hold_fill_;
+                for (int i = 0; i < ring_fill; ++i) {
+                    ++counts[ring[i]];
+                }
+                const int n = std::max(1, ring_fill);
+                const auto pct = [&](int v) { return counts[v] * 100 / n; };
+                wchar_t cadence[256];
+                swprintf_s(cadence,
+                           L"%s 3v %d%%   4v %d%%   5v %d%%   6v+ %d%%   arrival %.1f ms   "
+                           L"outliers %d",
+                           have_screen ? L"screen" : L"select", pct(3), pct(4), pct(5),
+                           counts[6] + counts[7] + counts[8] + counts[9] + counts[10] +
+                               counts[11],
+                           stream_stats_.arrival_ms, stream_stats_.arrival_outliers);
+                add_line(cadence, 0.86f);
             }
 
             if ((mask & 0x10) && stream_active_) {
