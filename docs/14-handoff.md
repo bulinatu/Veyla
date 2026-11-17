@@ -22,7 +22,7 @@ Last updated: live streaming + full controller pipeline.
 | Frame generation | **WORKS** — NVIDIA VFG 2× at 120 fps (synchronous; async blocked) |
 | Input rate | 60–1000 Hz, dedicated thread + high-resolution timer |
 | Neural upscaling | **WORKS** — RTX VSR 1080p→1440p/2160p, 7–11 ms; exclusive with VFG |
-| DLSSNR (same-res neural) | **WORKS via the NGX NR worker at 1080p** (settings + FSR1); live stream test and UI-thread offload pending (docs/18) |
+| DLSSNR (same-res neural) | **WORKS via the NGX NR worker at 1080p**, on its own thread, live settings; DLSS SR can run on the NR result (13.2 ms chain); live stream test pending (docs/18, docs/19) |
 | Colour pipeline | **WORKS** — chroma bilinear/bicubic/Lanczos + PQ detect/pass-through/tone-map |
 
 ---

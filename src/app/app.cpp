@@ -359,11 +359,10 @@ bool App::Init(Win32Window* window) {
     nr_present_ = !FindNrRuntime().empty();
     if (profile_.neural_nr > 0) {
         if (nr_present_ && EnsureNr()) {
+            // NR is an enhancement stage; DLSS SR may run after it. VSR and
+            // frame generation still replace the whole chain.
             DisableVsr();
             profile_.vsr = 0;
-            profile_.neural_sr = 0;
-            dlss_ready_ = false;
-            dlss_sr_.Shutdown();
             frame_gen_ = 0;
             profile_.frame_gen = 0;
         } else {
@@ -476,6 +475,12 @@ void App::DispatchClick() {
                     if (pin_.size() == 8) {
                         pairing_.Start(profile_, static_cast<uint32_t>(std::stoul(pin_)));
                     }
+                } else {
+                    // Buttons whose whole action lives in the widget switch
+                    // (overlay pages, the Neural Ultra preset). Without this a
+                    // drawn button was a placeholder: the overlay's Neural
+                    // button never opened the page.
+                    ApplyDropdown(it->index, 0);
                 }
                 break;
             case Hit::PinField:
@@ -643,10 +648,6 @@ void App::HandlePad() {
 void App::ApplyDropdown(int id, int index) {
     switch (id) {
         case W_Upscaler:
-            if (profile_.neural_nr > 0) {
-                profile_.neural_nr = 0;
-                DisableNr();
-            }
             if (index == 5) {
                 if (!DlssAvailable()) {
                     stream_note_ = "DLSS SR unavailable: nvngx_dlss.dll not found.";
@@ -1248,8 +1249,6 @@ bool App::EnsureDlssSr(int in_width, int in_height) {
 
 void App::ApplyNeuralSettings() {
     if (profile_.neural_sr > 0) {
-        profile_.neural_nr = 0;
-        DisableNr();
         if (!DlssAvailable()) {
             profile_.neural_sr = 0;
             dlss_note_ = L"DLSS SR unavailable: runtime not found";
@@ -1521,15 +1520,18 @@ void App::ApplyNrSettings() {
         }
         DisableVsr();
         profile_.vsr = 0;
-        profile_.neural_sr = 0;
-        dlss_ready_ = false;
-        dlss_in_w_ = 0;
-        dlss_in_h_ = 0;
-        dlss_sr_.Shutdown();
         frame_gen_ = 0;
         profile_.frame_gen = 0;
         fg_queue_.clear();
         fg_last_ = {};
+        // DLSS SR is not a rival of NR: it can run on the NR result. Keep the
+        // selected upscaler and make sure its feature matches this geometry.
+        if (profile_.neural_sr > 0 && DlssAvailable() &&
+            !EnsureDlssSr(profile_.width, profile_.height)) {
+            profile_.neural_sr = 0;
+            dlss_ready_ = false;
+            dlss_sr_.Shutdown();
+        }
         if (!ReconfigureNr()) {
             profile_.neural_nr = 0;
             DisableNr();
@@ -1681,9 +1683,6 @@ void App::StartStream() {
         } else {
             profile_.vsr = 0;
             vsr_quality_ = 0;
-            profile_.neural_sr = 0;
-            dlss_ready_ = false;
-            dlss_sr_.Shutdown();
             frame_gen_ = 0;
         }
     }
@@ -2016,7 +2015,7 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         } else if (streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
             const bool nr_active = profile_.neural_nr > 0 && nr_ready_;
             if (nr_active) {
-                // Hand the frame to the NR thread and show the newest result.
+                // Hand the frame to the NR thread and present the newest result.
                 // Nothing here waits for the worker: when it is late the last
                 // result stays on screen for one or two ticks.
                 SubmitNrFrame(stream_frame_);
@@ -2032,8 +2031,37 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                     int nr_h = 0;
                     bool nr_pq = false;
                     if (TakeNrResult(nr_w, nr_h, nr_pq)) {
-                        presenter_.SetSourceFinal(false);
-                        presenter_.SetSourceFrame(nr_out_.data(), nr_w, nr_h, nr_pq);
+                        // NR is the enhancement stage; when DLSS SR is selected
+                        // it upscales the NR result to the render target.
+                        const bool want_sr = profile_.neural_sr > 0;
+                        if (want_sr && (nr_w != dlss_in_w_ || nr_h != dlss_in_h_)) {
+                            dlss_ready_ = EnsureDlssSr(nr_w, nr_h);
+                        }
+                        std::string sr_detail;
+                        const bool sr_ok =
+                            want_sr && dlss_ready_ &&
+                            dlss_sr_.Process(nr_out_.data(), nr_w, nr_h, dlss_frame_,
+                                             sr_detail);
+                        if (sr_ok) {
+                            presenter_.SetSourceView(dlss_frame_.srv.Get(),
+                                                     dlss_sr_.out_width(),
+                                                     dlss_sr_.out_height(), nr_pq);
+                            presenter_.SetSourceFinal(true);
+                        } else {
+                            if (want_sr) {
+                                dlss_note_ = sr_detail.empty()
+                                                 ? L"DLSS SR is not ready after NR: " + dlss_note_
+                                                 : L"DLSS SR: " + Widen(sr_detail);
+                                std::fprintf(stderr, "[app] DLSS SR after NR failed: %ls\n",
+                                             dlss_note_.c_str());
+                                profile_.neural_sr = 0;
+                                dlss_ready_ = false;
+                                dlss_sr_.Shutdown();
+                                SaveProfile();
+                            }
+                            presenter_.SetSourceFinal(false);
+                            presenter_.SetSourceFrame(nr_out_.data(), nr_w, nr_h, nr_pq);
+                        }
                     }
                 }
             }
@@ -2753,8 +2781,9 @@ void App::RenderSettings(double t) {
 
             if (profile_.neural_sr > 0 && dlss_ready_) {
                 wchar_t text[192];
-                swprintf_s(text, L"DLSS SR preset %s active  -  %dx%d  -  last %.1f ms",
+                swprintf_s(text, L"DLSS SR preset %s active%s  -  %dx%d  -  last %.1f ms",
                            profile_.dlss_preset == 12 ? L"L" : (profile_.dlss_preset == 13 ? L"M" : L"K"),
+                           profile_.neural_nr > 0 ? L" (on the NR result)" : L"",
                            dlss_sr_.out_width(), dlss_sr_.out_height(), dlss_sr_.last_ms());
                 ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
                          th::Rgba(th::kMuted));
@@ -2838,13 +2867,16 @@ void App::RenderSettings(double t) {
             y += kRow;
 
             if (profile_.neural_nr > 0 && nr_ready_) {
-                wchar_t text[224];
+                wchar_t text[256];
                 swprintf_s(text,
                            L"NR active  -  %dx%d  -  net %dx%d (%d pass)  -  %.1f ms  -  %llu frames  -  %llu dropped",
                            nr_in_w_, nr_in_h_, nr_.work_width(), nr_.work_height(),
                            profile_.nr_passes, nr_last_ms_,
                            static_cast<unsigned long long>(nr_shown_),
                            static_cast<unsigned long long>(nr_dropped_));
+                if (profile_.neural_sr > 0 && dlss_ready_) {
+                    wcscat_s(text, L"  -  DLSS SR after NR");
+                }
                 ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
                          th::Rgba(th::kMuted));
             } else if (!NrAvailable()) {
@@ -2861,8 +2893,8 @@ void App::RenderSettings(double t) {
             }
             y += 26.0f;
             ui_.Text(
-                L"NGX worker at the stream size (zero depth, zero motion field); "
-                L"FSR1 upscales the NR result to the target.",
+                L"NGX worker at the stream size (zero depth, zero motion field). DLSS SR can run "
+                L"on the NR result; otherwise the selected upscaler does.",
                 {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 11.5f, th::Rgba(th::kMuted));
             break;
         }
@@ -3234,10 +3266,13 @@ void App::RenderStreamSettings(double t) {
         y += 56.0f;
 
         if (profile_.neural_nr > 0 && nr_ready_) {
-            wchar_t text[224];
+            wchar_t text[256];
             swprintf_s(text, L"NR active  -  net %dx%d (%d pass)  -  %.1f ms  -  %llu dropped",
                        nr_.work_width(), nr_.work_height(), profile_.nr_passes, nr_last_ms_,
                        static_cast<unsigned long long>(nr_dropped_));
+            if (profile_.neural_sr > 0 && dlss_ready_) {
+                wcscat_s(text, L"  -  + DLSS SR");
+            }
             ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
                      th::Rgba(th::kMuted));
         } else if (!NrAvailable()) {

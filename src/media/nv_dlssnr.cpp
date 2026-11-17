@@ -222,7 +222,9 @@ bool NvDlssnr::ReadExact(void* data, size_t bytes, DWORD timeout_ms, std::string
             detail = "NR worker timed out";
             return false;
         }
-        ::Sleep(1);
+        // Wait on the pipe (signaled when bytes are there) instead of Sleep(1):
+        // the default Windows timer granularity is 15.6 ms.
+        ::WaitForSingleObject(stdout_read_, 1);
     }
     return true;
 }
@@ -561,7 +563,7 @@ bool NvDlssnr::Process(const uint8_t* rgba, int width, int height, std::vector<u
         uint64_t seq1 = 0;
         std::memcpy(&seq1, out_view_, sizeof(seq1));
         if (seq1 & 1) {
-            ::Sleep(1);
+            ::SwitchToThread();
             continue;
         }
         std::memcpy(out.data(), out_view_ + 8, color_bytes);

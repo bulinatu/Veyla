@@ -399,10 +399,24 @@ bool NvDlssSr::SubmitAndWait(std::string& detail) {
     queue_->ExecuteCommandLists(1, lists);
     const UINT64 value = ++fence_value_;
     queue_->Signal(fence12_.Get(), value);
-    for (int spin = 0; spin < 20000 && fence12_->GetCompletedValue() < value; ++spin) {
-        ::Sleep(1);
+    // Wait on the fence event rather than polling with Sleep(1): the default
+    // Windows timer granularity is 15.6 ms, so a Sleep-based poll reports the
+    // GPU as ~15 ms slower than it is.
+    if (!wait_event_) {
+        wait_event_ = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
     }
-    if (fence12_->GetCompletedValue() < value) {
+    bool completed = false;
+    if (wait_event_) {
+        if (SUCCEEDED(fence12_->SetEventOnCompletion(value, wait_event_))) {
+            completed = ::WaitForSingleObject(wait_event_, 5000) == WAIT_OBJECT_0;
+        }
+    } else {
+        for (int spin = 0; spin < 5000 && fence12_->GetCompletedValue() < value; ++spin) {
+            ::Sleep(0);
+        }
+        completed = fence12_->GetCompletedValue() >= value;
+    }
+    if (!completed) {
         detail = "DLSS GPU fence timed out";
         return false;
     }
@@ -498,8 +512,14 @@ void NvDlssSr::Shutdown() {
             // Drain before releasing the feature.
             const UINT64 value = ++fence_value_;
             queue_->Signal(fence12_.Get(), value);
-            for (int spin = 0; spin < 20000 && fence12_->GetCompletedValue() < value; ++spin) {
-                ::Sleep(1);
+            if (wait_event_) {
+                if (SUCCEEDED(fence12_->SetEventOnCompletion(value, wait_event_))) {
+                    ::WaitForSingleObject(wait_event_, 5000);
+                }
+            } else {
+                for (int spin = 0; spin < 5000 && fence12_->GetCompletedValue() < value; ++spin) {
+                    ::Sleep(1);
+                }
             }
         }
         api_->release(static_cast<NVSDK_NGX_Handle*>(feature_));
@@ -515,6 +535,10 @@ void NvDlssSr::Shutdown() {
     motion12_.Reset();
     depth12_.Reset();
     guide_heap_.Reset();
+    if (wait_event_) {
+        ::CloseHandle(wait_event_);
+        wait_event_ = nullptr;
+    }
     in_width_ = 0;
     in_height_ = 0;
     out_width_ = 0;

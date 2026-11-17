@@ -45,7 +45,25 @@ Status date: 2026-11-17 (second session).
 - Status line: `NR active - 1920x1080 - net 1344x756 (2 pass) - X ms -
   N frames - M dropped`.
 - The NR result is 1080p; FSR1 (the selected Upscaler) upscales it to the
-  render target. NR is exclusive with DLSS SR, RTX VSR and VFG.
+  render target. NR is exclusive with RTX VSR and VFG, but **not with DLSS
+  SR**: when DLSS SR is the selected upscaler it runs on the NR result.
+
+### NR + DLSS SR chain (the required combination)
+- Pipeline: stream 1080p -> NR (NGX worker, own thread) -> DLSS SR
+  (1080p -> 1440p/2160p) -> present. Both features stay enabled together;
+  selecting DLSS SR does not turn NR off, and enabling NR does not turn
+  DLSS SR off.
+- Measured with `tools/nr_sr_chain_probe` at 1080p -> 2560x1440:
+  **NR 10.3 ms + SR 2.8 ms = 13.2 ms per frame (75.7 fps ceiling)**.
+- The SR number used to be ~15 ms because the fence wait polled with
+  `Sleep(1)`, which the default Windows timer rounds to 15.6 ms. The wait is
+  now a fence event; standalone DLSS SR is **~2.8 ms** instead of ~15 ms.
+  The NR pipe reader got the same treatment (it waits on the pipe handle).
+- DLSS SR still runs on the presentation thread (it shares the D3D11 device
+  with the presenter). If live testing shows the chain dropping frames, the
+  next step is to run SR on the NR thread with a double-buffered output.
+- If DLSS SR fails mid-stream the app falls back to presenting the NR result
+  and keeps NR running.
 - NR adds at most one displayed frame of latency by design: the presentation
   loop shows the newest finished NR frame instead of waiting for the current
   one. That is the smoothness-first trade the project asked for.
@@ -79,6 +97,37 @@ Status date: 2026-11-17 (second session).
   `W_NrHook`, `W_NrResolution`. `nr_passes` is now wired (Boost cascade);
   `nr_scale` is new.
 
+## Live test (2026-11-17, PS5-580, game running, 1080p60 stream)
+
+Configuration: `render_target=1440p`, `neural_nr=1`, `neural_sr=1`, DLSS preset
+M/L, quality Max Quality.
+
+| Metric | Result |
+|---|---|
+| Stream | 1920x1080 @ 60 fps, ~10-50 Mbps, decode D3D12VA 4.2-5.4 ms |
+| Present rate | 59.3-61.0 fps over the session |
+| NR (Full 1080p, 1 pass) | **10.4-11.1 ms**, 0-1 source frames dropped |
+| DLSS SR (1080p -> 1440p) | **3.8-4.2 ms** live |
+| NR -> DLSS SR chain | holds 60 fps; queue 0-1, `lost 0` |
+| Boost 70% + 2 passes, switched live | `RNSZ 1344x756 (2 pass) 213 ms`, NR 12.9 ms, 3 frames dropped during the rebuild, then 60 fps |
+| Back to Full 1080p, live | `RNSZ 1920x1080 (1 pass) 118 ms` |
+| NR Off -> On during the stream | worker restarts (~3 s), two frames dropped, one decode spike (46 ms), then 60 fps |
+| Overlay Neural page | opens and edits live after the button fix below |
+
+Visual check with F12 captures at 2560x1440 (`build/shots/live-chain-full.bmp`,
+`live-chain-boost.bmp`, `live-sr-only.bmp`): no ghosting, no halo, edges and
+the character keep the same sharpness with NR on or off; Boost looks the same
+as Full on this content. The NR effect stays subtle, as the synthetic test
+predicted, which is expected with zero motion guides.
+
+### Bug found and fixed during the live test
+
+The overlay's `Neural rendering` button was drawn but did nothing:
+`Hit::Button` only dispatched a fixed list of ids and never fell through to
+`ApplyDropdown`, so `W_NeuralOverlay`, `W_NeuralOverlayBack` and
+`W_NeuralMax` (the Neural Ultra preset) were dead. Buttons now fall through to
+the widget switch when they are not one of the special-cased ones.
+
 ## Runtime / packaging
 - `nvngx_dlss.dll` for DLSS SR: `third_party/nvidia-ngx/runtime` (gitignored);
   CMake copies it next to `brp.exe`; `scripts/install-ngx-runtime.ps1`.
@@ -91,13 +140,11 @@ Status date: 2026-11-17 (second session).
 
 ## Not yet verified / next steps (in order)
 
-1. **Live NR test with the console.** The console was in rest mode, so only
-   startup and synthetic probes were tested. Connect, stream, check
-   `BRP_DECODE_PROBE=1`: fps, `NR active` ms, dropped count, visual quality.
-   Capture a frame with F12 and compare NR on/off, full vs Boost.
-2. **Overlay live test.** The Neural overlay page (now with Network size and
-   Stack passes) and the DLSS entry in the overlay Upscaler list have not been
-   exercised during a live stream.
+1. **Done: live NR test.** See the live-test section above. What remains is a
+   longer session (30+ minutes) to watch the dropped counter and thermals.
+2. **Done: overlay live test.** The Neural page, Network size, Stack passes and
+   the DLSS entry were exercised during the stream (the page was unreachable
+   until the button-dispatch fix).
 3. **Install/packaging test.** Run `install-ngx-runtime.ps1` and
    `install-nr-runtime.ps1` into a clean app folder; confirm both find their
    runtimes through the exe-relative search paths.

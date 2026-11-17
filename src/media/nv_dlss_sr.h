@@ -90,6 +90,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource> depth12_;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> guide_heap_;
     uint64_t fence_value_ = 0;
+    HANDLE wait_event_ = nullptr;
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> input11_;
     Microsoft::WRL::ComPtr<ID3D12Resource> input12_;
