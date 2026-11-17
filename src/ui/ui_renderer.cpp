@@ -79,6 +79,11 @@ bool Renderer::BindSwapchain(ID3D11Texture2D* backbuffer) {
         return false;
     }
 
+    DXGI_SURFACE_DESC surface_desc{};
+    surface->GetDesc(&surface_desc);
+    std::fprintf(stderr, "[d2d] bind surface %ux%u\n", surface_desc.Width,
+                 surface_desc.Height);
+
     // D2D is picky about how the target bitmap is described. Probe the legal
     // combinations instead of hard-coding one and failing on a driver.
     struct Candidate {

@@ -256,6 +256,9 @@ bool Presenter::Resize(int width, int height) {
     if (width <= 0 || height <= 0) {
         return false;
     }
+    if (width == cfg_.output_width && height == cfg_.output_height) {
+        return true;  // already this size: no buffer churn, no flash
+    }
 
     ID3D11RenderTargetView* null_rtv = nullptr;
     context_->OMSetRenderTargets(1, &null_rtv, nullptr);
@@ -266,6 +269,8 @@ bool Presenter::Resize(int width, int height) {
     const UINT flags = (tearing_ && cfg_.allow_tearing) ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
     HRESULT hr = swapchain_->ResizeBuffers(0, static_cast<UINT>(width), static_cast<UINT>(height),
                                            DXGI_FORMAT_UNKNOWN, flags);
+    std::fprintf(stderr, "[presenter] resize %dx%d -> %dx%d hr=0x%08lX\n", cfg_.output_width,
+                 cfg_.output_height, width, height, static_cast<unsigned long>(hr));
     if (FAILED(hr)) {
         std::fprintf(stderr, "ResizeBuffers failed: 0x%08lX\n", static_cast<unsigned long>(hr));
         return false;

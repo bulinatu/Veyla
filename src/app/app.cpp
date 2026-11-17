@@ -331,6 +331,9 @@ bool App::Init(Win32Window* window) {
     render_target_ = std::clamp(profile_.render_target, 0, 3);
     ApplyRenderTarget();
     ApplyReflex();
+    if (std::getenv("BRP_START_FULLSCREEN") != nullptr) {
+        ToggleFullscreen();
+    }
     if (profile_.dlss_fg >= 2) {
         ApplyDlssFrameGen();
     }
@@ -404,6 +407,8 @@ void App::Resize(int width, int height) {
     if (width <= 0 || height <= 0) {
         return;
     }
+    std::fprintf(stderr, "[app] client resize %dx%d borderless=%d\n", width, height,
+                 borderless_ ? 1 : 0);
     ui_.ReleaseTarget();
     if (!presenter_.Resize(width, height)) {
         return;
@@ -2117,6 +2122,17 @@ void App::ToggleFullscreen() {
                        mi.rcMonitor.bottom - mi.rcMonitor.top,
                        SWP_FRAMECHANGED | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
         borderless_ = true;
+        RECT client{};
+        ::GetClientRect(hwnd, &client);
+        std::fprintf(stderr, "[app] fullscreen client %ldx%ld\n", client.right - client.left,
+                     client.bottom - client.top);
+        // Resize now, not on the next loop tick: the first frame after the
+        // toggle already has to be drawn at the new size.
+        ui_.ReleaseTarget();
+        if (presenter_.Resize(static_cast<int>(client.right - client.left),
+                              static_cast<int>(client.bottom - client.top))) {
+            ui_.BindSwapchain(presenter_.backbuffer());
+        }
     } else {
         ::SetWindowLongPtrW(hwnd, GWL_STYLE, windowed_style_);
         ::SetWindowLongPtrW(hwnd, GWL_EXSTYLE, windowed_ex_style_);
@@ -2125,6 +2141,13 @@ void App::ToggleFullscreen() {
                        windowed_rect_.bottom - windowed_rect_.top,
                        SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOOWNERZORDER);
         borderless_ = false;
+        RECT client{};
+        ::GetClientRect(hwnd, &client);
+        ui_.ReleaseTarget();
+        if (presenter_.Resize(static_cast<int>(client.right - client.left),
+                              static_cast<int>(client.bottom - client.top))) {
+            ui_.BindSwapchain(presenter_.backbuffer());
+        }
     }
     // The swap chain follows the client size through WM_SIZE -> Resize(); the
     // FG child window is re-fitted below when its size is checked in Frame().
@@ -2195,12 +2218,30 @@ void App::ApplyControllerOutput(bool force) {
 }
 
 void App::Frame(double time_seconds, const PointerState& pointer) {
-    const float physical_w = static_cast<float>(window_->width());
-    const float physical_h = static_cast<float>(window_->height());
+    // Ask Win32 for the client size every frame: the cached value can lag a
+    // borderless transition by a frame, and that frame would lay the whole UI
+    // out at the old scale (the "half-scaled" fullscreen look).
+    RECT client_rect{};
+    ::GetClientRect(window_->hwnd(), &client_rect);
+    const float physical_w = static_cast<float>(client_rect.right - client_rect.left);
+    const float physical_h = static_cast<float>(client_rect.bottom - client_rect.top);
+    if (physical_w <= 0.0f || physical_h <= 0.0f) {
+        return;
+    }
     ui_scale_ = std::clamp(physical_h / 900.0f, 1.0f, 2.5f);
     ui_w_ = physical_w / ui_scale_;
     ui_h_ = physical_h / ui_scale_;
     ui_.SetScale(ui_scale_);
+    // Self-heal: the swap chain must always match the client area. If a
+    // window resize message was missed (fullscreen transitions), the video
+    // would otherwise be drawn at the wrong size - cropped or stretched.
+    if (presenter_.output_width() != static_cast<int>(physical_w) ||
+        presenter_.output_height() != static_cast<int>(physical_h)) {
+        ui_.ReleaseTarget();
+        if (presenter_.Resize(static_cast<int>(physical_w), static_cast<int>(physical_h))) {
+            ui_.BindSwapchain(presenter_.backbuffer());
+        }
+    }
 
     pointer_ = pointer;
     if (ui_scale_ != 1.0f) {
