@@ -764,6 +764,51 @@ void App::BootWorkerMain() {
     }
 }
 
+void App::DrawLoaderMark(float cx, float cy, float reveal, float t, float alpha) {
+    const float spin = static_cast<float>(t) * 1.15f;
+    const float draw = std::clamp(reveal, 0.0f, 1.0f);
+
+    ui_.FillRadial(cx, cy, 190.0f * draw, th::Rgba(0x6B32D9, 0.26f * alpha * draw),
+                   th::Rgba(0x6B32D9, 0.0f));
+    ui_.FillCircle(cx, cy, 92.0f + 6.0f * std::sin(static_cast<float>(t) * 2.0f),
+                   th::Rgba(th::kAccent, 0.06f * alpha * draw));
+    ui_.StrokeArc(cx, cy, 62.0f, spin, 4.55f * draw, th::Rgba(th::kAccent, 0.92f * alpha), 2.4f);
+    ui_.StrokeArc(cx, cy, 76.0f, -spin * 0.65f + 0.8f, 2.15f * draw,
+                  th::Rgba(th::kInk, 0.22f * alpha), 1.2f);
+    ui_.StrokeCircle(cx, cy, 45.0f, th::Rgba(0xFFFFFF, 0.08f * alpha * draw), 1.0f);
+
+    const D2D1_RECT_F tile{cx - 22.0f, cy - 22.0f, cx + 22.0f, cy + 22.0f};
+    ui_.FillRounded(tile, 12.0f, th::Rgba(th::kAccent, 0.18f * alpha * draw));
+    ui_.StrokeRounded(tile, 12.0f, th::Rgba(th::kAccentWarm, 0.45f * alpha * draw), 1.0f);
+    ui_.Text(L"BRP", {cx - 30.0f, cy - 17.0f, cx + 30.0f, cy + 17.0f}, 14.0f,
+             th::Rgba(th::kInk, 0.95f * alpha * draw), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+             DWRITE_TEXT_ALIGNMENT_CENTER);
+}
+
+void App::DrawLoaderSteps(const std::vector<std::pair<std::wstring, int>>& steps, float x,
+                          float y, float w, float t, float alpha) {
+    constexpr float kRow = 32.0f;
+    for (size_t i = 0; i < steps.size(); ++i) {
+        const float cy = y + kRow * static_cast<float>(i) + kRow * 0.5f;
+        const int state = steps[i].second;  // 0 pending, 1 active, 2 done
+        const float dx = x + 9.0f;
+        if (state == 2) {
+            ui_.FillCircle(dx, cy, 9.0f, th::Rgba(th::kAccent, 0.85f * alpha));
+            ui_.FillCircle(dx, cy, 3.2f, th::Rgba(th::kInk, 0.95f * alpha));
+        } else if (state == 1) {
+            ui_.StrokeCircle(dx, cy, 9.0f, th::Rgba(th::kAccent, 0.22f * alpha), 2.0f);
+            ui_.StrokeArc(dx, cy, 9.0f, static_cast<float>(t) * 7.0f, 4.2f,
+                          th::Rgba(th::kAccent, 0.98f * alpha), 2.2f);
+        } else {
+            ui_.StrokeCircle(dx, cy, 9.0f, th::Rgba(0xFFFFFF, 0.16f * alpha), 1.0f);
+        }
+        ui_.Text(steps[i].first.c_str(), {x + 28.0f, cy - 13.0f, x + w, cy + 13.0f}, 13.0f,
+                 th::Rgba(state == 0 ? th::kMuted : th::kInk,
+                          (state == 0 ? 0.70f : 0.96f) * alpha),
+                 state == 1 ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL);
+    }
+}
+
 void App::RenderBoot(double t) {
     const float w = ui_w_;
     const float h = ui_h_;
@@ -774,73 +819,71 @@ void App::RenderBoot(double t) {
             ? 1.0f
             : 1.0f - std::clamp(static_cast<float>((t - boot_done_at_) / 0.45), 0.0f, 1.0f);
     const float alpha = fade_in * fade_out;
+    // The mark draws itself in over the first second of the boot.
+    const float reveal = std::clamp(static_cast<float>((t - boot_started_) / 1.0), 0.0f, 1.0f);
+    const float ease = 1.0f - (1.0f - reveal) * (1.0f - reveal);
 
     ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(th::kBgTop), th::Rgba(th::kBgBottom));
-    ui_.FillRadial(w * 0.5f, h * 0.42f, w * 0.60f, th::Rgba(0x6B32D9, 0.22f * alpha),
+    ui_.FillRadial(w * 0.5f, h * 0.40f, w * 0.60f, th::Rgba(0x6B32D9, 0.22f * alpha),
                    th::Rgba(0x6B32D9, 0.0f));
     ui_.FillRadial(w * 0.12f, h * 0.10f, w * 0.30f, th::Rgba(0x3E2170, 0.18f * alpha),
                    th::Rgba(0x3E2170, 0.0f));
 
     const float cx = w * 0.5f;
-    const float cy = h * 0.42f;
-    const float spin = static_cast<float>(t) * 1.15f;
+    const float cy = h * 0.34f;
+    DrawLoaderMark(cx, cy, ease, static_cast<float>(t), alpha);
 
-    ui_.FillCircle(cx, cy, 92.0f + 7.0f * std::sin(static_cast<float>(t) * 2.0f),
-                   th::Rgba(th::kAccent, 0.05f * alpha));
-    ui_.StrokeArc(cx, cy, 62.0f, spin, 4.55f, th::Rgba(th::kAccent, 0.90f * alpha), 2.4f);
-    ui_.StrokeArc(cx, cy, 76.0f, -spin * 0.65f + 0.8f, 2.15f, th::Rgba(th::kInk, 0.20f * alpha),
-                  1.2f);
-    ui_.StrokeCircle(cx, cy, 45.0f, th::Rgba(0xFFFFFF, 0.07f * alpha), 1.0f);
-
-    ui_.FillRounded({cx - 22.0f, cy - 22.0f, cx + 22.0f, cy + 22.0f}, 12.0f,
-                    th::Rgba(th::kAccent, 0.16f * alpha));
-    ui_.StrokeRounded({cx - 22.0f, cy - 22.0f, cx + 22.0f, cy + 22.0f}, 12.0f,
-                      th::Rgba(th::kAccent, 0.45f * alpha), 1.0f);
-    ui_.Text(L"BRP", {cx - 30.0f, cy - 17.0f, cx + 30.0f, cy + 17.0f}, 14.0f,
-             th::Rgba(th::kInk, 0.95f * alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+    const float title_y = cy + 104.0f + (1.0f - ease) * 10.0f;
+    ui_.Text(L"BETTERREMOTEPLAY", {cx - 300.0f, title_y, cx + 300.0f, title_y + 28.0f}, 17.0f,
+             th::Rgba(th::kInk, 0.96f * alpha * ease), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+             DWRITE_TEXT_ALIGNMENT_CENTER);
+    ui_.Text(L"REMOTE PLAY, BETTER", {cx - 300.0f, title_y + 30.0f, cx + 300.0f, title_y + 50.0f},
+             10.5f, th::Rgba(th::kMuted, 0.85f * alpha * ease), DWRITE_FONT_WEIGHT_SEMI_BOLD,
              DWRITE_TEXT_ALIGNMENT_CENTER);
 
-    ui_.Text(L"BETTERREMOTEPLAY", {cx - 300.0f, cy + 112.0f, cx + 300.0f, cy + 140.0f}, 17.0f,
-             th::Rgba(th::kInk, 0.96f * alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
-             DWRITE_TEXT_ALIGNMENT_CENTER);
-    ui_.Text(L"REMOTE PLAY, BETTER", {cx - 300.0f, cy + 144.0f, cx + 300.0f, cy + 164.0f}, 10.5f,
-             th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD,
-             DWRITE_TEXT_ALIGNMENT_CENTER);
+    // Step card: the real start-up tasks, in order. Step 0 is console discovery.
+    std::vector<std::pair<std::wstring, int>> steps;
+    const size_t done = std::min(boot_done_steps_, boot_total_);
+    for (size_t i = 0; i < boot_total_; ++i) {
+        std::wstring label = i == 0 ? std::wstring(L"Looking for consoles")
+                                    : (i - 1 < boot_tasks_.size() ? boot_tasks_[i - 1].label
+                                                                  : std::wstring(L"Finishing up"));
+        const int state = i < done ? 2 : (i == done ? 1 : 0);
+        steps.emplace_back(std::move(label), state);
+    }
 
-    const float bar_w = 460.0f;
-    const float bx = cx - bar_w * 0.5f;
-    const float by = cy + 194.0f;
+    const float card_w = 520.0f;
+    const float card_h = 74.0f + 32.0f * static_cast<float>(steps.size());
+    const float card_t = cy + 172.0f;
+    const D2D1_RECT_F card{cx - card_w * 0.5f, card_t, cx + card_w * 0.5f, card_t + card_h};
+    ui_.FillRounded(card, 18.0f, th::Rgba(th::kPanel, 0.72f * alpha * ease));
+    ui_.StrokeRounded(card, 18.0f, th::Rgba(th::kAccent, 0.20f * alpha), 1.0f);
+    ui_.FillRounded({card.left + 28.0f, card.top, card.right - 28.0f, card.top + 2.0f}, 1.0f,
+                    th::Rgba(th::kAccent, 0.75f * alpha));
+
+    DrawLoaderSteps(steps, card.left + 28.0f, card.top + 18.0f, card_w - 56.0f, static_cast<float>(t), alpha * ease);
+
+    const float bar_w = card_w - 56.0f;
+    const float bx = card.left + 28.0f;
+    const float by = card.bottom - 36.0f;
     ui_.FillRounded({bx, by, bx + bar_w, by + 4.0f}, 2.0f, th::Rgba(0xFFFFFF, 0.08f * alpha));
     const float filled = bar_w * static_cast<float>(std::clamp(boot_shown_, 0.0, 1.0));
     if (filled > 1.0f) {
         ui_.FillRounded({bx, by, bx + filled, by + 4.0f}, 2.0f,
                         th::Rgba(th::kAccent, 0.92f * alpha));
         ui_.FillCircle(bx + filled, by + 2.0f, 3.2f, th::Rgba(th::kInk, 0.95f * alpha));
-        ui_.FillCircle(bx + filled, by + 2.0f, 11.0f, th::Rgba(th::kAccent, 0.12f * alpha));
     }
-
-    ui_.Text(boot_status_.c_str(), {bx, by + 18.0f, bx + bar_w - 54.0f, by + 40.0f}, 12.0f,
-             th::Rgba(th::kInk,
-                      0.85f * alpha * std::max(0.60f, static_cast<float>(boot_status_alpha_))));
+    ui_.Text(boot_status_.c_str(), {bx, by + 10.0f, bx + bar_w - 60.0f, by + 30.0f}, 12.0f,
+             th::Rgba(th::kInkDim, 0.88f * alpha * std::max(0.60f, static_cast<float>(boot_status_alpha_))));
     wchar_t percent[16];
     swprintf_s(percent, L"%.0f%%", boot_shown_ * 100.0);
-    ui_.Text(percent, {bx + bar_w - 52.0f, by + 18.0f, bx + bar_w, by + 40.0f}, 12.0f,
+    ui_.Text(percent, {bx + bar_w - 56.0f, by + 10.0f, bx + bar_w, by + 30.0f}, 12.0f,
              th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    if (boot_total_ > 0) {
-        const float spacing = 12.0f;
-        const float start = cx - spacing * (static_cast<float>(boot_total_) - 1.0f) * 0.5f;
-        for (size_t i = 0; i < boot_total_; ++i) {
-            const bool done = i < boot_done_steps_;
-            const bool current = i == boot_done_steps_;
-            const float pulse = current ? 2.6f + 0.9f * std::sin(static_cast<float>(t) * 6.0f)
-                                        : 2.2f;
-            ui_.FillCircle(start + spacing * static_cast<float>(i), by + 52.0f, pulse,
-                           th::Rgba(done ? th::kAccent : th::kInk,
-                                    (done ? 0.75f : 0.14f) * alpha));
-        }
-    }
+    ui_.Text(L"v0.3", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
+             th::Rgba(th::kMuted, 0.55f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
+             DWRITE_TEXT_ALIGNMENT_CENTER);
 }
 
 bool App::Contains(const D2D1_RECT_F& rect, int x, int y) const {
@@ -5640,60 +5683,62 @@ void App::RenderStream(double t) {
     (void)t;
     const float w = ui_w_;
 
-    // Connecting screen: an opaque, boot-style animation. It also covers the
-    // gap between "session started" and the first decoded frame, so the
-    // presenter's synthetic test pattern is never visible to the user.
-    if (stream_connecting_ || (stream_active_ && last_source_at_ < 0.0)) {
+    // Connecting screen: the boot loader, with the real session phases.
+    if (stream_connecting_ || pending_connect_ != PendingConnect::None ||
+        (stream_active_ && last_source_at_ < 0.0)) {
         const float h = ui_h_;
+        const float ct = static_cast<float>(clock_);
         ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(th::kBgTop), th::Rgba(th::kBgBottom));
-        ui_.FillRadial(w * 0.5f, h * 0.42f, w * 0.62f, th::Rgba(0x6B32D9, 0.24f),
+        ui_.FillRadial(w * 0.5f, h * 0.40f, w * 0.60f, th::Rgba(0x6B32D9, 0.22f),
                        th::Rgba(0x6B32D9, 0.0f));
-        ui_.FillRadial(w * 0.12f, h * 0.10f, w * 0.30f, th::Rgba(0x3E2170, 0.20f),
+        ui_.FillRadial(w * 0.12f, h * 0.10f, w * 0.30f, th::Rgba(0x3E2170, 0.18f),
                        th::Rgba(0x3E2170, 0.0f));
 
         const float cx = w * 0.5f;
-        const float cy = h * 0.40f;
-        const float now = static_cast<float>(clock_);
-        const float spin = now * 1.15f;
-        ui_.FillCircle(cx, cy, 96.0f + 8.0f * std::sin(now * 2.2f), th::Rgba(th::kAccent, 0.055f));
-        ui_.StrokeArc(cx, cy, 64.0f, spin, 4.55f, th::Rgba(th::kAccent, 0.95f), 2.6f);
-        ui_.StrokeArc(cx, cy, 78.0f, -spin * 0.60f + 0.8f, 2.2f, th::Rgba(th::kInk, 0.22f),
-                      1.2f);
-        ui_.StrokeCircle(cx, cy, 46.0f, th::Rgba(0xFFFFFF, 0.08f), 1.0f);
-        ui_.FillRounded({cx - 22.0f, cy - 22.0f, cx + 22.0f, cy + 22.0f}, 12.0f,
-                        th::Rgba(th::kAccent, 0.18f));
-        ui_.StrokeRounded({cx - 22.0f, cy - 22.0f, cx + 22.0f, cy + 22.0f}, 12.0f,
-                          th::Rgba(th::kAccent, 0.55f), 1.0f);
-        ui_.FillRounded({cx - 8.0f, cy - 12.0f, cx - 2.0f, cy + 12.0f}, 3.0f,
-                        th::Rgba(th::kInk, 0.9f));
-        ui_.FillRounded({cx + 2.0f, cy - 12.0f, cx + 8.0f, cy + 12.0f}, 3.0f,
-                        th::Rgba(th::kInk, 0.9f));
+        const float cy = h * 0.34f;
+        DrawLoaderMark(cx, cy, 1.0f, ct, 1.0f);
 
-        ui_.Text(L"Connecting", {cx - 280.0f, cy + 96.0f, cx + 280.0f, cy + 134.0f}, 26.0f,
-                 th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                 DWRITE_TEXT_ALIGNMENT_CENTER);
-        const std::wstring subtitle =
-            Widen("Opening a Remote Play session on " + profile_.display_name());
-        ui_.Text(subtitle.c_str(), {cx - 340.0f, cy + 138.0f, cx + 340.0f, cy + 166.0f}, 13.0f,
-                 th::Rgba(th::kInkDim), DWRITE_FONT_WEIGHT_NORMAL,
-                 DWRITE_TEXT_ALIGNMENT_CENTER);
+        ui_.Text(L"Connecting", {cx - 300.0f, cy + 104.0f, cx + 300.0f, cy + 132.0f}, 20.0f,
+                 th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
+        const std::wstring subtitle = Widen(profile_.display_name());
+        ui_.Text(subtitle.c_str(), {cx - 300.0f, cy + 134.0f, cx + 300.0f, cy + 156.0f}, 12.5f,
+                 th::Rgba(th::kInkDim), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER);
 
-        const std::wstring step =
-            stream_connecting_ ? (stream_note_.empty() ? std::wstring(L"Talking to the console...")
-                                                       : Widen(stream_note_))
-                               : std::wstring(L"Waiting for the first frame...");
-        ui_.Text(step.c_str(), {cx - 360.0f, cy + 172.0f, cx + 360.0f, cy + 198.0f}, 12.0f,
-                 th::Rgba(th::kMuted, 0.95f), DWRITE_FONT_WEIGHT_NORMAL,
-                 DWRITE_TEXT_ALIGNMENT_CENTER);
+        // Phases are read from the real state: probe, wake, session, first frame.
+        int phase = 3;
+        if (pending_connect_ == PendingConnect::Probing) {
+            phase = 0;
+        } else if (pending_connect_ == PendingConnect::Waking) {
+            phase = 1;
+        } else if (stream_connecting_) {
+            phase = 2;
+        }
+        const wchar_t* labels[] = {L"Checking the console", L"Waking the console",
+                                   L"Opening the session", L"Waiting for the first frame"};
+        std::vector<std::pair<std::wstring, int>> steps;
+        for (int i = 0; i < 4; ++i) {
+            steps.emplace_back(labels[i], i < phase ? 2 : (i == phase ? 1 : 0));
+        }
 
-        // Indeterminate bar: it breathes instead of pretending to know progress.
-        const float bar_w = 420.0f;
-        const float bar_y = cy + 214.0f;
-        const float prog = 0.18f + 0.64f * (0.5f + 0.5f * std::sin(now * 1.7f));
-        ui_.FillRounded({cx - bar_w * 0.5f, bar_y, cx + bar_w * 0.5f, bar_y + 3.0f}, 1.5f,
-                        th::Rgba(0xFFFFFF, 0.08f));
-        ui_.FillRounded({cx - bar_w * 0.5f, bar_y, cx - bar_w * 0.5f + bar_w * prog, bar_y + 3.0f},
-                        1.5f, th::Rgba(th::kAccent, 0.85f));
+        const float card_w = 520.0f;
+        const float card_h = 74.0f + 32.0f * static_cast<float>(steps.size());
+        const float card_t = cy + 180.0f;
+        const D2D1_RECT_F card{cx - card_w * 0.5f, card_t, cx + card_w * 0.5f, card_t + card_h};
+        ui_.FillRounded(card, 18.0f, th::Rgba(th::kPanel, 0.72f));
+        ui_.StrokeRounded(card, 18.0f, th::Rgba(th::kAccent, 0.20f), 1.0f);
+        ui_.FillRounded({card.left + 28.0f, card.top, card.right - 28.0f, card.top + 2.0f}, 1.0f,
+                        th::Rgba(th::kAccent, 0.75f));
+        DrawLoaderSteps(steps, card.left + 28.0f, card.top + 18.0f, card_w - 56.0f, ct, 1.0f);
+
+        const float bar_w = card_w - 56.0f;
+        const float bx = card.left + 28.0f;
+        const float by = card.bottom - 36.0f;
+        const float prog = 0.18f + 0.64f * (0.5f + 0.5f * std::sin(ct * 1.7f));
+        ui_.FillRounded({bx, by, bx + bar_w, by + 4.0f}, 2.0f, th::Rgba(0xFFFFFF, 0.08f));
+        ui_.FillRounded({bx, by, bx + bar_w * prog, by + 4.0f}, 2.0f, th::Rgba(th::kAccent, 0.85f));
+        ui_.Text(stream_note_.empty() ? Widen(std::string("Working...")).c_str()
+                                      : Widen(stream_note_).c_str(),
+                 {bx, by + 10.0f, bx + bar_w, by + 30.0f}, 12.0f, th::Rgba(th::kInkDim, 0.9f));
         return;
     }
 

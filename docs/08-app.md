@@ -228,3 +228,15 @@ src/platform/win32_window.*   window, mouse/keyboard, per-monitor DPI
   VFG frame generation), Colour, Neural, Audio, Controller and Performance
   (frame buffer, Reflex). The sheet panel uses the same glass fill and accent
   edge as the Settings card. Tab width is 124 px so "Performance" fits.
+
+## Loaders (18 Nov 2026)
+
+- **Boot**: the mark draws itself in over the first second (glow, rings, tile),
+  then the title. A step card lists the real start-up tasks: looking for
+  consoles, then each `boot_tasks_` label, with done / active / pending states
+  driven by the boot worker. The progress bar and percentage are under the card.
+- **Connect**: the same loader, shown from the moment Connect is pressed (probe
+  included). The four steps follow the real state: checking the console, waking
+  it, opening the session, waiting for the first frame.
+- Shared helpers: `DrawLoaderMark` (rings and tile, with a reveal factor) and
+  `DrawLoaderSteps` (the step list).
