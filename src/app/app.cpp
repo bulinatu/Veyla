@@ -1720,14 +1720,10 @@ void App::ApplyLaunchPreset(int preset) {
             ApplyDlssFrameGen();
             stream_note_ = "Launch preset: DLSS SR Ultra Quality + FG 2x.";
             break;
-        case 1:  // Safe: FG 2x on the raw stream
-            profile_.neural_sr = 0;
-            profile_.dlss_fg = 2;
-            profile_.neural_nr = 0;
-            ApplyNeuralSettings();
-            ApplyDlssFrameGen();
-            stream_note_ = "Safe preset: FG 2x without DLSS SR.";
-            break;
+        case 1:  // FG 2x without SR: not offered until the worker restart path
+                 // is proven; keep the profile untouched.
+            stream_note_ = "FG without SR is not offered as a preset in this build.";
+            return;
         case 2:  // SR only
             profile_.neural_sr = 1;
             profile_.dlss_mode = 4;
@@ -5138,23 +5134,24 @@ void App::RenderSettings(double t) {
                          th::Rgba(th::kMuted));
             }
 
-            // One-click fallbacks for launch night.
+            // One-click fallbacks for launch night. "FG without SR" is not
+            // offered: a worker restarted at 1080p without SR was measured to
+            // come up without presenting, so the ladder uses only verified
+            // paths.
             y = 590.0f;
             ui_.Text(L"Launch presets", {kContentX, y, w - 64.0f, y + 30.0f}, 16.0f,
                      th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 38.0f;
             DrawButton(L"Launch: SR + FG 2x",
                        {kContentX, y, kContentX + 250.0f, y + 44.0f}, W_PresetLaunch, true);
-            DrawButton(L"Safe: FG 2x", {kContentX + 266.0f, y, kContentX + 516.0f, y + 44.0f},
-                       W_PresetSafe, false);
+            DrawButton(L"SR only", {kContentX + 266.0f, y, kContentX + 516.0f, y + 44.0f},
+                       W_PresetSr, false);
             y += 54.0f;
-            DrawButton(L"SR only", {kContentX, y, kContentX + 250.0f, y + 44.0f}, W_PresetSr,
-                       false);
-            DrawButton(L"Low latency", {kContentX + 266.0f, y, kContentX + 516.0f, y + 44.0f},
+            DrawButton(L"Low latency", {kContentX, y, kContentX + 250.0f, y + 44.0f},
                        W_PresetLow, false);
             y += 56.0f;
-            ui_.Text(L"Presets change the whole chain and restart the FG worker once; "
-                     L"apply them before playing, not during a fight.",
+            ui_.Text(L"Presets change the whole chain; they apply at the start of the next "
+                     L"session (reconnect), never mid-stream.",
                      {kContentX, y, w - 64.0f, y + 28.0f}, 11.5f, th::Rgba(th::kMuted));
             break;
         }

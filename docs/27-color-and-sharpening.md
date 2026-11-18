@@ -129,12 +129,14 @@ full-resolution screenshot (`tools/measure_frame.ps1`).
 ## 7. Companion features shipped in the same build
 
 - **Launch presets** (`Performance` tab): Launch = SR Ultra Quality + FG 2x
-  at 1440p, Safe = FG 2x without SR, SR only, Low latency = raw stream with
-  frame buffer 0. Presets only change the saved selection: the chain is built
-  at the start of the next session, never mid-stream. Reconfiguring DLSS and
-  the FG worker while D3D12VA is decoding was observed to make the decoder fail
-  ("Failed to map D3D12 Buffer resource"), so the app refuses to do it; the note
-  says "Disconnect and reconnect to apply it".
+  at 1440p, SR only, Low latency = raw stream with frame buffer 0. Presets only
+  change the saved selection: the chain is built at the start of the next
+  session, never mid-stream. Reconfiguring DLSS and the FG worker while D3D12VA
+  is decoding was observed to make the decoder fail ("Failed to map D3D12
+  Buffer resource"), so the app refuses to do it; the note says "Disconnect and
+  reconnect to apply it". A "FG 2x without SR" preset is deliberately not
+  offered: a worker restarted at 1080p without SR came up in overlay mode
+  without presenting frames, so the ladder only ships verified paths.
 - **Health log** at `%APPDATA%\BetterRemotePlay\health.log`, one line every
   30 s while the app runs: preset, worker fps, DLSS ms, enhance ms, frame p99,
   last frame work, late/stalls, source fps, 4v%, queue, drops, lost, decode
