@@ -197,18 +197,22 @@ float enh1[4];   // highlights, shadows, vibrance, hue_radians
 float enh2[4];   // temperature, tint, gamma, color_active
 ```
 
-Order inside `PSMain` (single pass, no extra target):
+Order inside `PSMain` (single pass, no extra target) - **as implemented**:
 
 1. upscale (mode 0-4), unchanged;
-2. existing tone-map / HDR encode, so `col` is always in the output's display
-   space (SDR gamma or PQ);
-3. sharpening (CAS, 1-texel cross on the upscaled image) when `gEnh0.x > 0`;
-4. colour block when `gEnh2.w > 0.5`.
+2. sharpening (CAS, 1-texel cross on the upscaled image) when sharpening > 0;
+3. tone-map / HDR encode (existing code), so `col` is display-referred;
+4. colour block when the colour switch is on (`gColor1.w > 0.5`).
 
-Sharpening before grading keeps it a local operator on one image (the four
-neighbours and the centre are the same kind of value) and needs no second
-render target. Today's mode-2/mode-3 sharpen calls are deleted and replaced by
-step 3, so SDR output stays visually identical at the 0.35 default.
+The uniform block ended up as `gColor0..gColor2` (exposure/contrast/saturation/
+hue, highlights/shadows/vibrance/active, temperature/tint/gamma) instead of
+`gEnh0..2`; the layout and the maths are identical. Sharpening runs **before**
+the tone map so the centre and its four neighbours are in the same space (no
+second render target). See `docs/27-color-and-sharpening.md` for the shipped
+implementation and measured results.
+
+The rest of this section is the original design sketch; the names map one to
+one (`gEnh0.x` == sharpening, `gEnh0.y` == exposure, and so on).
 
 ```hlsl
 // step 3: contrast-adaptive sharpening on display-space values

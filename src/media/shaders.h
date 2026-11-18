@@ -83,6 +83,9 @@ cbuffer PsParams : register(b0)
     float4 gCon1;
     float4 gCon2;
     float4 gCon3;
+    float4 gColor0;   // exposure (stops), contrast, saturation, hue (radians)
+    float4 gColor1;   // highlights, shadows, vibrance, colour active
+    float4 gColor2;   // temperature, tint, gamma, reserved
 };
 
 struct VSOut
@@ -272,6 +275,31 @@ float3 Easu(float2 uv)
     return clamp(aC / max(aW, 1e-6), mn4, mx4);
 }
 
+float3 ToLinearDisplay(float3 c)
+{
+    // PQ in and PQ out: use the ST.2084 EOTF, normalised so 1.0 == 100 nits.
+    if (gHdr > 0.5 && gSrcPq > 0.5)
+    {
+        float3 p = pow(saturate(c), 1.0 / 78.84375);
+        float3 lin = pow(max(p - 0.8359375, 0.0) /
+                             max(18.8515625 - 18.6875 * p, 1e-6),
+                         1.0 / 0.1593017578125);
+        return lin * (10000.0 / 100.0);
+    }
+    return pow(max(c, 0.0), 2.2);
+}
+
+float3 FromLinearDisplay(float3 lin)
+{
+    if (gHdr > 0.5 && gSrcPq > 0.5)
+    {
+        lin *= (100.0 / 10000.0);
+        float3 p = pow(max(lin, 0.0), 0.1593017578125);
+        return pow((0.8359375 + 18.8515625 * p) / (1.0 + 18.6875 * p), 78.84375);
+    }
+    return pow(max(lin, 0.0), 1.0 / 2.2);
+}
+
 float4 PSMain(VSOut i) : SV_TARGET
 {
     float3 col;
@@ -287,21 +315,22 @@ float4 PSMain(VSOut i) : SV_TARGET
     else if (gMode < 2.5)
     {
         col = CatmullRom(i.uv);
-
-        float2 o = 1.0 / gSrcSize;
-        float3 blur =
-            (gSrc.SampleLevel(gSmp, i.uv + float2(o.x, 0), 0).rgb +
-             gSrc.SampleLevel(gSmp, i.uv - float2(o.x, 0), 0).rgb +
-             gSrc.SampleLevel(gSmp, i.uv + float2(0, o.y), 0).rgb +
-             gSrc.SampleLevel(gSmp, i.uv - float2(0, o.y), 0).rgb) * 0.25;
-        col += (col - blur) * gSharp;
     }
     else if (gMode < 3.5)
     {
-        // Lanczos3 + contrast-adaptive sharpening, clamped to the local
-        // neighbourhood so dark detail is not crushed into black.
         col = Lanczos3(i.uv);
+    }
+    else
+    {
+        col = Easu(i.uv);
+    }
 
+    // Contrast-adaptive sharpening, applied in the source's own space (before
+    // the tone map), so the centre and the four neighbours are the same kind
+    // of value. Clamped to the local neighbourhood: no crushed blacks, bounded
+    // halos.
+    if (gSharp > 0.001)
+    {
         float2 o = 1.0 / gSrcSize;
         float3 n = gSrc.SampleLevel(gSmp, i.uv + float2(o.x, 0), 0).rgb;
         float3 s = gSrc.SampleLevel(gSmp, i.uv - float2(o.x, 0), 0).rgb;
@@ -309,14 +338,9 @@ float4 PSMain(VSOut i) : SV_TARGET
         float3 w = gSrc.SampleLevel(gSmp, i.uv - float2(0, o.y), 0).rgb;
 
         float3 blur = (n + s + e + w) * 0.25;
-        float3 mn = min(min(min(n, s), min(e, w)), col);
-        float3 mx = max(max(max(n, s), max(e, w)), col);
-        float3 sharpened = col + (col - blur) * gSharp;
-        col = clamp(sharpened, mn, mx);
-    }
-    else
-    {
-        col = Easu(i.uv);
+        float3 mn = min(min(n, s), min(e, w));
+        float3 mx = max(max(n, s), max(e, w));
+        col = clamp(col + (col - blur) * gSharp, mn, mx);
     }
 
     if (gHdr > 0.5)
@@ -346,6 +370,49 @@ float4 PSMain(VSOut i) : SV_TARGET
         float3 p = pow(saturate(col), 1.0 / m2);
         float3 lin = pow(max(p - c1, 0.0) / max(c2 - c3 * p, 1e-6), 1.0 / m1);
         col = pow(saturate(lin * 100.0), 1.0 / 2.2);
+    }
+
+    if (gColor1.w > 0.5)
+    {
+        // YIQ uses Rec.601 luma; use the same weights for the hue rotation so
+        // the reconstruction is luma-preserving and consistent.
+        const float3 kLuma = float3(0.299, 0.587, 0.114);
+
+        float3 lin = ToLinearDisplay(col);
+        lin *= exp2(gColor0.x);                       // exposure, stops
+
+        // White balance: luma-normalised gains, so temperature does not change
+        // brightness.
+        float3 wb = float3(1.0 + 0.15 * gColor2.x, 1.0 + 0.10 * gColor2.y,
+                           1.0 - 0.15 * gColor2.x);
+        wb /= dot(wb, kLuma);
+        lin *= wb;
+
+        float luma = dot(lin, kLuma);
+        lin = max((lin - 0.18) * gColor0.y + 0.18, 0.0);       // contrast
+        lin *= 1.0 + gColor1.x * smoothstep(0.45, 1.0, luma) * 0.35;   // highlights
+        lin *= 1.0 + gColor1.y * (1.0 - smoothstep(0.02, 0.22, luma)) * 0.45; // shadows
+
+        // Hue rotation in YIQ: luma is preserved by construction.
+        luma = dot(lin, kLuma);
+        float iy = dot(lin, float3(0.595716, -0.274453, -0.321263));
+        float qy = dot(lin, float3(0.211456, -0.522591, 0.311135));
+        float ca = cos(gColor0.w);
+        float sa = sin(gColor0.w);
+        float i2 = iy * ca - qy * sa;
+        float q2 = iy * sa + qy * ca;
+        lin = float3(luma, luma, luma) + i2 * float3(0.9563, -0.2721, -1.1070) +
+              q2 * float3(0.6210, -0.6474, 1.7046);
+
+        // Saturation, plus vibrance which weights low-chroma pixels more.
+        float mx = max(lin.r, max(lin.g, lin.b));
+        float mn = min(lin.r, min(lin.g, lin.b));
+        float chroma = saturate(mx - mn);
+        float sat = gColor0.z * (1.0 + gColor1.z * (1.0 - chroma));
+        lin = lerp(float3(luma, luma, luma), lin, sat);
+
+        col = FromLinearDisplay(lin);
+        col = pow(max(col, 0.0), 1.0 / gColor2.z);    // gamma, display space
     }
 
     return float4(saturate(col), 1.0);

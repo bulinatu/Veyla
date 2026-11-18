@@ -44,6 +44,21 @@ struct Profile {
     std::string codec = "hevc";
     bool hdr = false;
 
+    // Display enhance: sharpening always available, colour controls opt-in.
+    // Neutral values are the identity; old profiles load neutral.
+    int sharpness = 35;           // CAS amount 0..100
+    int color_on = 0;             // 0 = colour controls bypassed
+    int color_exposure = 0;       // -100..100 -> +-1 stop
+    int color_contrast = 100;     // 50..150, 18% grey pivot
+    int color_highlights = 0;     // -100..100
+    int color_shadows = 0;        // -100..100
+    int color_saturation = 100;   // 0..200
+    int color_vibrance = 0;       // 0..100
+    int color_hue = 0;            // -180..180 degrees
+    int color_temperature = 0;    // -100..100 (cool..warm)
+    int color_tint = 0;           // -100..100 (green..magenta)
+    int color_gamma = 100;        // 80..120
+
     // UI settings
     int upscaler = 1;
     int render_target = 0;  // 0 window/display, 1 1080p, 2 1440p, 3 2160p

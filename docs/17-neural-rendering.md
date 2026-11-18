@@ -7,7 +7,7 @@ packaged. The neural paths are now:
 ```
 stream (1080p RGBA)
   -> DLSS Super Resolution / DLAA (D3D12, optional)
-  -> [CPU readback of the SR output, when FG is enabled]
+  -> [GPU grade + CPU readback of the SR output, when FG is enabled]
   -> DLSS Frame Generation worker (2x-6x, presents its own window)
   -> display
 ```
@@ -19,7 +19,9 @@ its render resolution. The worker generates and presents the final frames; the
 parent's window is covered while it does. Measured with SR Ultra Quality +
 FG 2x at 2560x1440: **120 fps displayed**, source cadence 4 refreshes. The
 parent's source tick costs ~5-6 ms (upload + SR submit + readback + worker
-submit) but the worker is on its own thread and is not blocked by it.
+submit) but the worker is on its own thread and is not blocked by it. The
+readback is now also the colour/sharpening pass (`docs/27`), so the graded
+pixels are exactly what the worker presents.
 
 DLSS NR can still run inside the worker (`SetNeuralBypass` is off when NR is
 enabled). NR + FG 2x costs roughly 7-18 fps of output (120 -> 102-113 measured);

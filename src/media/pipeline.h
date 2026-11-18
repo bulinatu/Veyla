@@ -31,6 +31,24 @@ struct PresenterConfig {
     int upscale_mode = 2;  // 0 bilinear, 1 catmull-rom, 2 catmull-rom + sharpen
 };
 
+// Colour grading and sharpening applied to the video image (never to the UI).
+// Neutral values are the identity: the pass is skipped entirely.
+struct EnhanceParams {
+    bool active = false;       // any non-neutral value
+    bool color = false;        // colour controls on; sharpening can run alone
+    float sharpen = 0.0f;      // 0..1.2
+    float exposure = 0.0f;     // stops, -1..+1
+    float contrast = 1.0f;     // 0.5..1.5, 18% grey pivot
+    float highlights = 0.0f;   // -1..+1
+    float shadows = 0.0f;      // -1..+1
+    float saturation = 1.0f;   // 0..2
+    float vibrance = 0.0f;     // 0..1
+    float hue_deg = 0.0f;      // -180..+180
+    float temperature = 0.0f;  // -1..+1 (cool..warm)
+    float tint = 0.0f;         // -1..+1 (green..magenta)
+    float gamma = 1.0f;        // 0.8..1.2
+};
+
 // Owns the D3D11 device, the flip-model swapchain, and the post-process chain.
 //
 // Frame shape today:  synthetic source -> upscale -> present
@@ -77,6 +95,18 @@ public:
 
     void SetUpscaleMode(int mode);
     int upscale_mode() const { return cfg_.upscale_mode; }
+
+    void SetEnhance(const EnhanceParams& params) { enh_ = params; }
+    const EnhanceParams& enhance() const { return enh_; }
+    double enhance_ms() const { return enh_ms_; }
+
+    // Grades and reads back a frame at w x h as RGBA8 (SDR), for consumers that
+    // only speak CPU RGBA (the DLSS Frame Generation worker). `src_pq` marks a
+    // PQ/BT.2020 source; the result is always display-referred SDR.
+    bool EnhanceFrameReadback(const uint8_t* rgba, int w, int h, bool src_pq,
+                              std::vector<uint8_t>& out, double* ms);
+    bool EnhanceViewReadback(ID3D11ShaderResourceView* view, int w, int h, bool src_pq,
+                             std::vector<uint8_t>& out, double* ms);
 
     // 0,0 = render at the output size. 1920x1080 / 2560x1440 / 3840x2160 pick
     // an explicit render target; the result is fitted to the window/display.
@@ -137,6 +167,13 @@ private:
     bool CreateShaders();
     bool CreateTimingQueries();
 
+    // Post-process helpers shared by Render() and the readback path.
+    void SetPsParams(int src_w, int src_h, int dst_w, int dst_h, int mode, bool hdr_out,
+                     bool src_pq, bool enhance);
+    void DrawFullscreen(ID3D11ShaderResourceView* srv, ID3D11RenderTargetView* rtv, int x,
+                        int y, int w, int h);
+    bool EnsureGradeTargets(int w, int h);
+
     void BeginTiming();
     void EndTiming();
     void CollectTiming();
@@ -173,6 +210,16 @@ private:
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> source_srv_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> source_override_;
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> source_uav_;
+
+    // Grading readback: an offscreen RGBA8 target and a staging copy, sized
+    // once for the current frame size.
+    EnhanceParams enh_{};
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> grade_tex_;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> grade_rtv_;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> grade_staging_;
+    int grade_w_ = 0;
+    int grade_h_ = 0;
+    double enh_ms_ = 0.0;
 
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> gen_cs_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> vs_;

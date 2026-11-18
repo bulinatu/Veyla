@@ -75,6 +75,7 @@ enum class Icon {
     Connection,
     Debug,
     About,
+    Color,
 };
 
 // Small geometric icon set. Everything is drawn with D2D primitives so the
@@ -179,6 +180,12 @@ void DrawIcon(ui::Renderer& ui, Icon icon, float cx, float cy, float s, D2D1_COL
             ui.FillCircle(cx, cy - s * 0.32f, s * 0.10f, color);
             ui.Line({cx, cy - s * 0.05f}, {cx, cy + s * 0.45f}, color, weight);
             break;
+        case Icon::Color:
+            // Three overlapping discs: a palette without an image asset.
+            ui.FillCircle(cx - s * 0.34f, cy - s * 0.18f, s * 0.42f, color);
+            ui.FillCircle(cx + s * 0.34f, cy - s * 0.18f, s * 0.42f, color);
+            ui.FillCircle(cx, cy + s * 0.30f, s * 0.42f, color);
+            break;
     }
 }
 
@@ -229,6 +236,24 @@ enum WidgetId {
     W_ConsoleTriggers = 50,
     W_Motion = 51,
     W_RenderTarget = 52,
+    // Display enhance (Colour tab). 120-136; 110-119 stay free for presets.
+    W_ColorOn = 120,
+    W_ColorExposure,
+    W_ColorContrast,
+    W_ColorHighlights,
+    W_ColorShadows,
+    W_ColorSaturation,
+    W_ColorVibrance,
+    W_ColorHue,
+    W_ColorTemperature,
+    W_ColorTint,
+    W_ColorGamma,
+    W_Sharpness,
+    W_ColorReset,
+    W_ColorNeutral,
+    W_ColorVivid,
+    W_ColorCinematic,
+    W_ColorWarm,
     W_PairHome = 42,
     W_DlssPreset = 63,
     W_DlssMode = 64,
@@ -402,6 +427,7 @@ bool App::Init(Win32Window* window) {
     motion_ = profile_.motion != 0;
     streaming_.SetMotionEnabled(motion_);
     th::SetHdr(hdr_);
+    ApplyEnhance();
 
     pad_.SetBackend(kInputBackends[input_source_]);
 
@@ -1081,10 +1107,10 @@ void App::HandleKey(int vk) {
             } else if (vk == 'S') {
                 screen_ = Screen::Home;
             } else if (vk == VK_TAB || vk == VK_RIGHT) {
-                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 1) % 9);
+                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 1) % 10);
                 open_dropdown_ = -1;
             } else if (vk == VK_LEFT) {
-                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 8) % 9);
+                tab_ = static_cast<Tab>((static_cast<int>(tab_) + 9) % 10);
                 open_dropdown_ = -1;
             }
             break;
@@ -1510,6 +1536,63 @@ void App::ApplyDropdown(int id, int index) {
             output_dirty_ = true;
             SaveProfile();
             break;
+        case W_ColorOn:
+            profile_.color_on = index == 1 ? 1 : 0;
+            ApplyEnhance();
+            SaveProfile();
+            break;
+        case W_ColorReset:
+            profile_.sharpness = 35;
+            profile_.color_exposure = 0;
+            profile_.color_contrast = 100;
+            profile_.color_highlights = 0;
+            profile_.color_shadows = 0;
+            profile_.color_saturation = 100;
+            profile_.color_vibrance = 0;
+            profile_.color_hue = 0;
+            profile_.color_temperature = 0;
+            profile_.color_tint = 0;
+            profile_.color_gamma = 100;
+            ApplyEnhance();
+            SaveProfile();
+            break;
+        case W_ColorNeutral:
+            profile_.color_exposure = 0;
+            profile_.color_contrast = 100;
+            profile_.color_highlights = 0;
+            profile_.color_shadows = 0;
+            profile_.color_saturation = 100;
+            profile_.color_vibrance = 0;
+            profile_.color_hue = 0;
+            profile_.color_temperature = 0;
+            profile_.color_tint = 0;
+            profile_.color_gamma = 100;
+            ApplyEnhance();
+            SaveProfile();
+            break;
+        case W_ColorVivid:
+            profile_.color_saturation = 118;
+            profile_.color_vibrance = 35;
+            profile_.color_contrast = 108;
+            ApplyEnhance();
+            SaveProfile();
+            break;
+        case W_ColorCinematic:
+            profile_.color_contrast = 112;
+            profile_.color_saturation = 92;
+            profile_.color_highlights = -18;
+            profile_.color_shadows = 10;
+            profile_.color_temperature = -8;
+            ApplyEnhance();
+            SaveProfile();
+            break;
+        case W_ColorWarm:
+            profile_.color_temperature = 22;
+            profile_.color_tint = 4;
+            profile_.color_saturation = 105;
+            ApplyEnhance();
+            SaveProfile();
+            break;
         default:
             break;
     }
@@ -1566,6 +1649,39 @@ int App::present_hz() const {
     // presented by the NVIDIA worker/presenter on its own thread, so it no
     // longer dictates the UI cadence.
     return std::clamp(refresh_hz_, 24, 500);
+}
+
+void App::ApplyEnhance() {
+    EnhanceParams p{};
+    p.color = profile_.color_on > 0;
+    p.sharpen = static_cast<float>(std::clamp(profile_.sharpness, 0, 100)) / 100.0f;
+    p.exposure = static_cast<float>(std::clamp(profile_.color_exposure, -100, 100)) / 100.0f;
+    p.contrast = static_cast<float>(std::clamp(profile_.color_contrast, 50, 150)) / 100.0f;
+    p.highlights = static_cast<float>(std::clamp(profile_.color_highlights, -100, 100)) / 100.0f;
+    p.shadows = static_cast<float>(std::clamp(profile_.color_shadows, -100, 100)) / 100.0f;
+    p.saturation = static_cast<float>(std::clamp(profile_.color_saturation, 0, 200)) / 100.0f;
+    p.vibrance = static_cast<float>(std::clamp(profile_.color_vibrance, 0, 100)) / 100.0f;
+    p.hue_deg = static_cast<float>(std::clamp(profile_.color_hue, -180, 180));
+    p.temperature = static_cast<float>(std::clamp(profile_.color_temperature, -100, 100)) / 100.0f;
+    p.tint = static_cast<float>(std::clamp(profile_.color_tint, -100, 100)) / 100.0f;
+    p.gamma = static_cast<float>(std::clamp(profile_.color_gamma, 80, 120)) / 100.0f;
+    p.active = p.sharpen > 0.0f || p.color;
+
+    if (std::memcmp(&p, &enh_applied_, sizeof(p)) == 0) {
+        return;
+    }
+    presenter_.SetEnhance(p);
+    enh_applied_ = p;
+    enh_dirty_ = true;
+    enh_dirty_at_ = clock_;
+}
+
+void App::TickEnhance() {
+    ApplyEnhance();
+    if (enh_dirty_ && clock_ - enh_dirty_at_ >= 1.0) {
+        enh_dirty_ = false;
+        SaveProfile();
+    }
 }
 
 HANDLE App::present_waitable() const {
@@ -2957,6 +3073,11 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     hover_ = Hit::None;
     hover_index_ = -1;
 
+    // Colour/sharpening sliders write straight into the profile; apply them
+    // (and persist a second after the last change) without touching the
+    // capture or the colour itself.
+    TickEnhance();
+
     // Mouse activity drives the stream chrome and the OS cursor.
     if (pointer.x != last_mouse_x_ || pointer.y != last_mouse_y_ || pointer.clicked ||
         pointer.wheel != 0.0f) {
@@ -3324,18 +3445,18 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                         const int sr_h = dlss_sr_.out_height();
                         presenter_.SetSourceView(sr_frame.srv.Get(), sr_w, sr_h,
                                                  stream_frame_.pq);
-                        presenter_.SetSourceFinal(false);
-                        std::string rb_detail;
-                        if (dlss_sr_.ReadbackLast(sr_readback_, rb_detail) &&
-                            sr_readback_.size() ==
-                                static_cast<size_t>(sr_w) * sr_h * 4) {
+                        // Already at the render target: skip only the scaler.
+                        presenter_.SetSourceFinal(true);
+                        if (presenter_.EnhanceViewReadback(sr_frame.srv.Get(), sr_w, sr_h,
+                                                           stream_frame_.pq, sr_readback_,
+                                                           nullptr) &&
+                            sr_readback_.size() == static_cast<size_t>(sr_w) * sr_h * 4) {
                             SubmitNrFrameData(std::move(sr_readback_), sr_w, sr_h,
                                               stream_frame_.pq);
                             fed = true;
                         } else {
-                            dlss_note_ = L"FG readback: " + Widen(rb_detail);
-                            std::fprintf(stderr, "[app] SR->FG readback failed: %s\n",
-                                         rb_detail.c_str());
+                            dlss_note_ = L"FG enhance readback failed";
+                            std::fprintf(stderr, "[app] SR->FG graded readback failed\n");
                         }
                     } else {
                         std::fprintf(stderr, "[app] SR->FG stopped: %ls\n",
@@ -3347,9 +3468,24 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                     }
                 }
                 if (!fed) {
-                    presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
+                    // Raw stream into the worker. Grade it there and then when a
+                    // control is active; otherwise keep the zero-copy feed.
+                    if (presenter_.enhance().active) {
+                        if (presenter_.EnhanceFrameReadback(
+                                stream_frame_.rgba.data(), stream_frame_.width,
+                                stream_frame_.height, stream_frame_.pq, sr_readback_, nullptr) &&
+                            sr_readback_.size() ==
+                                static_cast<size_t>(stream_frame_.width) * stream_frame_.height * 4) {
+                            SubmitNrFrameData(std::move(sr_readback_), stream_frame_.width,
                                               stream_frame_.height, stream_frame_.pq);
-                    SubmitNrFrame(stream_frame_);
+                            fed = true;
+                        }
+                    }
+                    if (!fed) {
+                        presenter_.SetSourceFrame(stream_frame_.rgba.data(), stream_frame_.width,
+                                                  stream_frame_.height, stream_frame_.pq);
+                        SubmitNrFrame(stream_frame_);
+                    }
                 }
                 std::string fg_error;
                 if (NrFailed(fg_error)) {
@@ -4662,11 +4798,11 @@ void App::RenderSettings(double t) {
                  12.0f, th::Rgba(th::kMuted));
     }
 
-    const wchar_t* tab_names[] = {L"Display", L"Upscaling", L"Performance", L"Neural", L"Audio", L"Controller", L"Connection", L"Debug", L"About"};
-    const Icon tab_icons[] = {Icon::Display, Icon::Upscaling, Icon::Performance, Icon::Neural,
+    const wchar_t* tab_names[] = {L"Display", L"Upscaling", L"Color", L"Performance", L"Neural", L"Audio", L"Controller", L"Connection", L"Debug", L"About"};
+    const Icon tab_icons[] = {Icon::Display, Icon::Upscaling, Icon::Color, Icon::Performance, Icon::Neural,
                               Icon::Audio,   Icon::Controller, Icon::Connection,
                               Icon::Debug,   Icon::About};
-    for (int i = 0; i < 9; ++i) {
+    for (int i = 0; i < 10; ++i) {
         const D2D1_RECT_F tab{48.0f, 148.0f + i * 54.0f, 300.0f, 148.0f + i * 54.0f + 44.0f};
         const bool selected = static_cast<int>(tab_) == i;
         const bool hovered = hover_ == Hit::Tab && hover_index_ == i;
@@ -4704,6 +4840,67 @@ void App::RenderSettings(double t) {
             y += kRowH;
             ui_.Text(L"Upscaling and neural settings are in their own tabs; frame pacing and generation are under Performance.",
                      {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f, th::Rgba(th::kMuted));
+            break;
+        }
+
+        case Tab::Color: {
+            DrawDropdown(L"Colour controls", {L"Off (sharpening only)", L"On"},
+                         profile_.color_on > 0 ? 1 : 0, y, W_ColorOn);
+            y += 44.0f;
+            DrawSlider(L"Sharpening", profile_.sharpness, 0, 100, 5, y, W_Sharpness);
+            y += 44.0f;
+            DrawSlider(L"Exposure", profile_.color_exposure, -100, 100, 5, y, W_ColorExposure);
+            y += 44.0f;
+            DrawSlider(L"Contrast", profile_.color_contrast, 50, 150, 1, y, W_ColorContrast);
+            y += 44.0f;
+            DrawSlider(L"Highlights", profile_.color_highlights, -100, 100, 5, y,
+                       W_ColorHighlights);
+            y += 44.0f;
+            DrawSlider(L"Shadows", profile_.color_shadows, -100, 100, 5, y, W_ColorShadows);
+            y += 44.0f;
+            DrawSlider(L"Saturation", profile_.color_saturation, 0, 200, 5, y, W_ColorSaturation);
+            y += 44.0f;
+            DrawSlider(L"Vibrance", profile_.color_vibrance, 0, 100, 5, y, W_ColorVibrance);
+            y += 44.0f;
+            DrawSlider(L"Hue (degrees)", profile_.color_hue, -180, 180, 5, y, W_ColorHue, false);
+            y += 44.0f;
+            DrawSlider(L"Temperature", profile_.color_temperature, -100, 100, 5, y,
+                       W_ColorTemperature);
+            y += 44.0f;
+            DrawSlider(L"Tint", profile_.color_tint, -100, 100, 5, y, W_ColorTint);
+            y += 44.0f;
+            DrawSlider(L"Gamma", profile_.color_gamma, 80, 120, 1, y, W_ColorGamma);
+            y += 56.0f;
+
+            const float bw = 190.0f;
+            const float gap = 10.0f;
+            DrawButton(L"Neutral", {kContentX, y, kContentX + bw, y + 40.0f}, W_ColorNeutral,
+                       false);
+            DrawButton(L"Vivid", {kContentX + bw + gap, y, kContentX + 2 * bw + gap, y + 40.0f},
+                       W_ColorVivid, false);
+            DrawButton(L"Cinematic",
+                       {kContentX + 2 * (bw + gap), y, kContentX + 3 * bw + 2 * gap, y + 40.0f},
+                       W_ColorCinematic, false);
+            DrawButton(L"Warm",
+                       {kContentX + 3 * (bw + gap), y, kContentX + 4 * bw + 3 * gap, y + 40.0f},
+                       W_ColorWarm, false);
+            y += 50.0f;
+            DrawButton(L"Reset", {kContentX, y, kContentX + bw, y + 40.0f}, W_ColorReset, false);
+            y += 52.0f;
+
+            wchar_t status[192];
+            swprintf_s(status, L"Sharpening %d%%   -   colour %s   -   %s", profile_.sharpness,
+                       profile_.color_on > 0 ? L"on" : L"off",
+                       enh_applied_.active ? L"applied before the FG worker"
+                                           : L"bypassed (neutral)");
+            ui_.Text(status, {kContentX, y, w - 64.0f, y + 24.0f}, 12.0f, th::Rgba(th::kMuted));
+            y += 28.0f;
+            ui_.Text(hdr_ ? L"HDR output: exposure, white balance, saturation, hue and "
+                            L"sharpening are graded in linear light; highlights, shadows, gamma "
+                            L"and vibrance act on the SDR-referred curve."
+                          : L"Grading happens on the GPU before frame generation, so the worker "
+                            L"presents the same pixels the window would show.",
+                     {kContentX, y, w - 64.0f, y + 40.0f}, 11.5f, th::Rgba(th::kMuted));
             break;
         }
 
@@ -5331,6 +5528,11 @@ void App::RenderStream(double t) {
                     }
                     chain += part;
                 }
+                if (profile_.dlss_fg >= 2 && enh_applied_.active) {
+                    wchar_t part[96];
+                    swprintf_s(part, L"ENH %.2f ms   ", presenter_.enhance_ms());
+                    chain += part;
+                }
                 wchar_t stream_line[320];
                 swprintf_s(stream_line, L"PS5 %.1f fps   %s audio peak %.2f   %s",
                            source_fps, chain.c_str(), audio_.peak(),
@@ -5426,12 +5628,12 @@ void App::RenderStreamSettings(double t) {
              th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
 
     // The same categories as Settings; every control applies live.
-    const wchar_t* tabs[] = {L"Stream", L"DLSS", L"Neural",
+    const wchar_t* tabs[] = {L"Stream", L"DLSS", L"Colour", L"Neural",
                              L"Audio",  L"Controller"};
-    const Icon tab_icons[] = {Icon::Display, Icon::Upscaling, Icon::Neural,
+    const Icon tab_icons[] = {Icon::Display, Icon::Upscaling, Icon::Color, Icon::Neural,
                               Icon::Audio,   Icon::Controller};
     float tx = kContentX;
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 6; ++i) {
         const D2D1_RECT_F r{tx, 132.0f, tx + 104.0f, 166.0f};
         const bool selected = overlay_tab_ == i;
         if (selected) {
@@ -5479,7 +5681,27 @@ void App::RenderStreamSettings(double t) {
             }
             break;
         }
-        case 2: {  // Neural
+        case 2: {  // Colour
+            DrawDropdown(L"Colour controls", {L"Off (sharpening only)", L"On"},
+                         profile_.color_on > 0 ? 1 : 0, y, W_ColorOn);
+            y += row;
+            DrawSlider(L"Sharpening", profile_.sharpness, 0, 100, 5, y, W_Sharpness);
+            y += row;
+            DrawSlider(L"Saturation", profile_.color_saturation, 0, 200, 5, y, W_ColorSaturation);
+            y += row;
+            DrawSlider(L"Hue (degrees)", profile_.color_hue, -180, 180, 5, y, W_ColorHue, false);
+            y += row;
+            DrawSlider(L"Contrast", profile_.color_contrast, 50, 150, 1, y, W_ColorContrast);
+            y += row;
+            DrawSlider(L"Temperature", profile_.color_temperature, -100, 100, 5, y,
+                       W_ColorTemperature);
+            y += row;
+            DrawButton(L"Reset colour", {kContentX, y, kContentX + 200.0f, y + 40.0f},
+                       W_ColorReset, false);
+            break;
+        }
+
+        case 3: {  // Neural
             DrawDropdown(L"Neural Rendering", {L"Off", L"On"}, profile_.neural_nr > 0 ? 1 : 0,
                          y, W_NeuralNr);
             y += row;
@@ -5532,7 +5754,7 @@ void App::RenderStreamSettings(double t) {
             }
             break;
         }
-        case 3: {  // Audio
+        case 4: {  // Audio
             std::vector<std::wstring> devices;
             if (audio_devices_.empty()) {
                 devices.push_back(L"System default");
@@ -5574,7 +5796,7 @@ void App::RenderStreamSettings(double t) {
             y += 26.0f;
             break;
         }
-        case 4: {  // Controller
+        case 5: {  // Controller
             DrawDropdown(L"Input source", {kInputSourceNames[0], kInputSourceNames[1],
                                            kInputSourceNames[2]},
                          input_source_, y, W_InputSource);

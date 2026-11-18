@@ -71,7 +71,7 @@ public:
 
 private:
     enum class Screen { Home, Settings, Stream, StreamSettings };
-    enum class Tab { Display, Upscaling, Performance, Neural, Audio, Controller, Connection, Debug, About };
+    enum class Tab { Display, Upscaling, Color, Performance, Neural, Audio, Controller, Connection, Debug, About };
 
     enum class Hit {
         None,
@@ -159,6 +159,8 @@ private:
     void HandlePad();
     void ApplyDropdown(int id, int index);
     void ApplyRenderTarget();
+    void ApplyEnhance();
+    void TickEnhance();
     void OpenAudioDevice();
     void ApplyControllerOutput();
     void TriggerRumble();
@@ -349,6 +351,9 @@ private:
     int dlss_in_h_ = 0;
     std::wstring dlss_note_;
     media::NvDlssSr::Frame dlss_frame_;
+    EnhanceParams enh_applied_{};
+    bool enh_dirty_ = false;
+    double enh_dirty_at_ = 0.0;
 
 
     // neural rendering (DLSSNR through the NGX worker)

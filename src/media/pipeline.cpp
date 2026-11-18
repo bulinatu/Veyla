@@ -27,7 +27,11 @@ struct PsParams {
     float con1[4];
     float con2[4];
     float con3[4];
+    float color0[4];  // exposure, contrast, saturation, hue (radians)
+    float color1[4];  // highlights, shadows, vibrance, colour active
+    float color2[4];  // temperature, tint, gamma, reserved
 };
+static_assert(sizeof(PsParams) % 16 == 0, "constant buffer must stay 16-byte aligned");
 
 struct CsParams {
     float time;
@@ -535,82 +539,14 @@ void Presenter::Render(double time_seconds) {
         return;
     }
 
-    auto set_params = [&](int src_w, int src_h, int dst_w, int dst_h, int mode, float sharpen,
-                          float hdr) {
-        PsParams ps{};
-        ps.sharpen = sharpen;
-        ps.hdr = hdr;
-        ps.pad0 = cfg_.source_pq ? 1.0f : 0.0f;
-        ps.mode = static_cast<float>(mode);
-        ps.src_w = static_cast<float>(src_w);
-        ps.src_h = static_cast<float>(src_h);
-        ps.out_w = static_cast<float>(dst_w);
-        ps.out_h = static_cast<float>(dst_h);
-        const float in_w = ps.src_w;
-        const float in_h = ps.src_h;
-        const float out_w = ps.out_w;
-        const float out_h = ps.out_h;
-        ps.con0[0] = in_w / out_w;
-        ps.con0[1] = in_h / out_h;
-        ps.con0[2] = 0.5f * in_w / out_w - 0.5f;
-        ps.con0[3] = 0.5f * in_h / out_h - 0.5f;
-        ps.con1[0] = 1.0f / in_w;
-        ps.con1[1] = 1.0f / in_h;
-        ps.con1[2] = 1.0f / in_w;
-        ps.con1[3] = -1.0f / in_h;
-        ps.con2[0] = -1.0f / in_w;
-        ps.con2[1] = 2.0f / in_h;
-        ps.con2[2] = 1.0f / in_w;
-        ps.con2[3] = 2.0f / in_h;
-        ps.con3[0] = 0.0f;
-        ps.con3[1] = 4.0f / in_h;
-        ps.con3[2] = 0.0f;
-        ps.con3[3] = 0.0f;
-        if (SUCCEEDED(context_->Map(ps_cb_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-            std::memcpy(mapped.pData, &ps, sizeof(ps));
-            context_->Unmap(ps_cb_.Get(), 0);
-        }
-    };
-
-    auto set_viewport = [&](int x, int y, int w, int h) {
-        D3D11_VIEWPORT vp{};
-        vp.TopLeftX = static_cast<float>(x);
-        vp.TopLeftY = static_cast<float>(y);
-        vp.Width = static_cast<float>(w);
-        vp.Height = static_cast<float>(h);
-        vp.MaxDepth = 1.0f;
-        context_->RSSetViewports(1, &vp);
-    };
-
-    auto draw_fullscreen = [&](ID3D11ShaderResourceView* srv) {
-        ID3D11ShaderResourceView* views[] = {srv};
-        context_->PSSetShaderResources(0, 1, views);
-        ID3D11SamplerState* sampler = sampler_.Get();
-        context_->PSSetSamplers(0, 1, &sampler);
-        ID3D11Buffer* ps_buffers[] = {ps_cb_.Get()};
-        context_->PSSetConstantBuffers(0, 1, ps_buffers);
-        context_->VSSetShader(vs_.Get(), nullptr, 0);
-        context_->PSSetShader(ps_.Get(), nullptr, 0);
-        context_->IASetInputLayout(nullptr);
-        context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        context_->Draw(3, 0);
-    };
-
-    set_params(cfg_.source_width, cfg_.source_height, stage_w, stage_h,
-               cfg_.source_final ? 0 : cfg_.upscale_mode,
-               cfg_.source_final ? 0.0f
-                                 : ((cfg_.upscale_mode == 3) ? 0.45f : 0.35f),
-               cfg_.hdr ? 1.0f : 0.0f);
+    SetPsParams(cfg_.source_width, cfg_.source_height, stage_w, stage_h,
+                cfg_.source_final ? 0 : cfg_.upscale_mode, cfg_.hdr, cfg_.source_pq, true);
     ID3D11RenderTargetView* stage_rtv = use_target ? target_rtv_.Get() : rtv_.Get();
-    context_->OMSetRenderTargets(1, &stage_rtv, nullptr);
-    set_viewport(0, 0, stage_w, stage_h);
-    draw_fullscreen(source_view);
+    DrawFullscreen(source_view, stage_rtv, 0, 0, stage_w, stage_h);
 
     if (use_target) {
         const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
         context_->ClearRenderTargetView(rtv_.Get(), black);
-        ID3D11RenderTargetView* backbuffer_rtv = rtv_.Get();
-        context_->OMSetRenderTargets(1, &backbuffer_rtv, nullptr);
 
         // Preserve the stream's aspect ratio: black bars instead of stretching.
         const float scale = std::min(static_cast<float>(cfg_.output_width) / stage_w,
@@ -620,10 +556,9 @@ void Presenter::Render(double time_seconds) {
         const int fitted_x = (cfg_.output_width - fitted_w) / 2;
         const int fitted_y = (cfg_.output_height - fitted_h) / 2;
 
-        // Already upscaled: a second sharpen would amplify resampling artifacts.
-        set_params(stage_w, stage_h, fitted_w, fitted_h, 1, 0.0f, 0.0f);
-        set_viewport(fitted_x, fitted_y, fitted_w, fitted_h);
-        draw_fullscreen(target_srv_.Get());
+        // Already upscaled and graded: this pass only fits it to the window.
+        SetPsParams(stage_w, stage_h, fitted_w, fitted_h, 1, false, false, false);
+        DrawFullscreen(target_srv_.Get(), rtv_.Get(), fitted_x, fitted_y, fitted_w, fitted_h);
     }
 
     EndTiming();
@@ -634,6 +569,179 @@ void Presenter::Render(double time_seconds) {
     if (cpu_ms_.size() > 4000) {
         cpu_ms_.erase(cpu_ms_.begin(), cpu_ms_.begin() + 1000);
     }
+}
+
+void Presenter::SetPsParams(int src_w, int src_h, int dst_w, int dst_h, int mode, bool hdr_out,
+                            bool src_pq, bool enhance) {
+    PsParams ps{};
+    ps.sharpen = enhance ? enh_.sharpen : 0.0f;
+    ps.mode = static_cast<float>(mode);
+    ps.src_w = static_cast<float>(src_w);
+    ps.src_h = static_cast<float>(src_h);
+    ps.out_w = static_cast<float>(dst_w);
+    ps.out_h = static_cast<float>(dst_h);
+    ps.hdr = hdr_out ? 1.0f : 0.0f;
+    ps.pad0 = src_pq ? 1.0f : 0.0f;
+
+    const float in_w = ps.src_w;
+    const float in_h = ps.src_h;
+    const float out_w = ps.out_w;
+    const float out_h = ps.out_h;
+    ps.con0[0] = in_w / out_w;
+    ps.con0[1] = in_h / out_h;
+    ps.con0[2] = 0.5f * in_w / out_w - 0.5f;
+    ps.con0[3] = 0.5f * in_h / out_h - 0.5f;
+    ps.con1[0] = 1.0f / in_w;
+    ps.con1[1] = 1.0f / in_h;
+    ps.con1[2] = 1.0f / in_w;
+    ps.con1[3] = -1.0f / in_h;
+    ps.con2[0] = -1.0f / in_w;
+    ps.con2[1] = 2.0f / in_h;
+    ps.con2[2] = 1.0f / in_w;
+    ps.con2[3] = 2.0f / in_h;
+    ps.con3[0] = 0.0f;
+    ps.con3[1] = 4.0f / in_h;
+    ps.con3[2] = 0.0f;
+    ps.con3[3] = 0.0f;
+
+    if (enhance) {
+        ps.color0[0] = enh_.exposure;
+        ps.color0[1] = enh_.contrast;
+        ps.color0[2] = enh_.saturation;
+        ps.color0[3] = enh_.hue_deg * 3.14159265f / 180.0f;
+        ps.color1[0] = enh_.highlights;
+        ps.color1[1] = enh_.shadows;
+        ps.color1[2] = enh_.vibrance;
+        ps.color1[3] = enh_.color ? 1.0f : 0.0f;
+        ps.color2[0] = enh_.temperature;
+        ps.color2[1] = enh_.tint;
+        ps.color2[2] = enh_.gamma;
+        ps.color2[3] = 0.0f;
+    }
+
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (SUCCEEDED(context_->Map(ps_cb_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+        std::memcpy(mapped.pData, &ps, sizeof(ps));
+        context_->Unmap(ps_cb_.Get(), 0);
+    }
+}
+
+void Presenter::DrawFullscreen(ID3D11ShaderResourceView* srv, ID3D11RenderTargetView* rtv, int x,
+                               int y, int w, int h) {
+    if (!srv || !rtv || w <= 0 || h <= 0) {
+        return;
+    }
+    D3D11_VIEWPORT vp{};
+    vp.TopLeftX = static_cast<float>(x);
+    vp.TopLeftY = static_cast<float>(y);
+    vp.Width = static_cast<float>(w);
+    vp.Height = static_cast<float>(h);
+    vp.MaxDepth = 1.0f;
+    context_->RSSetViewports(1, &vp);
+    context_->OMSetRenderTargets(1, &rtv, nullptr);
+
+    ID3D11ShaderResourceView* views[] = {srv};
+    context_->PSSetShaderResources(0, 1, views);
+    ID3D11SamplerState* sampler = sampler_.Get();
+    context_->PSSetSamplers(0, 1, &sampler);
+    ID3D11Buffer* ps_buffers[] = {ps_cb_.Get()};
+    context_->PSSetConstantBuffers(0, 1, ps_buffers);
+    context_->VSSetShader(vs_.Get(), nullptr, 0);
+    context_->PSSetShader(ps_.Get(), nullptr, 0);
+    context_->IASetInputLayout(nullptr);
+    context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context_->Draw(3, 0);
+}
+
+bool Presenter::EnsureGradeTargets(int w, int h) {
+    if (w <= 0 || h <= 0) {
+        return false;
+    }
+    if (grade_tex_ && grade_rtv_ && grade_staging_ && grade_w_ == w && grade_h_ == h) {
+        return true;
+    }
+    ID3D11RenderTargetView* no_rtv = nullptr;
+    context_->OMSetRenderTargets(1, &no_rtv, nullptr);
+    ID3D11ShaderResourceView* no_srv = nullptr;
+    context_->PSSetShaderResources(0, 1, &no_srv);
+    grade_rtv_.Reset();
+    grade_tex_.Reset();
+    grade_staging_.Reset();
+    grade_w_ = 0;
+    grade_h_ = 0;
+
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = static_cast<UINT>(w);
+    td.Height = static_cast<UINT>(h);
+    td.MipLevels = 1;
+    td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    if (FAILED(device_->CreateTexture2D(&td, nullptr, &grade_tex_))) {
+        return false;
+    }
+    if (FAILED(device_->CreateRenderTargetView(grade_tex_.Get(), nullptr, &grade_rtv_))) {
+        return false;
+    }
+    D3D11_TEXTURE2D_DESC sd = td;
+    sd.Usage = D3D11_USAGE_STAGING;
+    sd.BindFlags = 0;
+    sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    if (FAILED(device_->CreateTexture2D(&sd, nullptr, &grade_staging_))) {
+        return false;
+    }
+    grade_w_ = w;
+    grade_h_ = h;
+    return true;
+}
+
+bool Presenter::EnhanceViewReadback(ID3D11ShaderResourceView* view, int w, int h, bool src_pq,
+                                    std::vector<uint8_t>& out, double* ms) {
+    if (!view || !EnsureGradeTargets(w, h)) {
+        return false;
+    }
+    const auto started = std::chrono::steady_clock::now();
+
+    // Always SDR out: this is the CPU RGBA contract of the FG worker.
+    SetPsParams(w, h, w, h, 0, false, src_pq, true);
+    DrawFullscreen(view, grade_rtv_.Get(), 0, 0, w, h);
+
+    // Unbind before the copy; the debug layer flags a still-bound resource.
+    ID3D11RenderTargetView* no_rtv = nullptr;
+    context_->OMSetRenderTargets(1, &no_rtv, nullptr);
+    ID3D11ShaderResourceView* no_srv = nullptr;
+    context_->PSSetShaderResources(0, 1, &no_srv);
+
+    context_->CopyResource(grade_staging_.Get(), grade_tex_.Get());
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(context_->Map(grade_staging_.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+        return false;
+    }
+    const size_t row = static_cast<size_t>(w) * 4;
+    out.resize(row * static_cast<size_t>(h));
+    const auto* src = static_cast<const uint8_t*>(mapped.pData);
+    for (int y = 0; y < h; ++y) {
+        std::memcpy(out.data() + row * static_cast<size_t>(y),
+                    src + static_cast<size_t>(mapped.RowPitch) * static_cast<size_t>(y), row);
+    }
+    context_->Unmap(grade_staging_.Get(), 0);
+
+    enh_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started)
+                  .count();
+    if (ms) {
+        *ms = enh_ms_;
+    }
+    return true;
+}
+
+bool Presenter::EnhanceFrameReadback(const uint8_t* rgba, int w, int h, bool src_pq,
+                                     std::vector<uint8_t>& out, double* ms) {
+    if (!rgba || !SetSourceFrame(rgba, w, h, src_pq)) {
+        return false;
+    }
+    return EnhanceViewReadback(source_srv_.Get(), w, h, src_pq, out, ms);
 }
 
 void Presenter::Clear(const float rgba[4]) {
