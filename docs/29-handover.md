@@ -24,11 +24,14 @@ Current build: `0.3`, standalone ZIP at `dist\BetterRemotePlay-0.3-standalone.zi
 
 1. **FG 120 on 240 Hz is not vblank-phase locked.** Some frames hold 1 or 3
    refreshes instead of 2, which is felt as a slight speed wobble while panning.
-   Workaround: run the desktop at 120 Hz or enable G-SYNC (both measured to
-   remove the ambiguity). Fixing it inside the closed worker is not possible.
+   The worker presents on its own clock and is closed, so the app cannot align
+   it. Possible workaround: enable G-SYNC. Changing the monitor to 120 Hz was
+   rejected by the user and is not offered.
 2. **Plain 60 fps path also shows rare cadence slips**: 3v/5v holds (~3 %) and a
-   few late 240 Hz ticks per 2 s, with every neural stage off. It is parent
-   pacing/DWM, not decode. Not fixed.
+   few late 240 Hz ticks per 2 s, with every neural stage off. Not decode.
+   Tested and rejected: registering the main thread with MMCSS "Games". A/B over
+   24 windows of 480 frames at Home (late ticks per window): baseline median 9,
+   MMCSS median 16, so it was reverted. The cause is not main-thread scheduling.
 3. **FG without SR is not offered.** A worker restarted at 1080p without SR came
    up in overlay mode and never presented. Safe fallbacks are SR only or raw.
 4. **Presets apply at the next session only.** Changing DLSS/FG while streaming
@@ -80,7 +83,7 @@ then copy `build-perf\Release\brp.exe` to `build\Release`.
 
 ## Next, in priority order
 
-1. Investigate 120-on-240 presentation (display-mode matching or worker pacing).
+1. Evaluate G-SYNC for FG 2x on 240 Hz (no display mode change). Worker-side pacing stays out of scope.
 2. Finish router + PS5 settings and the bitrate/reconnect matrix (docs/26).
 3. Decide whether the legacy VFG and Reflex paths stay (maintenance vs features).
 4. Split `app.cpp` and share the Settings/overlay panels.
