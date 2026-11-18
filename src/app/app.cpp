@@ -5051,7 +5051,9 @@ void App::RenderSettings(double t) {
                          {L"Bilinear (fast)", L"Bicubic", L"Lanczos (sharpest)"},
                          std::clamp(profile_.chroma, 0, 2), y, W_Chroma);
             y += kRowH;
-            ui_.Text(L"Upscaling and neural settings are in their own tabs; frame pacing and generation are under Performance.",
+            DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
+            y += kRowH;
+            ui_.Text(L"DLSS, frame generation and neural rendering have their own tabs; frame buffer and Reflex are under Performance.",
                      {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f, th::Rgba(th::kMuted));
             break;
         }
@@ -5118,28 +5120,6 @@ void App::RenderSettings(double t) {
         }
 
         case Tab::Performance: {
-            DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
-            y += kRowH;
-            {
-                const bool available = FrameGenAvailable();
-                std::vector<std::wstring> options;
-                if (available) {
-                    options = {L"Off", L"NVIDIA VFG 2x (120 fps)"};
-                } else {
-                    options = {L"Off  -  NVIDIA VFX runtime missing"};
-                }
-                int selected = 0;
-                if (frame_gen_ == 2) {
-                    selected = 1;
-                }
-                DrawDropdown(L"Frame generation", options, selected, y, W_FrameGen, available);
-            }
-            y += kRowH;
-            DrawDropdown(L"DLSS Frame Generation",
-                         {L"Off", L"2x", L"3x", L"4x", L"5x", L"6x"},
-                         profile_.dlss_fg >= 2 ? std::clamp(profile_.dlss_fg - 1, 1, 5) : 0, y,
-                         W_DlssFg);
-            y += kRowH;
             DrawDropdown(L"Frame buffer",
                          {L"0 (fixed, lowest)", L"1 (adaptive)", L"2 (adaptive)",
                           L"3 (adaptive max)"},
@@ -5148,63 +5128,19 @@ void App::RenderSettings(double t) {
             DrawDropdown(L"NVIDIA Reflex", {L"Off", L"On", L"On + Boost"}, profile_.reflex, y,
                          W_Reflex);
             y += kRowH;
-
-            if (frame_gen_ >= 2 && fg_ready_) {
-                wchar_t text[192];
-                swprintf_s(text, L"NVIDIA VFG active  -  60 -> %d fps  -  last %.1f ms",
-                           60 * frame_gen_, nv_vfx_.last_generate_ms());
-                ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
-                         th::Rgba(th::kMuted));
-            } else if (profile_.dlss_fg >= 2) {
-                const double target =
-                    std::min<double>(present_hz(), 60.0 * profile_.dlss_fg);
-                wchar_t text[256];
-                if (!stream_active_) {
-                    swprintf_s(text, L"DLSS FG %dx selected  -  starts with the next session",
-                               profile_.dlss_fg);
-                } else if (fg_worker_fps_ > 0.0) {
-                    swprintf_s(text, L"DLSS FG worker: %.0f fps displayed  -  requested %dx "
-                                     L"(%.0f fps)",
-                               fg_worker_fps_, profile_.dlss_fg, target);
-                } else {
-                    swprintf_s(text, L"DLSS FG %dx requested  -  waiting for the first "
-                                     L"generated frames",
-                               profile_.dlss_fg);
-                }
-                const bool limited =
-                    fg_worker_fps_ > 0.0 && fg_worker_fps_ < target * 0.95;
-                ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
-                         th::Rgba(limited ? 0xFFC145 : th::kMuted, 0.95f));
-                if (profile_.dlss_fg > 2) {
-                    ui_.Text(L"This GPU sustains about 120 fps of output: 2x is the clean "
-                             L"240 Hz setting, 3x-6x land between refreshes.",
-                             {kContentX, y + 28.0f, w - 64.0f, y + 54.0f}, 11.5f,
-                             th::Rgba(th::kMuted));
-                }
-            } else if (!FrameGenAvailable()) {
-                ui_.Text(L"NVIDIA VFX runtime not found: third_party\\nvidia-vfx\\runtime",
-                         {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
-                         th::Rgba(th::kMuted));
-            } else if (!fg_note_.empty()) {
-                ui_.Text(fg_note_.c_str(), {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
-                         th::Rgba(th::kMuted));
-            } else {
-                ui_.Text(L"NVIDIA VFG ready - select a multiplier to enable",
-                         {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
-                         th::Rgba(th::kMuted));
-            }
             if (profile_.reflex > 0) {
                 ui_.Text(L"Reflex markers are active. Its sleep stage is not used: it "
                          L"targets a game-style simulation window and fights vblank pacing.",
-                         {kContentX, y + 58.0f, w - 64.0f, y + 84.0f}, 11.5f,
+                         {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 11.5f,
                          th::Rgba(th::kMuted));
+                y += 30.0f;
             }
 
             // One-click fallbacks for launch night. "FG without SR" is not
             // offered: a worker restarted at 1080p without SR was measured to
             // come up without presenting, so the ladder uses only verified
             // paths.
-            y = 590.0f;
+            y += 24.0f;
             ui_.Text(L"Launch presets", {kContentX, y, w - 64.0f, y + 30.0f}, 16.0f,
                      th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 38.0f;
@@ -5272,6 +5208,76 @@ void App::RenderSettings(double t) {
                 ui_.Text(dlss_note_.c_str(), {kContentX, y + 2.0f, w - 64.0f, y + 26.0f},
                          12.0f, th::Rgba(th::kMuted));
                 y += 24.0f;
+            }
+
+            y += 18.0f;
+            ui_.Text(L"Frame generation", {kContentX, y, w - 64.0f, y + 30.0f}, 16.0f,
+                     th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+            y += 36.0f;
+            {
+                const bool available = FrameGenAvailable();
+                std::vector<std::wstring> options;
+                if (available) {
+                    options = {L"Off", L"NVIDIA VFG 2x (120 fps)"};
+                } else {
+                    options = {L"Off  -  NVIDIA VFX runtime missing"};
+                }
+                int selected = 0;
+                if (frame_gen_ == 2) {
+                    selected = 1;
+                }
+                DrawDropdown(L"NVIDIA VFG (legacy)", options, selected, y, W_FrameGen, available);
+            }
+            y += kRowH;
+            DrawDropdown(L"DLSS Frame Generation",
+                         {L"Off", L"2x", L"3x", L"4x", L"5x", L"6x"},
+                         profile_.dlss_fg >= 2 ? std::clamp(profile_.dlss_fg - 1, 1, 5) : 0, y,
+                         W_DlssFg);
+            y += kRowH;
+
+            if (frame_gen_ >= 2 && fg_ready_) {
+                wchar_t text[192];
+                swprintf_s(text, L"NVIDIA VFG active  -  60 -> %d fps  -  last %.1f ms",
+                           60 * frame_gen_, nv_vfx_.last_generate_ms());
+                ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
+            } else if (profile_.dlss_fg >= 2) {
+                const double target =
+                    std::min<double>(present_hz(), 60.0 * profile_.dlss_fg);
+                wchar_t text[256];
+                if (!stream_active_) {
+                    swprintf_s(text, L"DLSS FG %dx selected  -  starts with the next session",
+                               profile_.dlss_fg);
+                } else if (fg_worker_fps_ > 0.0) {
+                    swprintf_s(text, L"DLSS FG worker: %.0f fps displayed  -  requested %dx "
+                                     L"(%.0f fps)",
+                               fg_worker_fps_, profile_.dlss_fg, target);
+                } else {
+                    swprintf_s(text, L"DLSS FG %dx requested  -  waiting for the first "
+                                     L"generated frames",
+                               profile_.dlss_fg);
+                }
+                const bool limited =
+                    fg_worker_fps_ > 0.0 && fg_worker_fps_ < target * 0.95;
+                ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
+                         th::Rgba(limited ? 0xFFC145 : th::kMuted, 0.95f));
+                if (profile_.dlss_fg > 2) {
+                    ui_.Text(L"This GPU sustains about 120 fps of output: 2x is the clean "
+                             L"240 Hz setting, 3x-6x land between refreshes.",
+                             {kContentX, y + 28.0f, w - 64.0f, y + 54.0f}, 11.5f,
+                             th::Rgba(th::kMuted));
+                }
+            } else if (!FrameGenAvailable()) {
+                ui_.Text(L"NVIDIA VFX runtime not found: third_party\\nvidia-vfx\\runtime",
+                         {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
+            } else if (!fg_note_.empty()) {
+                ui_.Text(fg_note_.c_str(), {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
+            } else {
+                ui_.Text(L"NVIDIA VFG ready - select a multiplier to enable",
+                         {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
+                         th::Rgba(th::kMuted));
             }
             break;
         }
@@ -5562,12 +5568,10 @@ void App::RenderSettings(double t) {
                      {kContentX, y, w - 64.0f, y + 30.0f}, 16.0f, th::Rgba(th::kInk),
                      DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 36.0f;
-            ui_.Text(L"These are the in-game HUD sections. They apply live and are saved.",
+            ui_.Text(L"Sections of the latency HUD. Turn the HUD on under Display; these apply live and are saved.",
                      {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 11.5f, th::Rgba(th::kMuted));
             y += 30.0f;
 
-            DrawDropdown(L"Latency HUD (master)", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
-            y += row;
             DrawDropdown(L"Frame times + stutters", {L"Off", L"On"},
                          (profile_.hud_mask & 0x1) ? 1 : 0, y, W_HudFrames);
             y += row;

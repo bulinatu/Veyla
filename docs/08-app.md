@@ -194,3 +194,20 @@ src/platform/win32_window.*   window, mouse/keyboard, per-monitor DPI
   the full Settings page keeps the old margins.
 - **Disconnect** sends an idle pad state and an RST (see
   `docs/09-session.md`), so the console frees the pairing immediately.
+
+---
+
+## Settings tab map (18 Nov 2026)
+
+| Tab | What lives here |
+| --- | --- |
+| Display | HDR output, video decoder, chroma upsampling, Latency HUD |
+| Upscaling | Upscaler, DLSS model, DLSS mode, upscale target, DLSS Frame Generation, NVIDIA VFG (legacy) |
+| Color | Colour controls, sharpening, presets, status line |
+| Performance | Frame buffer, NVIDIA Reflex, launch presets |
+| Neural | DLSS Neural Rendering (NR): pipeline, scale, passes, style, strength, character |
+| Audio | Output device, buffer, test tone |
+| Controller | Input source, report rate, rumble, triggers, motion, lightbar, LEDs |
+| Connection | Bitrate, stream resolution, stream FPS, reachability test |
+| Debug | Sections of the latency HUD (the master switch is under Display) |
+| About | Version and notes |
