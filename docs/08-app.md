@@ -222,3 +222,9 @@ src/platform/win32_window.*   window, mouse/keyboard, per-monitor DPI
   track and a halo on the knob; primary buttons are brighter with a warm edge.
 - **Not done**: a game rail with cover art. The library list is still demo data
   (invented titles), so it stays out until the PSN library is wired.
+
+- **In-stream sheet** uses the same tab names and grouping as Settings: Display
+  (decoder, chroma, Latency HUD), Upscaling (upscaler, target, DLSS, DLSS and
+  VFG frame generation), Colour, Neural, Audio, Controller and Performance
+  (frame buffer, Reflex). The sheet panel uses the same glass fill and accent
+  edge as the Settings card. Tab width is 124 px so "Performance" fits.

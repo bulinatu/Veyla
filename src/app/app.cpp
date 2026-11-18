@@ -5921,19 +5921,21 @@ void App::RenderStreamSettings(double t) {
     const D2D1_RECT_F panel{sheet_l, 70.0f, sheet_r, h - 70.0f};
     panel_x_ = sheet_l + 32.0f;
     panel_right_ = sheet_r - 32.0f;
-    ui_.FillRounded(panel, 18.0f, th::Rgba(0x120A20, 0.96f));
-    ui_.StrokeRounded(panel, 18.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
+    ui_.FillRounded(panel, 18.0f, th::Rgba(th::kPanel, 0.94f));
+    ui_.StrokeRounded(panel, 18.0f, th::Rgba(th::kAccent, 0.18f), 1.0f);
+    ui_.FillRounded({panel.left + 32.0f, panel.top, panel.right - 32.0f, panel.top + 2.0f}, 1.0f,
+                    th::Rgba(th::kAccent, 0.75f));
     ui_.Text(L"Stream settings", {panel_x_, 84.0f, panel_right_, 120.0f}, 22.0f,
              th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
 
     // The same categories as Settings; every control applies live.
-    const wchar_t* tabs[] = {L"Stream", L"DLSS", L"Colour", L"Neural",
-                             L"Audio",  L"Controller"};
+    const wchar_t* tabs[] = {L"Display", L"Upscaling", L"Colour", L"Neural",
+                             L"Audio",  L"Controller", L"Performance"};
     const Icon tab_icons[] = {Icon::Display, Icon::Upscaling, Icon::Color, Icon::Neural,
-                              Icon::Audio,   Icon::Controller};
+                              Icon::Audio,   Icon::Controller, Icon::Performance};
     float tx = panel_x_;
-    for (int i = 0; i < 6; ++i) {
-        const D2D1_RECT_F r{tx, 132.0f, tx + 104.0f, 166.0f};
+    for (int i = 0; i < 7; ++i) {
+        const D2D1_RECT_F r{tx, 132.0f, tx + 124.0f, 166.0f};
         const bool selected = overlay_tab_ == i;
         if (selected) {
             ui_.FillRounded(r, 10.0f, th::Rgba(th::kAccent, 0.22f));
@@ -5943,14 +5945,21 @@ void App::RenderStreamSettings(double t) {
         ui_.Text(tabs[i], {r.left + 29.0f, r.top, r.right - 6.0f, r.bottom}, 11.5f,
                  th::Rgba(selected ? th::kInk : th::kInkDim), DWRITE_FONT_WEIGHT_SEMI_BOLD);
         AddHit(Hit::OverlayTab, i, r);
-        tx += 112.0f;
+        tx += 128.0f;
     }
 
     const float row = 46.0f;
     float y = 184.0f;
 
     switch (overlay_tab_) {
-        case 1: {  // DLSS
+        case 1: {  // Upscaling
+            DrawDropdown(L"Upscaler", UpscalerLabels(),
+                         profile_.neural_sr > 0 ? 5 : upscale_, y, W_Upscaler);
+            y += row;
+            DrawDropdown(L"Upscale target",
+                         {L"Window / display", L"1080p", L"1440p", L"2160p"}, render_target_,
+                         y, W_RenderTarget);
+            y += row;
             DrawDropdown(L"DLSS model preset",
                          {L"K (Transformer 1, stable)", L"L (Transformer 2, best)",
                           L"M (Transformer 2, sharp)"},
@@ -5964,10 +5973,6 @@ void App::RenderStreamSettings(double t) {
                          std::clamp(profile_.dlss_mode, 0, 5), y, W_DlssMode,
                          DlssAvailable());
             y += row;
-            ui_.Text(L"Percentage of the output resolution fed to DLSS; DLAA runs at the frame "
-                     L"size with AI AA.",
-                     {panel_x_, y + 2.0f, panel_right_, y + 26.0f}, 11.5f, th::Rgba(th::kMuted));
-            y += 30.0f;
             if (profile_.neural_sr > 0 && dlss_ready_) {
                 wchar_t text[224];
                 swprintf_s(text, L"DLSS %s active  -  %dx%d -> %dx%d  -  %.1f ms",
@@ -5978,8 +5983,28 @@ void App::RenderStreamSettings(double t) {
                          th::Rgba(th::kMuted));
                 y += 26.0f;
             }
+            y += 14.0f;
+            {
+                const bool available = FrameGenAvailable();
+                std::vector<std::wstring> options;
+                if (available) {
+                    options = {L"Off", L"NVIDIA VFG 2x (120 fps)"};
+                } else {
+                    options = {L"Off  -  NVIDIA VFX runtime missing"};
+                }
+                DrawDropdown(L"NVIDIA VFG (legacy)", options, frame_gen_ == 2 ? 1 : 0, y,
+                             W_FrameGen, available);
+            }
+            y += row;
+            DrawDropdown(L"DLSS Frame Generation", {L"Off", L"2x", L"3x", L"4x", L"5x", L"6x"},
+                         profile_.dlss_fg >= 2
+                             ? std::clamp(profile_.dlss_fg - 1, 1, 5)
+                             : 0,
+                         y, W_DlssFg);
+            y += row;
             break;
         }
+
         case 2: {  // Colour
             DrawDropdown(L"Colour controls", {L"Off (sharpening only)", L"On"},
                          profile_.color_on > 0 ? 1 : 0, y, W_ColorOn);
@@ -6145,51 +6170,36 @@ void App::RenderStreamSettings(double t) {
             y += 24.0f;
             break;
         }
-        default: {  // Stream
-            DrawDropdown(L"Upscaler", UpscalerLabels(),
-                         profile_.neural_sr > 0 ? 5 : upscale_, y, W_Upscaler);
-            y += row;
-            DrawDropdown(L"Upscale target",
-                         {L"Window / display", L"1080p", L"1440p", L"2160p"}, render_target_,
-                         y, W_RenderTarget);
-            y += row;
-            {
-                const bool available = FrameGenAvailable();
-                std::vector<std::wstring> options;
-                if (available) {
-                    options = {L"Off", L"NVIDIA VFG 2x (120 fps)"};
-                } else {
-                    options = {L"Off  -  NVIDIA VFX runtime missing"};
-                }
-                DrawDropdown(L"Frame generation", options, frame_gen_ == 2 ? 1 : 0, y,
-                             W_FrameGen, available);
-            }
-            y += row;
-            DrawDropdown(L"DLSS Frame Generation", {L"Off", L"2x", L"3x", L"4x", L"5x", L"6x"},
-                         profile_.dlss_fg >= 2
-                             ? std::clamp(profile_.dlss_fg - 1, 1, 5)
-                             : 0,
-                         y, W_DlssFg);
-            y += row;
-            DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
-            y += row;
-            DrawDropdown(L"NVIDIA Reflex", {L"Off", L"On", L"On + Boost"}, profile_.reflex, y,
-                         W_Reflex);
-            y += row;
-            DrawDropdown(L"Frame buffer",
-                         {L"0 (fixed, lowest)", L"1 (adaptive)", L"2 (adaptive)",
-                          L"3 (adaptive max)"},
-                         stream_buffer_, y, W_FrameBuffer);
-            y += row;
+        case 0:
+        default: {  // Display
             DrawDropdown(L"Video decoder (next session)",
                          {L"Auto", L"D3D11VA", L"D3D12VA", L"Vulkan", L"DXVA2",
                           L"CUDA (NVDEC)", L"Software"},
                          std::clamp(profile_.decoder, 0, 6), y, W_Decoder);
             y += row;
+            DrawDropdown(L"Chroma upsampling (next session)",
+                         {L"Bilinear (fast)", L"Bicubic", L"Lanczos (sharpest)"},
+                         std::clamp(profile_.chroma, 0, 2), y, W_Chroma);
+            y += row;
+            DrawDropdown(L"Latency HUD", {L"Off", L"On"}, hud_ ? 1 : 0, y, W_Hud);
+            y += row;
+            break;
+        }
+
+        case 6: {  // Performance
+            DrawDropdown(L"Frame buffer",
+                         {L"0 (fixed, lowest)", L"1 (adaptive)", L"2 (adaptive)",
+                          L"3 (adaptive max)"},
+                         stream_buffer_, y, W_FrameBuffer);
+            y += row;
+            DrawDropdown(L"NVIDIA Reflex", {L"Off", L"On", L"On + Boost"}, profile_.reflex, y,
+                         W_Reflex);
+            y += row;
             break;
         }
     }
 
+    y += 20.0f;
     DrawButton(L"Resume", {panel_x_, y + 6.0f, panel_x_ + 200.0f, y + 50.0f},
                W_ResumeOverlay, true);
     DrawButton(L"Disconnect", {panel_x_ + 220.0f, y + 6.0f, panel_x_ + 420.0f, y + 50.0f},
