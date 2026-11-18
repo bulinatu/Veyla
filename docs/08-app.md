@@ -175,3 +175,22 @@ src/platform/win32_window.*   window, mouse/keyboard, per-monitor DPI
 1. Wire the chiaki-ng core into `brp-session` and turn `Connect` into a real pairing flow.
 2. Feed decoded Opus into the audio engine and decoded video into the presenter.
 3. Replace the rail's demo library with the user's PSN library.
+
+---
+
+## In-stream UI behaviour (18 Nov 2026)
+
+- **Esc needs a second press.** On Home the first Esc shows "Press Esc again to
+  quit." and the second quits. In the stream the first Esc shows a centred
+  "Press Esc again to disconnect" pill and only the second one disconnects. The
+  two-second window resets after any action.
+- **Connecting screen** uses the same visual language as the boot animation
+  (gradient, orbiting spinner, status line, breathing bar). It is opaque and
+  also covers the gap until the first decoded frame, so the presenter's
+  synthetic test pattern is never visible.
+- **The in-stream settings sheet is 1020 logical px wide and centred** (was
+  window-wide). The shared widgets read a content frame (`panel_x_`,
+  `panel_right_`) so labels, controls and hit boxes stay aligned inside it;
+  the full Settings page keeps the old margins.
+- **Disconnect** sends an idle pad state and an RST (see
+  `docs/09-session.md`), so the console frees the pairing immediately.
