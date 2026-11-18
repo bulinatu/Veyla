@@ -934,7 +934,10 @@ Shipped, verified on the reference machine:
 - **Presets**: saved only; applied at the start of the next session. Live
   reconfiguration of DLSS/FG mid-stream broke the D3D12VA decoder once
   ("Failed to map D3D12 Buffer resource"), so the app refuses to do it and
-  says "Disconnect and reconnect to apply it".
+  says "Disconnect and reconnect to apply it". Only verified ladders ship:
+  Launch (SR + FG), SR only, Low latency. FG without SR is not offered
+  because a worker restarted at 1080p without SR came up in overlay mode and
+  never presented a frame.
 - **Network**: PC NIC changes applied and verified (Green Ethernet, Gigabit
   Lite, Power Saving Mode, LSO v2, RSC disabled); 100-ping 0% loss, 0 ms;
   zero NIC errors/discards (`docs/26`). Router and PS5 items need the admin
