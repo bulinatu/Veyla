@@ -109,6 +109,8 @@ private:
     void RenderStreamSettings(double t);
     void RenderIntro(double t);
     void RenderBoot(double t);
+    void DrawBrandMark(float cx, float cy, float reveal, float t, float alpha);
+    void DrawBootLogo(float cx, float cy, float reveal, float t, float alpha);
     void DrawLoaderMark(float cx, float cy, float reveal, float t, float alpha);
     void DrawLoaderSteps(const std::vector<std::pair<std::wstring, int>>& steps, float x, float y, float w, float t, float alpha);
 

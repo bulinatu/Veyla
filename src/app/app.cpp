@@ -799,6 +799,76 @@ void App::DrawLoaderSteps(const std::vector<std::pair<std::wstring, int>>& steps
     }
 }
 
+void App::DrawBrandMark(float cx, float cy, float reveal, float t, float alpha) {
+    const float r = std::clamp(reveal, 0.0f, 1.0f);
+    const float ease = 1.0f - (1.0f - r) * (1.0f - r) * (1.0f - r);
+    const float k = alpha * ease;
+
+    // Halo that swells as the mark arrives.
+    ui_.FillRadial(cx, cy, 250.0f * ease, th::Rgba(0x7B3CFF, 0.34f * k),
+                   th::Rgba(0x7B3CFF, 0.0f));
+
+    // Three orbit rings turning at different speeds, with a rotating tick ring.
+    const float spin = t * 0.9f;
+    ui_.StrokeCircle(cx, cy, 104.0f, th::Rgba(0xFFFFFF, 0.05f * k), 1.0f);
+    ui_.StrokeArc(cx, cy, 104.0f, spin, 1.10f * 2.0f * ease * 1.4f,
+                  th::Rgba(th::kAccent, 0.95f * k), 2.6f);
+    ui_.StrokeArc(cx, cy, 120.0f, -spin * 0.6f + 0.8f, 0.7f * 2.0f * ease * 1.4f,
+                  th::Rgba(th::kAccentWarm, 0.75f * k), 1.6f);
+    ui_.StrokeArc(cx, cy, 138.0f, spin * 0.3f, 2.2f * ease, th::Rgba(th::kInk, 0.16f * k), 1.0f);
+    for (int i = 0; i < 12; ++i) {
+        const float a = spin * 0.5f + static_cast<float>(i) * 0.5235988f;
+        ui_.StrokeArc(cx, cy, 104.0f, a, 0.07f * ease, th::Rgba(th::kInk, 0.55f * k), 2.0f);
+    }
+
+    // Emblem: a rounded tile with a play mark that scales in.
+    const float tile = 44.0f * ease + 2.0f;
+    const D2D1_RECT_F tile_rect{cx - tile, cy - tile, cx + tile, cy + tile};
+    ui_.FillRounded(tile_rect, 22.0f * ease + 2.0f, th::Rgba(th::kAccent, 0.24f * k));
+    ui_.StrokeRounded(tile_rect, 22.0f * ease + 2.0f, th::Rgba(th::kAccentWarm, 0.65f * k), 1.2f);
+    ui_.FillCircle(cx, cy, 30.0f * ease, th::Rgba(th::kAccent, 0.18f * k));
+    const float s = 26.0f * ease;
+    ui_.FillTriangle({cx - s * 0.45f, cy - s * 0.62f}, {cx + s * 0.62f, cy},
+                     {cx - s * 0.45f, cy + s * 0.62f}, th::Rgba(th::kInk, 0.96f * k));
+
+    // Sparks drifting on an orbit around the mark.
+    for (int i = 0; i < 18; ++i) {
+        const float fi = static_cast<float>(i);
+        const float a = fi * 0.349f + t * (0.12f + 0.03f * static_cast<float>(i % 3));
+        const float rad = 168.0f + 10.0f * std::sin(t * 1.3f + fi);
+        const float pulse = 0.5f + 0.5f * std::sin(t * 2.0f + fi * 1.7f);
+        ui_.FillCircle(cx + std::cos(a) * rad, cy + std::sin(a) * rad, 1.4f + pulse * 0.8f,
+                       th::Rgba(i % 2 == 0 ? th::kAccent : th::kAccentWarm, (0.25f + 0.45f * pulse) * k));
+    }
+
+}
+
+void App::DrawBootLogo(float cx, float cy, float reveal, float t, float alpha) {
+    const float r = std::clamp(reveal, 0.0f, 1.0f);
+    const float ease = 1.0f - (1.0f - r) * (1.0f - r) * (1.0f - r);
+    const float k = alpha * ease;
+    DrawBrandMark(cx, cy, reveal, t, alpha);
+
+    // Wordmark, with a light glint that crosses it once the mark has settled.
+    const float word_y = cy + 116.0f;
+    ui_.Text(L"BetterRemotePlay", {cx - 320.0f, word_y, cx + 320.0f, word_y + 40.0f}, 30.0f,
+             th::Rgba(th::kInk, 0.98f * k), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+             DWRITE_TEXT_ALIGNMENT_CENTER);
+    if (r >= 0.95f) {
+        const float phase = std::fmod(t * 0.38f, 1.9f);
+        const float gx = cx - 330.0f + phase * 360.0f;
+        ui_.FillRadial(gx, word_y + 20.0f, 90.0f, th::Rgba(0xFFFFFF, 0.20f * alpha),
+                       th::Rgba(0xFFFFFF, 0.0f));
+    }
+
+    const float line_w = 260.0f * ease;
+    ui_.FillRounded({cx - line_w * 0.5f, word_y + 52.0f, cx + line_w * 0.5f, word_y + 54.0f},
+                    1.0f, th::Rgba(th::kAccent, 0.85f * k));
+    ui_.Text(L"REMOTE PLAY, BETTER", {cx - 300.0f, word_y + 62.0f, cx + 300.0f, word_y + 82.0f},
+             10.5f, th::Rgba(th::kMuted, 0.85f * k), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+             DWRITE_TEXT_ALIGNMENT_CENTER);
+}
+
 void App::RenderBoot(double t) {
     const float w = ui_w_;
     const float h = ui_h_;
@@ -821,15 +891,7 @@ void App::RenderBoot(double t) {
 
     const float cx = w * 0.5f;
     const float cy = h * 0.34f;
-    DrawLoaderMark(cx, cy, ease, static_cast<float>(t), alpha);
-
-    const float title_y = cy + 104.0f + (1.0f - ease) * 10.0f;
-    ui_.Text(L"BETTERREMOTEPLAY", {cx - 300.0f, title_y, cx + 300.0f, title_y + 28.0f}, 17.0f,
-             th::Rgba(th::kInk, 0.96f * alpha * ease), DWRITE_FONT_WEIGHT_SEMI_BOLD,
-             DWRITE_TEXT_ALIGNMENT_CENTER);
-    ui_.Text(L"REMOTE PLAY, BETTER", {cx - 300.0f, title_y + 30.0f, cx + 300.0f, title_y + 50.0f},
-             10.5f, th::Rgba(th::kMuted, 0.85f * alpha * ease), DWRITE_FONT_WEIGHT_SEMI_BOLD,
-             DWRITE_TEXT_ALIGNMENT_CENTER);
+    DrawBootLogo(cx, cy, reveal, static_cast<float>(t), alpha);
 
     // Step card: the real start-up tasks, in order. Step 0 is console discovery.
     std::vector<std::pair<std::wstring, int>> steps;
@@ -844,7 +906,7 @@ void App::RenderBoot(double t) {
 
     const float card_w = 520.0f;
     const float card_h = 74.0f + 32.0f * static_cast<float>(steps.size());
-    const float card_t = cy + 172.0f;
+    const float card_t = cy + 204.0f;
     const D2D1_RECT_F card{cx - card_w * 0.5f, card_t, cx + card_w * 0.5f, card_t + card_h};
     ui_.FillRounded(card, 18.0f, th::Rgba(th::kPanel, 0.72f * alpha * ease));
     ui_.StrokeRounded(card, 18.0f, th::Rgba(th::kAccent, 0.20f * alpha), 1.0f);
@@ -4792,8 +4854,11 @@ void App::RenderIntro(double t) {
     ui_.BeginFrame();
 
     ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(th::kBgTop), th::Rgba(th::kBgBottom));
-    ui_.FillRadial(w * 0.5f, h * 0.5f, w * 0.44f, th::Rgba(th::kAccent, 0.10f),
-                   th::Rgba(th::kAccent, 0.0f));
+    // Two aurora glows that drift slowly, so the background is never still.
+    ui_.FillRadial(w * 0.5f + std::sin(static_cast<float>(t) * 0.4f) * w * 0.12f, h * 0.36f,
+                   w * 0.46f, th::Rgba(th::kAccent, 0.14f), th::Rgba(th::kAccent, 0.0f));
+    ui_.FillRadial(w * 0.5f - std::cos(static_cast<float>(t) * 0.3f) * w * 0.16f, h * 0.70f,
+                   w * 0.38f, th::Rgba(0x3E2170, 0.22f), th::Rgba(0x3E2170, 0.0f));
 
     auto ease = [](float x) {
         x = std::clamp(x, 0.0f, 1.0f);
@@ -4808,6 +4873,8 @@ void App::RenderIntro(double t) {
     const float outro = static_cast<float>(std::clamp((t - 3.05) / 0.50, 0.0, 1.0));
     const float fade = 1.0f - outro;
 
+    DrawBrandMark(w * 0.5f, h * 0.30f, ease(static_cast<float>(t / 0.90)), static_cast<float>(t), fade);
+
     const float size1 = std::clamp(h * 0.064f, 42.0f, 88.0f);
     const float size2 = size1 * 0.62f;
     const float gap = size2 * 0.30f;
@@ -4820,7 +4887,7 @@ void App::RenderIntro(double t) {
 
     // Centre the two-line lockup as one block, both horizontally and vertically.
     const float step = size1 * 0.95f;
-    const float y1 = h * 0.5f - step * 0.5f + (1.0f - remote) * 10.0f;
+    const float y1 = h * 0.62f - step * 0.5f + (1.0f - remote) * 10.0f;
     const float y2 = y1 + step + (1.0f - but) * 12.0f;
 
     const float x_remote = w * 0.5f - w_remote * 0.5f;
@@ -4845,6 +4912,17 @@ void App::RenderIntro(double t) {
         ui_.Text(L"Better", {x2, y2 - size2, x2 + wbe, y2 + size2}, size2,
                  th::Rgba(th::kInk, better * fade), DWRITE_FONT_WEIGHT_SEMI_BOLD);
     }
+
+    // A glint crosses the finished line, and an accent rule grows beneath it.
+    if (better >= 0.99f) {
+        const float phase = std::fmod(static_cast<float>(t) * 0.45f, 1.8f);
+        const float gx = w * 0.5f - w_remote * 0.5f - 60.0f + phase * (w_remote + 120.0f);
+        ui_.FillRadial(gx, y1, size1 * 0.9f, th::Rgba(0xFFFFFF, 0.22f * fade),
+                       th::Rgba(0xFFFFFF, 0.0f));
+    }
+    const float rule = 240.0f * better;
+    ui_.FillRounded({w * 0.5f - rule * 0.5f, y2 + size2 + 12.0f, w * 0.5f + rule * 0.5f, y2 + size2 + 14.0f},
+                    1.0f, th::Rgba(th::kAccent, 0.85f * fade));
 
     ui_.EndFrame();
 }

@@ -262,3 +262,12 @@ src/platform/win32_window.*   window, mouse/keyboard, per-monitor DPI
   decision with a separate client identity and terms to review.
 - Text: `Renderer::TextWrapped` wraps paragraphs. `Text` and `TextEllipsis`
   stay single-line.
+
+## Start-up logo (intro, 18 Nov 2026)
+
+- The intro ("RemotePlay but Better") now opens with the brand mark: three
+  orbit rings with tick marks, a rounded tile with a play triangle, and 18
+  sparks drifting on an orbit. The mark draws in over the first 0.9 s.
+- Two aurora glows drift behind it; a light glint crosses the finished line and
+  an accent rule grows beneath it.
+- The mark is `DrawBrandMark`, shared with the boot screen's `DrawBootLogo`.
