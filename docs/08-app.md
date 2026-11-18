@@ -211,3 +211,14 @@ src/platform/win32_window.*   window, mouse/keyboard, per-monitor DPI
 | Connection | Bitrate, stream resolution, stream FPS, reachability test |
 | Debug | Sections of the latency HUD (the master switch is under Display) |
 | About | Version and notes |
+
+## Visual pass (18 Nov 2026)
+
+- **Home**: the hero card has a top accent line, a console silhouette with its
+  glow on the right, and text that stops before it.
+- **Settings**: every tab's content sits on one glass card (`kPanel` at 46 %), so
+  groups read as sections.
+- **Controls**: dropdowns take an accent stroke on hover; sliders have a thinner
+  track and a halo on the knob; primary buttons are brighter with a warm edge.
+- **Not done**: a game rail with cover art. The library list is still demo data
+  (invented titles), so it stays out until the PSN library is wired.

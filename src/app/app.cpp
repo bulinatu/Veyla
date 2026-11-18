@@ -4659,9 +4659,11 @@ void App::DrawDropdown(const wchar_t* label, const std::vector<std::wstring>& op
     const D2D1_RECT_F control{right - 340.0f, y + 8.0f, right, y + 54.0f};
     const bool hovered = hover_ == Hit::Dropdown && hover_index_ == id;
 
-    ui_.FillRounded(control, 10.0f,
+    ui_.FillRounded(control, 12.0f,
                     th::Rgba(0xFFFFFF, hovered ? 0.10f : (enabled ? 0.06f : 0.03f)));
-    ui_.StrokeRounded(control, 10.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
+    ui_.StrokeRounded(control, 12.0f,
+                      hovered && enabled ? th::Rgba(th::kAccent, 0.55f) : th::Rgba(0xFFFFFF, 0.10f),
+                      1.0f);
 
     std::wstring value;
     if (!options.empty() && selected >= 0 && selected < static_cast<int>(options.size())) {
@@ -4719,8 +4721,9 @@ void App::DrawSlider(const wchar_t* label, int& value, int min, int max, int ste
     const float t = max > min ? static_cast<float>(value - min) / static_cast<float>(max - min)
                               : 0.0f;
     const float knob = track_l + t * (track_r - track_l);
-    ui_.FillRounded({track_l, cy - 3.0f, track_r, cy + 3.0f}, 3.0f, th::Rgba(0xFFFFFF, 0.10f));
-    ui_.FillRounded({track_l, cy - 3.0f, knob, cy + 3.0f}, 3.0f, th::Rgba(th::kAccent, 0.85f));
+    ui_.FillRounded({track_l, cy - 2.0f, track_r, cy + 2.0f}, 2.0f, th::Rgba(0xFFFFFF, 0.10f));
+    ui_.FillRounded({track_l, cy - 2.0f, knob, cy + 2.0f}, 2.0f, th::Rgba(th::kAccent, 0.95f));
+    ui_.FillCircle(knob, cy, 13.0f, th::Rgba(th::kAccent, 0.16f));
     ui_.FillCircle(knob, cy, 8.0f, th::Rgba(th::kInk, 0.95f));
     ui_.FillCircle(knob, cy, 5.0f, th::Rgba(th::kAccent, 1.0f));
 
@@ -4740,8 +4743,8 @@ void App::DrawButton(const wchar_t* label, const D2D1_RECT_F& rect, int id, bool
     const bool hovered = hover_ == Hit::Button && hover_index_ == id;
     const float alpha = hovered ? 1.0f : 0.85f;
     if (primary) {
-        ui_.FillRounded(rect, 12.0f, th::Rgba(th::kAccent, hovered ? 0.30f : 0.20f));
-        ui_.StrokeRounded(rect, 12.0f, th::Rgba(th::kAccent, 0.9f), 1.2f);
+        ui_.FillRounded(rect, 12.0f, th::Rgba(th::kAccent, hovered ? 0.38f : 0.26f));
+        ui_.StrokeRounded(rect, 12.0f, th::Rgba(th::kAccentWarm, hovered ? 0.55f : 0.35f), 1.0f);
     } else {
         ui_.FillRounded(rect, 12.0f, th::Rgba(0xFFFFFF, hovered ? 0.12f : 0.06f));
         ui_.StrokeRounded(rect, 12.0f, th::Rgba(0xFFFFFF, 0.12f), 1.0f);
@@ -4898,13 +4901,24 @@ void App::RenderHome(double t) {
     const D2D1_RECT_F card{x0, y0, x0 + card_w, y0 + card_h};
     ui_.FillRounded(card, 22.0f, th::Rgba(0xFFFFFF, 0.05f));
     ui_.StrokeRounded(card, 22.0f, th::Rgba(0xFFFFFF, 0.09f), 1.0f);
+    ui_.FillRounded({x0 + 36.0f, y0, x0 + card_w - 36.0f, y0 + 2.0f}, 1.0f, th::Rgba(th::kAccent, 0.75f));
+
+    // Console silhouette on the right of the hero card, with its glow.
+    const float cxl = x0 + card_w - 152.0f;
+    ui_.FillRadial(cxl, y0 + 176.0f, 170.0f, th::Rgba(th::kAccent, 0.20f), th::Rgba(th::kAccent, 0.0f));
+    const D2D1_RECT_F body{cxl - 86.0f, y0 + 44.0f, cxl + 86.0f, y0 + 298.0f};
+    ui_.FillRounded(body, 30.0f, th::Rgba(0xFFFFFF, 0.08f));
+    ui_.StrokeRounded(body, 30.0f, th::Rgba(th::kAccent, 0.40f), 1.2f);
+    ui_.FillRounded({cxl - 46.0f, y0 + 82.0f, cxl + 46.0f, y0 + 86.0f}, 2.0f, th::Rgba(th::kAccent, 0.9f));
+    ui_.FillCircle(cxl, y0 + 186.0f, 42.0f, th::Rgba(0xFFFFFF, 0.04f));
+    ui_.StrokeRounded({cxl - 42.0f, y0 + 144.0f, cxl + 42.0f, y0 + 228.0f}, 42.0f, th::Rgba(0xFFFFFF, 0.08f), 1.0f);
 
     ui_.Text(L"PLAYSTATION 5", {x0 + 36.0f, y0 + 26.0f, x0 + card_w - 36.0f, y0 + 48.0f}, 10.5f,
              th::Rgba(th::kMuted, 0.9f), DWRITE_FONT_WEIGHT_SEMI_BOLD);
 
     const std::wstring name =
         profile_.has_console() ? Widen(profile_.display_name()) : std::wstring(L"No console");
-    ui_.Text(name.c_str(), {x0 + 36.0f, y0 + 54.0f, x0 + card_w - 36.0f, y0 + 116.0f}, 42.0f,
+    ui_.Text(name.c_str(), {x0 + 36.0f, y0 + 54.0f, x0 + card_w - 290.0f, y0 + 116.0f}, 42.0f,
              th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
 
     uint32_t dot = th::kOffline;
@@ -4934,19 +4948,19 @@ void App::RenderHome(double t) {
     }
 
     ui_.FillCircle(x0 + 42.0f, y0 + 140.0f, 4.5f, th::Rgba(dot));
-    ui_.Text(status.c_str(), {x0 + 56.0f, y0 + 126.0f, x0 + card_w - 36.0f, y0 + 154.0f}, 14.0f,
+    ui_.Text(status.c_str(), {x0 + 56.0f, y0 + 126.0f, x0 + card_w - 290.0f, y0 + 154.0f}, 14.0f,
              th::Rgba(th::kInkDim));
 
     std::wstring address = profile_.host.empty() ? L"No address" : Widen(profile_.host);
     address += profile_.needs_pairing() ? L"   ·   pairing needed" : L"   ·   paired";
-    ui_.Text(address.c_str(), {x0 + 36.0f, y0 + 158.0f, x0 + card_w - 36.0f, y0 + 182.0f}, 12.5f,
+    ui_.Text(address.c_str(), {x0 + 36.0f, y0 + 158.0f, x0 + card_w - 290.0f, y0 + 182.0f}, 12.5f,
              th::Rgba(th::kMuted));
 
     const PadState home_pad = pad_.snapshot();
     ui_.FillCircle(x0 + 42.0f, y0 + 201.0f, 4.0f,
                    th::Rgba(home_pad.connected ? th::kOnline : th::kMuted));
     ui_.Text(home_pad.connected ? Widen(home_pad.name).c_str() : L"No controller",
-             {x0 + 56.0f, y0 + 188.0f, x0 + card_w - 36.0f, y0 + 214.0f}, 12.5f,
+             {x0 + 56.0f, y0 + 188.0f, x0 + card_w - 290.0f, y0 + 214.0f}, 12.5f,
              th::Rgba(th::kMuted));
 
     const float button_y = y0 + 224.0f;
@@ -5035,6 +5049,12 @@ void App::RenderSettings(double t) {
     }
 
     ui_.FillRect({324.0f, 140.0f, 325.0f, h - 60.0f}, th::Rgba(0xFFFFFF, 0.06f));
+    {
+        // The content sits on one glass card so the groups read as sections.
+        const D2D1_RECT_F card{336.0f, 132.0f, w - 40.0f, h - 56.0f};
+        ui_.FillRounded(card, 18.0f, th::Rgba(th::kPanel, 0.46f));
+        ui_.StrokeRounded(card, 18.0f, th::Rgba(0xFFFFFF, 0.07f), 1.0f);
+    }
 
     float y = 148.0f;
 
