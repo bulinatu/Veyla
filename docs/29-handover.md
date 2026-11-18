@@ -3,8 +3,8 @@
 Windows C++ PS5 Remote Play client on the chiaki-ng session core. DLSS Super
 Resolution, DLSS Frame Generation (through the closed NeuralScreen worker),
 GPU colour and sharpening, a custom PS5-style UI and native DualSense support.
-Build `0.3`. Last commit: `61310a8`. The ZIP in `dist\` predates this session
-and must be rebuilt with `tools\package_release.ps1`.
+Build `0.3`. Run `git log -1` for the current commit. The ZIP in `dist\` predates
+this session and must be rebuilt with `tools\package_release.ps1`.
 
 ## What works
 
@@ -30,7 +30,8 @@ and must be rebuilt with `tools\package_release.ps1`.
   fullscreen gave 95-100 %.
 - `f3d52d4` Presets only save while a session runs; the chain is built at the
   next start. The old code applied the chain mid-stream, contrary to its comment.
-- Profile `fps` was 30 on the test machine (halves the source). Reset to 60.
+- Profile `fps` was 30 in the test machine's `session.json` (halves the source).
+  Set to 60; the code default is also 60. Nothing in the app forced it.
 
 **Settings** (`7de3310`)
 - Display: HDR, decoder, chroma, Latency HUD (the only master switch).
@@ -57,7 +58,7 @@ and must be rebuilt with `tools\package_release.ps1`.
 **Rejected and reverted**
 - MMCSS "Games" on the main thread: median 16 late ticks per 480 vs 9 baseline.
 - Display mode switch to 120 Hz for FG: user declined.
-- Jitter buffer 2: no gain over 1.
+- Jitter buffer 2: no gain over 1 (4v 52-81 % across windows vs 70-76 % at 1).
 
 ## Known problems and limits
 
@@ -78,12 +79,14 @@ and must be rebuilt with `tools\package_release.ps1`.
 8. **Chroma and bitrate quality are not compared.** Lanczos chroma and 75 vs 100
    Mbps need a side-by-side test on a real game.
 9. **Untested after the last edits:**
-   - the intro's final fade and the hand-off to boot (captured up to 2.8 s only);
+   - the intro's final fade and the hand-off to boot. Screenshots were taken from
+     process start, which lags the intro by the start-up time, so the 3.25 s shot
+     still showed the settled mark rather than the fade;
    - the Upscaling and Performance tabs inside the in-stream sheet (compiled, not
      screenshotted);
    - the boot card position after the last move.
 10. **No self-update.** Distribution is the ZIP.
-11. **Structure debt**: `app.cpp` is ~6k lines. Settings and the stream sheet
+11. **Structure debt**: `app.cpp` is 6.3k lines. Settings and the stream sheet
     still repeat control code. The VFG and Reflex paths stay on purpose.
 
 ## Where things are
@@ -104,6 +107,8 @@ and must be rebuilt with `tools\package_release.ps1`.
 | `docs/09-session.md` | Connect, disconnect, reconnect |
 | `docs/26-network-setup.md` | Network measurements and checklist |
 | `docs/27-color-and-sharpening.md` | Colour math and costs |
+| `docs/28-code-audit-polish.md` | Code audit and polish record |
+| `docs/15-frame-generation.md`, `docs/19-dlss-overview.md` | FG and DLSS design notes |
 
 ## Run and diagnose
 
