@@ -32,11 +32,18 @@ link                        -> 2.5 Gbps, full duplex, connected
 ### After the PC changes (same session, stream running at 100 Mbps)
 
 ```
-ping -n 100 192.168.1.21    -> 100/100, 0% loss, min 0, max 1, avg 0 ms
-[app]  fps 60.0, 15.1 Mbps ... lost 0, drops 0, decode 4.4/5.3 ms
-[video] src 60.0 fps, select 4v 100%, arrival 16.7 ms, outliers 2
-[fg]   displayed 120.0 FPS (2x)
+ping -n 100 192.168.1.21    -> 100/100, 0% loss, min 0, max 0, avg 0 ms
+Get-NetAdapterStatistics    -> ReceivedDiscardedPackets 0, ReceivedPacketErrors 0
+                               OutboundDiscardedPackets 0, OutboundPacketErrors 0
+[app]  fps 60.0, 14.0 Mbps ... lost 0, drops 0, decode 4.2/4.8 ms
+[video] src 60.0 fps, select 4v 100%, arrival 16.6 ms, outliers 2
+[fg]   displayed 120.0 FPS (2x)  (avg 119.7 over 269 samples, see caveat below)
 ```
+
+One 12-second dip to 100-112 fps was recorded at 10:43 while background work ran
+on the PC (source control and log reads, not the stream); the worker recovered
+to 120 without intervention. Everything else in the 9-minute window was
+118-120.4.
 
 The bitrate in the app was 100 Mbps; the console sent ~15 Mbps for this scene
 (HEVC variable bitrate), which is why `[app]` shows 15 Mbps rather than 100.

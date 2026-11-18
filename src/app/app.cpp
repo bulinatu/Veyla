@@ -5696,8 +5696,6 @@ void App::RenderStreamSettings(double t) {
             DrawSlider(L"Temperature", profile_.color_temperature, -100, 100, 5, y,
                        W_ColorTemperature);
             y += row;
-            DrawButton(L"Reset colour", {kContentX, y, kContentX + 200.0f, y + 40.0f},
-                       W_ColorReset, false);
             break;
         }
 
