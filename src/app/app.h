@@ -469,6 +469,13 @@ private:
     double wake_deadline_ = 0.0;
     int wake_packets_ = 0;
 
+    // The console keeps the previous session reserved for a few seconds after
+    // the sockets close. Reconnecting inside that window returns "already in
+    // use", so a failed start retries instead of giving up on the first try.
+    int connect_retries_ = 0;
+    bool connect_retrying_ = false;
+    double connect_retry_at_ = 0.0;
+
     session::Pairing pairing_;
     std::string pin_;
     bool pin_focus_ = false;

@@ -147,3 +147,23 @@ The loader already accepts hex `rp_key`/`rp_regist_key`, so this is a converter,
 ## The supported path, in one line
 
 Pair once with the console's 8-digit code. It takes ~30 seconds, produces **our own** keys, and from then on import is irrelevant. The metadata import above exists purely so that the account-id scavenger hunt disappears.
+
+---
+
+## Disconnect and reconnect
+
+`DisconnectStream` (Esc in the stream, or the Disconnect button) now:
+
+1. Sends one **idle controller state** to the console (no buttons, no trigger
+   pull) and waits ~24 ms so the feedback thread delivers it before the sockets
+   close. Without this, disconnecting while holding a trigger could leave the
+   console acting on a stuck input.
+2. Calls `chiaki_session_stop`, which closes the control and stream sockets
+   cleanly, then joins the session thread.
+
+The console still reserves the session for a short moment. If a Connect lands
+inside that window, the console answers "Remote Play on Console is already in
+use"; instead of showing that error once, the app retries every 2.5 s (up to 12
+times) with the note "Console is still releasing the previous session (retry
+N/12)...". Measured on the reference machine: a reconnect 0.4 s after
+disconnect succeeds on the first attempt.

@@ -2881,6 +2881,8 @@ void App::ConnectConsole() {
 
     pending_connect_ = PendingConnect::Probing;
     next_connect_step_ = clock_;
+    connect_retries_ = 0;
+    connect_retrying_ = false;
     stream_note_ = "Checking " + profile_.host + " ...";
     probe_.Start(profile_.host, 9295);
 }
@@ -2989,11 +2991,31 @@ void App::TickSession() {
     if (!ok) {
         stream_active_ = false;
         screen_ = Screen::Home;
-        stream_note_ = error.empty() ? "Could not start the session." : error;
+        const bool reserved =
+            error.find("already in use") != std::string::npos ||
+            error.find("Connection Refused in Session Request") != std::string::npos ||
+            error.find("Ctrl failed to connect") != std::string::npos;
+        if (reserved && connect_retries_ < 12) {
+            ++connect_retries_;
+            char note[192];
+            std::snprintf(note, sizeof(note),
+                          "Console is still releasing the previous session "
+                          "(retry %d/12)...",
+                          connect_retries_);
+            stream_note_ = note;
+            connect_retrying_ = true;
+            connect_retry_at_ = clock_ + 2.5;
+        } else {
+            connect_retrying_ = false;
+            connect_retries_ = 0;
+            stream_note_ = error.empty() ? "Could not start the session." : error;
+        }
         std::fprintf(stderr, "[app] start failed: %s\n", error.c_str());
         return;
     }
 
+    connect_retrying_ = false;
+    connect_retries_ = 0;
     stream_active_ = true;
     video_holds_.fill(0);
     video_hold_pos_ = 0;
@@ -3149,7 +3171,8 @@ void App::DisconnectStream() {
     if (window_) {
         window_->SetCursorHidden(false);
     }
-    stream_note_ = "Disconnected. The console may take a few seconds to release the session.";
+    stream_note_ = "Disconnected. The console releases the session in a few seconds; "
+                   "Connect retries on its own until it is free.";
     screen_ = Screen::Home;
 }
 
@@ -3341,6 +3364,10 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     }
     probe_.Poll();
     TickPendingConnect();
+    if (connect_retrying_ && clock_ >= connect_retry_at_) {
+        connect_retrying_ = false;
+        StartStream();
+    }
     HandlePad();
 
     if (window_) {

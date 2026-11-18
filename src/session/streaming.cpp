@@ -253,6 +253,14 @@ void Streaming::Stop() {
 
     std::lock_guard<std::mutex> api(api_mutex_);
     if (initialised_) {
+        // Tell the console "no buttons held" explicitly, and give the feedback
+        // thread one send interval to deliver it before the sockets close.
+        // Without this, disconnecting while holding a trigger can leave the
+        // console acting on a stuck input until its own timeout.
+        ChiakiControllerState idle;
+        chiaki_controller_state_set_idle(&idle);
+        chiaki_session_set_controller_state(&session_, &idle);
+        std::this_thread::sleep_for(std::chrono::milliseconds(24));
         chiaki_session_stop(&session_);
         chiaki_session_join(&session_);
         chiaki_session_fini(&session_);
