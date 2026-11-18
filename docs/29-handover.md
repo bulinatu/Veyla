@@ -78,13 +78,11 @@ this session and must be rebuilt with `tools\package_release.ps1`.
    checklist. Bitrate 100 Mbps tested clean; 50/75 not swept.
 8. **Chroma and bitrate quality are not compared.** Lanczos chroma and 75 vs 100
    Mbps need a side-by-side test on a real game.
-9. **Untested after the last edits:**
-   - the intro's final fade and the hand-off to boot. Screenshots were taken from
-     process start, which lags the intro by the start-up time, so the 3.25 s shot
-     still showed the settled mark rather than the fade;
-   - the Upscaling and Performance tabs inside the in-stream sheet (compiled, not
-     screenshotted);
-   - the boot card position after the last move.
+9. **Untested after the last edits:** the intro's final fade and the hand-off to
+   boot. Screenshots were taken from process start, which lags the intro by the
+   start-up time, so the 3.25 s shot still showed the settled mark rather than
+   the fade. The boot step card, and the Upscaling and Performance tabs of the
+   in-stream sheet, were captured and look correct.
 10. **No self-update.** Distribution is the ZIP.
 11. **Structure debt**: `app.cpp` is 6.3k lines. Settings and the stream sheet
     still repeat control code. The VFG and Reflex paths stay on purpose.
@@ -129,7 +127,7 @@ ticks over 1.5 x budget per 480 frames.
 ## Next, in priority order
 
 1. Test G-SYNC for FG 2x on 240 Hz (Windows setting only).
-2. Capture the untested items above (intro fade, sheet tabs, boot card).
+2. Capture the intro fade and its hand-off to boot.
 3. Side-by-side quality test: Lanczos vs bicubic chroma, 75 vs 100 Mbps.
 4. Decide on the game library: a separate client identity and terms, or no library.
 5. Rebuild the ZIP with `tools\package_release.ps1` and record its SHA256.
