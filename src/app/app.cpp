@@ -1730,6 +1730,11 @@ void App::TickEnhance() {
 }
 
 void App::ApplyLaunchPreset(int preset) {
+    // While a session runs, a preset only changes the saved selection. Building
+    // the chain mid-session restarts the FG worker and has been observed to
+    // upset the D3D12VA decoder, so the chain is built on the next start.
+    const bool live = !stream_active_;
+    const char* note = nullptr;
     switch (preset) {
         case 0:  // Launch: DLSS SR Ultra Quality + FG 2x at 1440p
             profile_.neural_sr = 1;
@@ -1737,13 +1742,15 @@ void App::ApplyLaunchPreset(int preset) {
             profile_.dlss_fg = 2;
             profile_.neural_nr = 0;
             profile_.render_target = 2;
-            render_target_ = 2;
             profile_.frame_buffer = 1;
-            stream_buffer_ = 1;
-            ApplyRenderTarget();
-            ApplyNeuralSettings();
-            ApplyDlssFrameGen();
-            stream_note_ = "Launch preset: DLSS SR Ultra Quality + FG 2x.";
+            if (live) {
+                render_target_ = 2;
+                stream_buffer_ = 1;
+                ApplyRenderTarget();
+                ApplyNeuralSettings();
+                ApplyDlssFrameGen();
+            }
+            note = "Launch preset: DLSS SR Ultra Quality + FG 2x.";
             break;
         case 1:  // FG 2x without SR: not offered until the worker restart path
                  // is proven; keep the profile untouched.
@@ -1754,36 +1761,35 @@ void App::ApplyLaunchPreset(int preset) {
             profile_.dlss_mode = 4;
             profile_.dlss_fg = 0;
             profile_.neural_nr = 0;
-            ApplyNeuralSettings();
-            ApplyDlssFrameGen();
-            stream_note_ = "SR-only preset: no frame generation.";
+            if (live) {
+                ApplyNeuralSettings();
+                ApplyDlssFrameGen();
+            }
+            note = "SR-only preset: no frame generation.";
             break;
         case 3:  // Low latency: raw stream, no neural stages
             profile_.neural_sr = 0;
             profile_.dlss_fg = 0;
             profile_.neural_nr = 0;
             profile_.upscaler = 0;
-            upscale_ = 0;
-            presenter_.SetUpscaleMode(0);
             profile_.render_target = 0;
-            render_target_ = 0;
             profile_.frame_buffer = 0;
-            stream_buffer_ = 0;
-            ApplyNeuralSettings();
-            ApplyDlssFrameGen();
-            ApplyRenderTarget();
-            stream_note_ = "Low-latency preset: raw stream, no neural stages.";
+            if (live) {
+                upscale_ = 0;
+                presenter_.SetUpscaleMode(0);
+                render_target_ = 0;
+                stream_buffer_ = 0;
+                ApplyNeuralSettings();
+                ApplyDlssFrameGen();
+                ApplyRenderTarget();
+            }
+            note = "Low-latency preset: raw stream, no neural stages.";
             break;
         default:
-            break;
+            return;
     }
-    // Only the selection changes here. Building the chain mid-session restarts
-    // the FG worker and has been observed to upset the D3D12VA decoder, so the
-    // chain is built once, on connect (TickSession), or on the next start.
     SaveProfile();
-    stream_note_ = stream_active_
-                       ? "Preset saved. Disconnect and reconnect to apply it."
-                       : "Preset saved; it applies when the session starts.";
+    stream_note_ = std::string(note) + (live ? " Applied." : " Applies when the session starts.");
 }
 
 void App::LogHealth() {

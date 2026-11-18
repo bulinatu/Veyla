@@ -34,9 +34,11 @@ Current build: `0.3`, standalone ZIP at `dist\BetterRemotePlay-0.3-standalone.zi
    MMCSS median 16, so it was reverted. The cause is not main-thread scheduling.
 3. **FG without SR is not offered.** A worker restarted at 1080p without SR came
    up in overlay mode and never presented. Safe fallbacks are SR only or raw.
-4. **Presets apply at the next session only.** Changing DLSS/FG while streaming
-   once broke the D3D12VA decoder ("Failed to map D3D12 Buffer resource").
-   The UI says "disconnect and reconnect".
+4. **Presets apply at the next session only (intended).** While streaming, a
+   preset saves the selection and the note says it applies on the next start.
+   Building the chain mid-session once broke the D3D12VA decoder ("Failed to map
+   D3D12 Buffer resource"). Note: the preset code previously applied the chain
+   even while streaming, contrary to its comment; fixed, build-verified only.
 5. **HDR through FG is SDR.** The worker only accepts RGBA8 (format 28), so the
    graded readback tone-maps. Parent window can still be HDR; the worker cannot.
 6. **DLSS NR** works inside the worker but costs ~7-18 fps at 2x; **FG 3x-6x**
