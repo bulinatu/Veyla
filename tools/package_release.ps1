@@ -147,6 +147,22 @@ Features and runtimes
 - The app is not affiliated with Sony Interactive Entertainment. No Sony
   artwork, code, keys or fonts are included.
 
+Settings worth knowing
+----------------------
+- Settings > Color: sharpening plus exposure, contrast, highlights, shadows,
+  saturation, vibrance, hue, temperature, tint and gamma. The in-stream overlay
+  (Tab) has the most used controls and applies them live.
+- Settings > Performance > Launch presets: "Launch" is DLSS SR Ultra Quality +
+  DLSS Frame Generation 2x at 1440p; also SR only and Low latency. Presets are
+  saved and applied at the start of the next session (reconnect), never while
+  streaming.
+- Health log: %APPDATA%\BetterRemotePlay\health.log, one line every 30 seconds
+  (worker fps, frame timing, source cadence, drops, decode, audio, handles,
+  VRAM). Rotates at 2 MB.
+- DualSense: native HID works over USB and Bluetooth, including rumble, LEDs
+  and adaptive triggers. On Bluetooth a 250 Hz report rate is plenty; 500/1000
+  Hz are for USB.
+
 Credits
 -------
 - Chiaki/chiaki-ng session layer and PSN OAuth client constants (GPL).
