@@ -1114,7 +1114,12 @@ void App::HandleKey(int vk) {
             } else if (vk == 'S' || vk == VK_TAB) {
                 screen_ = Screen::Settings;
             } else if (vk == VK_ESCAPE) {
-                quit_ = true;
+                if (clock_ - last_esc_at_ < 2.0) {
+                    quit_ = true;
+                } else {
+                    last_esc_at_ = clock_;
+                    stream_note_ = "Press Esc again to quit.";
+                }
             }
             break;
 
@@ -1145,7 +1150,13 @@ void App::HandleKey(int vk) {
                 open_dropdown_ = -1;
                 mouse_active_at_ = clock_;
             } else if (vk == VK_ESCAPE) {
-                DisconnectStream();
+                if (clock_ - last_esc_at_ < 2.0) {
+                    last_esc_at_ = -10.0;
+                    DisconnectStream();
+                } else {
+                    last_esc_at_ = clock_;
+                    stream_note_ = "Press Esc again to disconnect.";
+                }
             } else if (vk == 'H') {
                 hud_ = !hud_;
             } else if (vk >= '1' && vk <= '5') {
@@ -2989,6 +3000,7 @@ void App::TickSession() {
     if (!ok) {
         stream_active_ = false;
         screen_ = Screen::Home;
+        last_esc_at_ = -10.0;
         const bool reserved =
             error.find("already in use") != std::string::npos ||
             error.find("Connection Refused in Session Request") != std::string::npos;
@@ -4613,13 +4625,13 @@ void App::DrawTile(const D2D1_RECT_F& rect, const GameEntry& game, float alpha, 
 
 
 void App::DrawSettingLabel(const wchar_t* label, float y, bool enabled) {
-    ui_.Text(label, {kContentX, y, kContentX + 460.0f, y + 56.0f}, 16.0f,
+    ui_.Text(label, {panel_x_, y, panel_x_ + 460.0f, y + 56.0f}, 16.0f,
              th::Rgba(enabled ? th::kInk : th::kMuted, enabled ? 0.95f : 0.6f),
              DWRITE_FONT_WEIGHT_NORMAL);
 }
 
 void App::DrawInfoRow(const wchar_t* label, const std::wstring& value, float y) {
-    const float right = ui_w_ - 64.0f;
+    const float right = panel_right_ > 0.0f ? panel_right_ : ui_w_ - 64.0f;
     DrawSettingLabel(label, y, true);
     ui_.TextEllipsis(value.c_str(), {right - 420.0f, y, right, y + 56.0f}, 15.0f,
                      th::Rgba(th::kInkDim), DWRITE_FONT_WEIGHT_NORMAL,
@@ -4628,7 +4640,7 @@ void App::DrawInfoRow(const wchar_t* label, const std::wstring& value, float y) 
 
 void App::DrawDropdown(const wchar_t* label, const std::vector<std::wstring>& options, int selected,
                        float y, int id, bool enabled) {
-    const float right = ui_w_ - 64.0f;
+    const float right = panel_right_ > 0.0f ? panel_right_ : ui_w_ - 64.0f;
     DrawSettingLabel(label, y, enabled);
 
     const D2D1_RECT_F control{right - 340.0f, y + 8.0f, right, y + 54.0f};
@@ -4667,7 +4679,7 @@ void App::DrawDropdown(const wchar_t* label, const std::vector<std::wstring>& op
 
 void App::DrawSlider(const wchar_t* label, int& value, int min, int max, int step, float y,
                      int id, bool percent) {
-    const float right = ui_w_ - 64.0f;
+    const float right = panel_right_ > 0.0f ? panel_right_ : ui_w_ - 64.0f;
     DrawSettingLabel(label, y, true);
     const D2D1_RECT_F control{right - 340.0f, y + 8.0f, right, y + 54.0f};
     const float track_l = control.left + 18.0f;
@@ -5591,32 +5603,60 @@ void App::RenderStream(double t) {
     (void)t;
     const float w = ui_w_;
 
-    if (stream_connecting_) {
-        ui_.FillRect({0.0f, 0.0f, w, ui_h_}, th::Rgba(0x05030A, 0.88f));
-        const float panel_w = 560.0f;
-        const float panel_h = 176.0f;
-        const D2D1_RECT_F panel{(w - panel_w) * 0.5f, (ui_h_ - panel_h) * 0.5f,
-                                (w + panel_w) * 0.5f, (ui_h_ + panel_h) * 0.5f};
-        ui_.FillRounded(panel, 18.0f, th::Rgba(0x120A20, 0.97f));
-        ui_.StrokeRounded(panel, 18.0f, th::Rgba(th::kAccent, 0.35f), 1.0f);
+    // Connecting screen: an opaque, boot-style animation. It also covers the
+    // gap between "session started" and the first decoded frame, so the
+    // presenter's synthetic test pattern is never visible to the user.
+    if (stream_connecting_ || (stream_active_ && last_source_at_ < 0.0)) {
+        const float h = ui_h_;
+        ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(th::kBgTop), th::Rgba(th::kBgBottom));
+        ui_.FillRadial(w * 0.5f, h * 0.42f, w * 0.62f, th::Rgba(0x6B32D9, 0.24f),
+                       th::Rgba(0x6B32D9, 0.0f));
+        ui_.FillRadial(w * 0.12f, h * 0.10f, w * 0.30f, th::Rgba(0x3E2170, 0.20f),
+                       th::Rgba(0x3E2170, 0.0f));
 
-        ui_.StrokeArc(panel.left + 56.0f, panel.top + 76.0f, 16.0f,
-                      static_cast<float>(clock_ * 5.0), 4.7f,
-                      th::Rgba(th::kAccent, 0.95f), 2.6f);
-        ui_.Text(L"Connecting",
-                 {panel.left + 92.0f, panel.top + 40.0f, panel.right - 28.0f,
-                  panel.top + 76.0f},
-                 24.0f, th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        ui_.Text(Widen("Opening a Remote Play session on " + profile_.display_name() + ".")
-                     .c_str(),
-                 {panel.left + 92.0f, panel.top + 80.0f, panel.right - 28.0f,
-                  panel.top + 112.0f},
-                 12.5f, th::Rgba(th::kInkDim));
-        ui_.Text(L"The presentation loop stays live; no frame is dropped while the "
-                 L"session negotiates.",
-                 {panel.left + 28.0f, panel.top + 124.0f, panel.right - 28.0f,
-                  panel.top + 152.0f},
-                 11.5f, th::Rgba(th::kMuted));
+        const float cx = w * 0.5f;
+        const float cy = h * 0.40f;
+        const float now = static_cast<float>(clock_);
+        const float spin = now * 1.15f;
+        ui_.FillCircle(cx, cy, 96.0f + 8.0f * std::sin(now * 2.2f), th::Rgba(th::kAccent, 0.055f));
+        ui_.StrokeArc(cx, cy, 64.0f, spin, 4.55f, th::Rgba(th::kAccent, 0.95f), 2.6f);
+        ui_.StrokeArc(cx, cy, 78.0f, -spin * 0.60f + 0.8f, 2.2f, th::Rgba(th::kInk, 0.22f),
+                      1.2f);
+        ui_.StrokeCircle(cx, cy, 46.0f, th::Rgba(0xFFFFFF, 0.08f), 1.0f);
+        ui_.FillRounded({cx - 22.0f, cy - 22.0f, cx + 22.0f, cy + 22.0f}, 12.0f,
+                        th::Rgba(th::kAccent, 0.18f));
+        ui_.StrokeRounded({cx - 22.0f, cy - 22.0f, cx + 22.0f, cy + 22.0f}, 12.0f,
+                          th::Rgba(th::kAccent, 0.55f), 1.0f);
+        ui_.FillRounded({cx - 8.0f, cy - 12.0f, cx - 2.0f, cy + 12.0f}, 3.0f,
+                        th::Rgba(th::kInk, 0.9f));
+        ui_.FillRounded({cx + 2.0f, cy - 12.0f, cx + 8.0f, cy + 12.0f}, 3.0f,
+                        th::Rgba(th::kInk, 0.9f));
+
+        ui_.Text(L"Connecting", {cx - 280.0f, cy + 96.0f, cx + 280.0f, cy + 134.0f}, 26.0f,
+                 th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                 DWRITE_TEXT_ALIGNMENT_CENTER);
+        const std::wstring subtitle =
+            Widen("Opening a Remote Play session on " + profile_.display_name());
+        ui_.Text(subtitle.c_str(), {cx - 340.0f, cy + 138.0f, cx + 340.0f, cy + 166.0f}, 13.0f,
+                 th::Rgba(th::kInkDim), DWRITE_FONT_WEIGHT_NORMAL,
+                 DWRITE_TEXT_ALIGNMENT_CENTER);
+
+        const std::wstring step =
+            stream_connecting_ ? (stream_note_.empty() ? std::wstring(L"Talking to the console...")
+                                                       : Widen(stream_note_))
+                               : std::wstring(L"Waiting for the first frame...");
+        ui_.Text(step.c_str(), {cx - 360.0f, cy + 172.0f, cx + 360.0f, cy + 198.0f}, 12.0f,
+                 th::Rgba(th::kMuted, 0.95f), DWRITE_FONT_WEIGHT_NORMAL,
+                 DWRITE_TEXT_ALIGNMENT_CENTER);
+
+        // Indeterminate bar: it breathes instead of pretending to know progress.
+        const float bar_w = 420.0f;
+        const float bar_y = cy + 214.0f;
+        const float prog = 0.18f + 0.64f * (0.5f + 0.5f * std::sin(now * 1.7f));
+        ui_.FillRounded({cx - bar_w * 0.5f, bar_y, cx + bar_w * 0.5f, bar_y + 3.0f}, 1.5f,
+                        th::Rgba(0xFFFFFF, 0.08f));
+        ui_.FillRounded({cx - bar_w * 0.5f, bar_y, cx - bar_w * 0.5f + bar_w * prog, bar_y + 3.0f},
+                        1.5f, th::Rgba(th::kAccent, 0.85f));
         return;
     }
 
@@ -5816,6 +5856,20 @@ void App::RenderStream(double t) {
         }
 
     }
+
+    // Double-Esc confirmation toast.
+    if (clock_ - last_esc_at_ < 2.0) {
+        const float fade =
+            std::clamp(static_cast<float>(2.0 - (clock_ - last_esc_at_)) * 2.0f, 0.0f, 1.0f);
+        const float pill_w = 340.0f;
+        const D2D1_RECT_F pill{w * 0.5f - pill_w * 0.5f, ui_h_ - 104.0f,
+                               w * 0.5f + pill_w * 0.5f, ui_h_ - 56.0f};
+        ui_.FillRounded(pill, 14.0f, th::Rgba(0x05030A, 0.80f * fade));
+        ui_.StrokeRounded(pill, 14.0f, th::Rgba(th::kAccent, 0.65f * fade), 1.0f);
+        ui_.Text(L"Press Esc again to disconnect", {pill.left, pill.top, pill.right, pill.bottom},
+                 13.0f, th::Rgba(th::kInk, 0.95f * fade), DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                 DWRITE_TEXT_ALIGNMENT_CENTER);
+    }
 }
 
 void App::RenderStreamSettings(double t) {
@@ -5824,10 +5878,15 @@ void App::RenderStreamSettings(double t) {
     const float h = ui_h_;
 
     ui_.FillRect({0.0f, 0.0f, w, h}, th::Rgba(0x000000, 0.66f));
-    const D2D1_RECT_F panel{300.0f, 70.0f, w - 40.0f, h - 70.0f};
+    const float sheet_w = std::min(1020.0f, w - 120.0f);
+    const float sheet_l = (w - sheet_w) * 0.5f;
+    const float sheet_r = sheet_l + sheet_w;
+    const D2D1_RECT_F panel{sheet_l, 70.0f, sheet_r, h - 70.0f};
+    panel_x_ = sheet_l + 32.0f;
+    panel_right_ = sheet_r - 32.0f;
     ui_.FillRounded(panel, 18.0f, th::Rgba(0x120A20, 0.96f));
     ui_.StrokeRounded(panel, 18.0f, th::Rgba(0xFFFFFF, 0.10f), 1.0f);
-    ui_.Text(L"Stream settings", {kContentX, 84.0f, w - 64.0f, 120.0f}, 22.0f,
+    ui_.Text(L"Stream settings", {panel_x_, 84.0f, panel_right_, 120.0f}, 22.0f,
              th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
 
     // The same categories as Settings; every control applies live.
@@ -5835,7 +5894,7 @@ void App::RenderStreamSettings(double t) {
                              L"Audio",  L"Controller"};
     const Icon tab_icons[] = {Icon::Display, Icon::Upscaling, Icon::Color, Icon::Neural,
                               Icon::Audio,   Icon::Controller};
-    float tx = kContentX;
+    float tx = panel_x_;
     for (int i = 0; i < 6; ++i) {
         const D2D1_RECT_F r{tx, 132.0f, tx + 104.0f, 166.0f};
         const bool selected = overlay_tab_ == i;
@@ -5870,7 +5929,7 @@ void App::RenderStreamSettings(double t) {
             y += row;
             ui_.Text(L"Percentage of the output resolution fed to DLSS; DLAA runs at the frame "
                      L"size with AI AA.",
-                     {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 11.5f, th::Rgba(th::kMuted));
+                     {panel_x_, y + 2.0f, panel_right_, y + 26.0f}, 11.5f, th::Rgba(th::kMuted));
             y += 30.0f;
             if (profile_.neural_sr > 0 && dlss_ready_) {
                 wchar_t text[224];
@@ -5878,7 +5937,7 @@ void App::RenderStreamSettings(double t) {
                            profile_.dlss_mode == 5 ? L"DLAA" : L"SR", dlss_in_w_,
                            dlss_in_h_, dlss_sr_.out_width(), dlss_sr_.out_height(),
                            dlss_sr_.last_ms());
-                ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
+                ui_.Text(text, {panel_x_, y + 2.0f, panel_right_, y + 26.0f}, 12.0f,
                          th::Rgba(th::kMuted));
                 y += 26.0f;
             }
@@ -5944,12 +6003,12 @@ void App::RenderStreamSettings(double t) {
                     wcscat_s(text, profile_.nr_order == 1 ? L"  -  after DLSS SR"
                                                           : L"  -  before DLSS SR");
                 }
-                ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
+                ui_.Text(text, {panel_x_, y + 2.0f, panel_right_, y + 26.0f}, 12.0f,
                          th::Rgba(th::kMuted));
                 y += 26.0f;
             } else if (!NrAvailable()) {
                 ui_.Text(L"NR runtime missing: native\\nvngx.dll + nvngx_dlssnr.dll",
-                         {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 12.0f,
+                         {panel_x_, y + 2.0f, panel_right_, y + 26.0f}, 12.0f,
                          th::Rgba(th::kMuted));
                 y += 26.0f;
             }
@@ -5978,7 +6037,7 @@ void App::RenderStreamSettings(double t) {
             DrawDropdown(L"Buffer", {L"10 ms", L"20 ms", L"30 ms", L"40 ms"},
                          BufferIndex(audio_buffer_ms_), y, W_AudioBuffer);
             y += row;
-            DrawButton(L"Play test tone", {kContentX, y + 6.0f, kContentX + 220.0f, y + 46.0f},
+            DrawButton(L"Play test tone", {panel_x_, y + 6.0f, panel_x_ + 220.0f, y + 46.0f},
                        W_TestTone, false);
             y += row;
             std::wstring info;
@@ -5992,7 +6051,7 @@ void App::RenderStreamSettings(double t) {
                 info = audio_failed_ ? L"Could not open the device (busy or removed)"
                                      : L"Not started";
             }
-            ui_.Text(info.c_str(), {kContentX, y, w - 64.0f, y + 40.0f}, 12.0f,
+            ui_.Text(info.c_str(), {panel_x_, y, panel_right_, y + 40.0f}, 12.0f,
                      th::Rgba(th::kMuted));
             y += 26.0f;
             break;
@@ -6041,10 +6100,10 @@ void App::RenderStreamSettings(double t) {
             DrawDropdown(L"Mic LED", {kMicLedNames[0], kMicLedNames[1], kMicLedNames[2]},
                          mic_led_, y, W_MicLed);
             y += row;
-            DrawButton(L"Rumble test", {kContentX, y + 4.0f, kContentX + 220.0f, y + 40.0f},
+            DrawButton(L"Rumble test", {panel_x_, y + 4.0f, panel_x_ + 220.0f, y + 40.0f},
                        W_Rumble, false);
             y += row;
-            ui_.Text(PadStatus(pad_.snapshot()).c_str(), {kContentX, y, w - 64.0f, y + 24.0f},
+            ui_.Text(PadStatus(pad_.snapshot()).c_str(), {panel_x_, y, panel_right_, y + 24.0f},
                      12.0f, th::Rgba(th::kMuted));
             y += 24.0f;
             break;
@@ -6094,9 +6153,11 @@ void App::RenderStreamSettings(double t) {
         }
     }
 
-    DrawButton(L"Resume", {kContentX, y + 6.0f, kContentX + 200.0f, y + 50.0f},
+    DrawButton(L"Resume", {panel_x_, y + 6.0f, panel_x_ + 200.0f, y + 50.0f},
                W_ResumeOverlay, true);
-    DrawButton(L"Disconnect", {kContentX + 220.0f, y + 6.0f, kContentX + 420.0f, y + 50.0f},
+    DrawButton(L"Disconnect", {panel_x_ + 220.0f, y + 6.0f, panel_x_ + 420.0f, y + 50.0f},
                W_Disconnect, false);
     DrawPopup();
+    panel_x_ = 344.0f;
+    panel_right_ = 0.0f;
 }

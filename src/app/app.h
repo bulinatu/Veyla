@@ -232,6 +232,14 @@ private:
     std::atomic<bool> pad_run_{false};
     int upscale_ = 1;
     bool quit_ = false;
+    // Esc is destructive (quit on Home, disconnect in the stream): require a
+    // second press within two seconds so it cannot happen by reflex.
+    double last_esc_at_ = -10.0;
+    // Content frame for the shared settings widgets. The in-stream sheet is
+    // narrower than the full-screen Settings page, so the helpers read these
+    // instead of the window edges. 0 means "use the window".
+    float panel_x_ = 344.0f;
+    float panel_right_ = 0.0f;
     bool device_lost_handled_ = false;
     void RecoverFromDeviceLoss();
     bool capture_requested_ = false;
