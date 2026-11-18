@@ -158,12 +158,19 @@ Pair once with the console's 8-digit code. It takes ~30 seconds, produces **our 
    pull) and waits ~24 ms so the feedback thread delivers it before the sockets
    close. Without this, disconnecting while holding a trigger could leave the
    console acting on a stuck input.
-2. Calls `chiaki_session_stop`, which closes the control and stream sockets
-   cleanly, then joins the session thread.
+2. Sets **`SO_LINGER(0)` on the control socket**, so its close becomes a TCP
+   RST instead of a polite FIN. This is the explicit "I am gone" signal: a
+   polite close leaves the pairing's session reserved on the console for 1-2
+   minutes and reconnects are refused until it times out (documented against
+   the PS5 protocol: "A session closed politely stays reserved on the console.
+   Setting SO_LINGER to zero before abort sends a real RST").
+3. Calls `chiaki_session_stop`, joins and frees the session.
 
-The console still reserves the session for a short moment. If a Connect lands
-inside that window, the console answers "Remote Play on Console is already in
-use"; instead of showing that error once, the app retries every 2.5 s (up to 12
-times) with the note "Console is still releasing the previous session (retry
-N/12)...". Measured on the reference machine: a reconnect 0.4 s after
-disconnect succeeds on the first attempt.
+Measured on the reference machine: Esc, then Connect 1 second later, produces a
+new session that is still running 20+ seconds later (`src 59.8`, `4v 98%`).
+
+**No automatic retries.** A *failed* connect attempt keeps the pairing's
+session held for 1-2 minutes and fast retries extend that window, so the app
+does not hammer the console. If "already in use" still appears (for example
+another device is streaming), the note says to wait about 30 seconds and press
+Connect again.

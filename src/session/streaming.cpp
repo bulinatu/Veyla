@@ -261,6 +261,20 @@ void Streaming::Stop() {
         chiaki_controller_state_set_idle(&idle);
         chiaki_session_set_controller_state(&session_, &idle);
         std::this_thread::sleep_for(std::chrono::milliseconds(24));
+
+        // A polite FIN leaves the pairing's session reserved on the console
+        // for 1-2 minutes, and reconnects during that window are refused.
+        // Setting SO_LINGER(0) turns the control-socket close into a RST,
+        // which frees the session immediately (verified behaviour, see
+        // docs/09-session.md).
+        if (!CHIAKI_SOCKET_IS_INVALID(session_.ctrl.sock)) {
+            linger reset{};
+            reset.l_onoff = 1;
+            reset.l_linger = 0;
+            ::setsockopt(session_.ctrl.sock, SOL_SOCKET, SO_LINGER,
+                         reinterpret_cast<const char*>(&reset), sizeof(reset));
+        }
+
         chiaki_session_stop(&session_);
         chiaki_session_join(&session_);
         chiaki_session_fini(&session_);
