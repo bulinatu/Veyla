@@ -3,8 +3,13 @@
 Windows C++ PS5 Remote Play client on the chiaki-ng session core. DLSS Super
 Resolution, DLSS Frame Generation (through the closed NeuralScreen worker),
 GPU colour and sharpening, a custom PS5-style UI and native DualSense support.
-Build `0.3`. Run `git log -1` for the current commit. The ZIP in `dist\` predates
-this session and must be rebuilt with `tools\package_release.ps1`.
+Build `0.3`. Run `git log -1` for the current commit.
+
+Standalone ZIP (rebuilt 18 Nov 2026, 18:48): `dist\BetterRemotePlay-0.3-standalone.zip`,
+571.6 MB, SHA256 `C7866E1C23A101AE97E68056E7BDAB7B89AE7F0F716D5AD952EF5B4545DB6B72`.
+`dist\BetterRemotePlay\brp.exe` matches `build\Release\brp.exe` (SHA256
+`70F9E2D5E68AFDB2817804FCFE7392E6ACEFD1F2A692398669B903C85EC89CBA`). The package
+contains no `session.json` or pairing data.
 
 ## What works
 
@@ -130,5 +135,4 @@ ticks over 1.5 x budget per 480 frames.
 2. Capture the intro fade and its hand-off to boot.
 3. Side-by-side quality test: Lanczos vs bicubic chroma, 75 vs 100 Mbps.
 4. Decide on the game library: a separate client identity and terms, or no library.
-5. Rebuild the ZIP with `tools\package_release.ps1` and record its SHA256.
-6. Split `app.cpp` and share the Settings and sheet controls.
+5. Split `app.cpp` and share the Settings and sheet controls.

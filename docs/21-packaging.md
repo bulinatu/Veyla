@@ -49,3 +49,12 @@ account.
 - `nvngx.dll` in `nr/native/` and `nvngx_dlss.dll` in the root are different
   NGX components: one is the NeuralScreen worker, the other the DLSS SR feature
   DLL.
+
+## Build 0.3, 18 Nov 2026
+
+- ZIP: `dist\BetterRemotePlay-0.3-standalone.zip`, 571.6 MB,
+  SHA256 `C7866E1C23A101AE97E68056E7BDAB7B89AE7F0F716D5AD952EF5B4545DB6B72`.
+- `dist\BetterRemotePlay\brp.exe` SHA256
+  `70F9E2D5E68AFDB2817804FCFE7392E6ACEFD1F2A692398669B903C85EC89CBA`, identical
+  to `build\Release\brp.exe` at packaging time.
+- No `session.json` or pairing data in the package.
