@@ -55,6 +55,11 @@ public:
               DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING,
               DWRITE_PARAGRAPH_ALIGNMENT valign = DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
+    // Paragraph text: wraps at the rect width and is clipped at its bottom.
+    void TextWrapped(const wchar_t* text, const D2D1_RECT_F& rect, float size,
+                     D2D1_COLOR_F color, DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL,
+                     DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING);
+
     // Same as Text, but truncates with an ellipsis instead of clipping mid-glyph.
     void TextEllipsis(const wchar_t* text, const D2D1_RECT_F& rect, float size,
                       D2D1_COLOR_F color,
@@ -73,7 +78,7 @@ public:
 private:
     IDWriteTextFormat* Format(float size, DWRITE_FONT_WEIGHT weight,
                               DWRITE_TEXT_ALIGNMENT align,
-                              DWRITE_PARAGRAPH_ALIGNMENT valign);
+                              DWRITE_PARAGRAPH_ALIGNMENT valign, bool wrap = false);
 
     // A DirectWrite layout is immutable and independent of the target, so the
     // same label (almost every static string in the UI) can be drawn every
@@ -85,7 +90,7 @@ private:
     };
     IDWriteTextLayout* Layout(const wchar_t* text, float size, DWRITE_FONT_WEIGHT weight,
                               DWRITE_TEXT_ALIGNMENT align, DWRITE_PARAGRAPH_ALIGNMENT valign,
-                              float width, float height, bool ellipsis);
+                              float width, float height, bool ellipsis, bool wrap = false);
 
     struct LinearGradientEntry {
         D2D1_COLOR_F top{};

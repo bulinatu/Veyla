@@ -42,12 +42,6 @@ struct PointerState {
     float wheel = 0.0f;
 };
 
-struct GameEntry {
-    const wchar_t* title;
-    const wchar_t* meta;
-    unsigned accent;  // 0xRRGGBB
-};
-
 class App {
 public:
     ~App();
@@ -75,7 +69,6 @@ private:
 
     enum class Hit {
         None,
-        Tile,
         Stream,
         SettingsButton,
         Back,
@@ -125,8 +118,6 @@ private:
 
     void RenderTopBar();
     void RenderWindowChrome();
-    void DrawTile(const D2D1_RECT_F& rect, const GameEntry& game, float alpha, bool selected,
-                  bool hovered);
 
     void DrawSettingLabel(const wchar_t* label, float y, bool enabled = true);
     void DrawInfoRow(const wchar_t* label, const std::wstring& value, float y);
@@ -223,8 +214,6 @@ private:
 
     Screen screen_ = Screen::Home;
     Tab tab_ = Tab::Display;
-    int selected_ = 0;
-    float scroll_ = 0.0f;
     bool hud_ = true;
     bool hdr_ = false;
     int stream_buffer_ = 1;
@@ -247,7 +236,6 @@ private:
     bool capture_requested_ = false;
     double last_time_ = -1.0;
     double clock_ = 0.0;
-    std::vector<GameEntry> games_;
 
     session::Profile profile_;
     std::string session_note_;

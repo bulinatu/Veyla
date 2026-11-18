@@ -403,16 +403,6 @@ bool App::Init(Win32Window* window) {
         std::fprintf(stderr, "[app] display refresh %d Hz\n", refresh_hz_);
     }
 
-    games_ = {
-        {L"Neon Drift", L"Racing  ·  4h played", 0x2E6BFF},
-        {L"Starfall", L"Action RPG  ·  12h played", 0xB14BFF},
-        {L"Iron Vale", L"Adventure  ·  2h played", 0xFF7A45},
-        {L"Deep Signal", L"Horror  ·  6h played", 0x14B8A6},
-        {L"Velocity Zero", L"Arcade  ·  1h played", 0xFFC145},
-        {L"Hollow Crown", L"Strategy  ·  21h played", 0xEF476F},
-        {L"Skyline 9", L"Shooter  ·  9h played", 0x4DA3FF},
-        {L"Paper Moons", L"Puzzle  ·  30m played", 0x8AC926},
-    };
 
     const std::string session_path = session::DefaultProfilePath();
     std::string session_detail;
@@ -947,12 +937,6 @@ void App::DispatchClick() {
         }
 
         switch (it->hit) {
-            case Hit::Tile:
-                if (selected_ == it->index) {
-                    screen_ = Screen::Stream;
-                }
-                selected_ = it->index;
-                break;
             case Hit::Stream:
                 screen_ = Screen::Stream;
                 break;
@@ -1148,11 +1132,7 @@ void App::HandleKey(int vk) {
 
     switch (screen_) {
         case Screen::Home:
-            if (vk == VK_LEFT) {
-                selected_ = std::max(0, selected_ - 1);
-            } else if (vk == VK_RIGHT) {
-                selected_ = std::min(static_cast<int>(games_.size()) - 1, selected_ + 1);
-            } else if (vk == VK_RETURN) {
+            if (vk == VK_RETURN) {
                 screen_ = Screen::Stream;
             } else if (vk == 'S' || vk == VK_TAB) {
                 screen_ = Screen::Settings;
@@ -1281,12 +1261,6 @@ void App::HandlePad() {
         } else if (screen_ != Screen::Stream) {
             screen_ = Screen::Home;
         }
-    }
-    if ((pressed & PadL1) && screen_ == Screen::Home) {
-        selected_ = std::max(0, selected_ - 1);
-    }
-    if ((pressed & PadR1) && screen_ == Screen::Home) {
-        selected_ = std::min(static_cast<int>(games_.size()) - 1, selected_ + 1);
     }
 }
 
@@ -3472,14 +3446,6 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         }
     }
 
-    if (pointer_.wheel != 0.0f && screen_ == Screen::Home) {
-        const int steps = static_cast<int>(pointer_.wheel);
-        selected_ = std::clamp(selected_ - steps, 0, static_cast<int>(games_.size()) - 1);
-    }
-
-    const float target = static_cast<float>(selected_);
-    scroll_ += (target - scroll_) * (1.0f - std::exp(-16.0f * static_cast<float>(dt)));
-
     if (profile_.dlss_fg >= 2 && nr_.present_mode() && !fg_window_) {
         AttachFgWindow();
     }
@@ -4640,46 +4606,6 @@ void App::RenderWindowChrome() {
     }
 }
 
-void App::DrawTile(const D2D1_RECT_F& rect, const GameEntry& game, float alpha, bool selected,
-                   bool hovered) {
-    ui_.FillRounded({rect.left + 4.0f, rect.top + 12.0f, rect.right + 4.0f, rect.bottom + 12.0f},
-                    22.0f, th::Rgba(0x000000, 0.40f * alpha));
-
-    const float w = rect.right - rect.left;
-    const float h = rect.bottom - rect.top;
-
-    ui_.PushRoundedClip(rect, 22.0f);
-    ui_.FillLinearV(rect, th::Rgba(th::Scale(game.accent, 0.62f), alpha),
-                    th::Rgba(0x05070D, alpha));
-
-    ui_.FillCircle(rect.left + w * 0.80f, rect.top + h * 0.24f, w * 0.58f,
-                   th::Rgba(game.accent, 0.18f * alpha));
-    ui_.FillCircle(rect.left + w * 0.16f, rect.top + h * 0.74f, w * 0.42f,
-                   th::Rgba(0xFFFFFF, 0.05f * alpha));
-    ui_.FillCircle(rect.left + w * 0.52f, rect.top + h * 0.50f, w * 0.10f,
-                   th::Rgba(0xFFFFFF, 0.10f * alpha));
-
-    wchar_t index[8];
-    swprintf_s(index, L"%02d", static_cast<int>(&game - games_.data()) + 1);
-    ui_.Text(index, {rect.left + 22.0f, rect.top + 12.0f, rect.right - 22.0f, rect.top + 66.0f},
-             44.0f, th::Rgba(0xFFFFFF, 0.10f * alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-
-    ui_.Text(game.title, {rect.left + 22.0f, rect.bottom - 62.0f, rect.right - 22.0f,
-                          rect.bottom - 26.0f},
-             16.0f, th::Rgba(th::kInk, alpha), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    ui_.PopClip();
-
-    const float border_alpha = selected ? 0.30f : (hovered ? 0.22f : 0.09f);
-    ui_.StrokeRounded(rect, 22.0f, th::Rgba(0xFFFFFF, border_alpha * alpha), 1.0f);
-
-    if (selected) {
-        ui_.StrokeRounded({rect.left - 6.0f, rect.top - 6.0f, rect.right + 6.0f, rect.bottom + 6.0f},
-                          28.0f, th::Rgba(game.accent, 0.60f), 2.0f);
-    }
-}
-
-
-
 void App::DrawSettingLabel(const wchar_t* label, float y, bool enabled) {
     ui_.Text(label, {panel_x_, y, panel_x_ + 460.0f, y + 56.0f}, 16.0f,
              th::Rgba(enabled ? th::kInk : th::kMuted, enabled ? 0.95f : 0.6f),
@@ -5040,6 +4966,50 @@ void App::RenderHome(double t) {
              {x0 + 36.0f, y0 + 288.0f, x0 + card_w - 36.0f, y0 + 316.0f}, 11.5f,
              th::Rgba(th::kMuted, 0.85f));
 
+    // Three cards with what a session will use. Every value comes from the saved
+    // profile; the library card states what this build cannot show.
+    const float row_y = y0 + card_h + 22.0f;
+    const float gap = 16.0f;
+    const float cw = (card_w - 2.0f * gap) / 3.0f;
+    const float rh = 140.0f;
+    const auto info_card = [&](float left, const wchar_t* kicker, const std::wstring& title,
+                               const std::wstring& body) {
+        const D2D1_RECT_F r{left, row_y, left + cw, row_y + rh};
+        ui_.FillRounded(r, 16.0f, th::Rgba(0xFFFFFF, 0.04f));
+        ui_.StrokeRounded(r, 16.0f, th::Rgba(0xFFFFFF, 0.08f), 1.0f);
+        ui_.Text(kicker, {r.left + 20.0f, r.top + 16.0f, r.right - 20.0f, r.top + 34.0f}, 10.0f,
+                 th::Rgba(th::kMuted, 0.9f), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        ui_.Text(title.c_str(), {r.left + 20.0f, r.top + 38.0f, r.right - 20.0f, r.top + 66.0f},
+                 17.0f, th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        ui_.TextWrapped(body.c_str(), {r.left + 20.0f, r.top + 72.0f, r.right - 20.0f, r.bottom - 10.0f},
+                        12.0f, th::Rgba(th::kInkDim), DWRITE_FONT_WEIGHT_NORMAL);
+    };
+
+    const wchar_t* res_label = profile_.height >= 1440 ? L"1440p"
+                              : (profile_.height >= 1080 ? L"1080p" : L"720p");
+    wchar_t stream_title[64];
+    swprintf_s(stream_title, L"%s  -  %d fps", res_label, profile_.fps);
+    wchar_t stream_body[160];
+    std::wstring codec = Widen(profile_.codec);
+    std::transform(codec.begin(), codec.end(), codec.begin(), ::towupper);
+    swprintf_s(stream_body, L"%s  -  %.0f Mbps  -  %s",
+               codec.c_str(), profile_.bitrate_kbps / 1000.0,
+               profile_.hdr ? L"HDR" : L"SDR");
+    info_card(x0, L"STREAM", stream_title, stream_body);
+
+    const std::vector<std::wstring> upscalers = UpscalerLabels();
+    const std::wstring upscale_name =
+        profile_.neural_sr > 0 ? std::wstring(L"DLSS Super Resolution")
+                               : upscalers[static_cast<size_t>(std::clamp(upscale_, 0, static_cast<int>(upscalers.size()) - 1))];
+    std::wstring enh_body = profile_.dlss_fg >= 2
+                                ? L"Frame generation " + std::to_wstring(profile_.dlss_fg) + L"x"
+                                : std::wstring(L"Frame generation off");
+    enh_body += L"  -  sharpening " + std::to_wstring(profile_.sharpness) + L"%";
+    info_card(x0 + cw + gap, L"ENHANCEMENT", upscale_name, enh_body);
+
+    info_card(x0 + 2.0f * (cw + gap), L"GAME LIBRARY", L"Not in this build",
+              L"Installed titles are not exposed to remote clients. Launch games from the "
+              L"console screen.");
 }
 
 void App::RenderSettings(double t) {

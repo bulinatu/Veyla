@@ -240,3 +240,25 @@ src/platform/win32_window.*   window, mouse/keyboard, per-monitor DPI
   it, opening the session, waiting for the first frame.
 - Shared helpers: `DrawLoaderMark` (rings and tile, with a reveal factor) and
   `DrawLoaderSteps` (the step list).
+
+## Home (18 Nov 2026)
+
+- Hero card: console name, state, address, controller, Connect / Pair / Preview.
+- Three cards under it, every value from the saved profile:
+  - **Stream**: resolution, fps, codec, bitrate, SDR or HDR.
+  - **Enhancement**: upscaler (DLSS SR when on), frame generation multiplier, sharpening.
+  - **Game library**: says that this build does not show a library.
+- The demo titles (`games_`, `GameEntry`, `DrawTile`) are removed. They were
+  invented, and the rail was never drawn.
+
+### Why there is no library yet
+
+- Remote Play streams the console screen. The protocol does not list the games
+  installed on the console.
+- The PSN library endpoint (`gamelist/v2`) needs the `psn:mobile.v2.core` scope.
+  That belongs to the official mobile client, not to this project's Remote Play
+  client identity. The About text says this project ships no Sony keys or
+  client credentials, so the library is not wired. Adding it would be a product
+  decision with a separate client identity and terms to review.
+- Text: `Renderer::TextWrapped` wraps paragraphs. `Text` and `TextEllipsis`
+  stay single-line.

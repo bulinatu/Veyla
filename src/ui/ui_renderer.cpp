@@ -416,10 +416,11 @@ void Renderer::FillRadial(float cx, float cy, float radius, D2D1_COLOR_F inner,
 
 IDWriteTextFormat* Renderer::Format(float size, DWRITE_FONT_WEIGHT weight,
                                     DWRITE_TEXT_ALIGNMENT align,
-                                    DWRITE_PARAGRAPH_ALIGNMENT valign) {
+                                    DWRITE_PARAGRAPH_ALIGNMENT valign, bool wrap) {
     const uint64_t key = (static_cast<uint64_t>(static_cast<int>(std::lround(size * 2.0f))) << 32) |
                          (static_cast<uint64_t>(weight) << 16) |
-                         (static_cast<uint64_t>(align) << 8) | static_cast<uint64_t>(valign);
+                         (static_cast<uint64_t>(align) << 8) | static_cast<uint64_t>(valign) |
+                         (static_cast<uint64_t>(wrap) << 40);
 
     auto it = formats_.find(key);
     if (it != formats_.end()) {
@@ -435,7 +436,7 @@ IDWriteTextFormat* Renderer::Format(float size, DWRITE_FONT_WEIGHT weight,
     }
     format->SetTextAlignment(align);
     format->SetParagraphAlignment(valign);
-    format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    format->SetWordWrapping(wrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
 
     auto [pos, inserted] = formats_.emplace(key, std::move(format));
     return pos->second.Get();
@@ -448,8 +449,8 @@ void Renderer::ClearTextCache() {
 IDWriteTextLayout* Renderer::Layout(const wchar_t* text, float size,
                                     DWRITE_FONT_WEIGHT weight, DWRITE_TEXT_ALIGNMENT align,
                                     DWRITE_PARAGRAPH_ALIGNMENT valign, float width, float height,
-                                    bool ellipsis) {
-    IDWriteTextFormat* format = Format(size, weight, align, valign);
+                                    bool ellipsis, bool wrap) {
+    IDWriteTextFormat* format = Format(size, weight, align, valign, wrap);
     if (!format || !text) {
         return nullptr;
     }
@@ -465,6 +466,7 @@ IDWriteTextLayout* Renderer::Layout(const wchar_t* text, float size,
     key = HashFloat(key, width);
     key = HashFloat(key, height);
     key = MixHash(key, ellipsis ? 0xABCDEFull : 0x123456ull);
+    key = MixHash(key, wrap ? 0x5A5A5Aull : 0x0ull);
 
     auto it = text_cache_.find(key);
     if (it != text_cache_.end()) {
@@ -506,7 +508,21 @@ void Renderer::Text(const wchar_t* text, const D2D1_RECT_F& rect, float size, D2
                     DWRITE_PARAGRAPH_ALIGNMENT valign) {
     IDWriteTextLayout* layout =
         Layout(text, size, weight, align, valign, rect.right - rect.left,
-               rect.bottom - rect.top, false);
+               rect.bottom - rect.top, false, false);
+    if (!layout) {
+        return;
+    }
+    brush_->SetColor(color);
+    dc_->DrawTextLayout(D2D1::Point2F(rect.left, rect.top), layout, brush_.Get(),
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP);
+}
+
+void Renderer::TextWrapped(const wchar_t* text, const D2D1_RECT_F& rect, float size,
+                            D2D1_COLOR_F color, DWRITE_FONT_WEIGHT weight,
+                            DWRITE_TEXT_ALIGNMENT align) {
+    IDWriteTextLayout* layout =
+        Layout(text, size, weight, align, DWRITE_PARAGRAPH_ALIGNMENT_NEAR, rect.right - rect.left,
+               rect.bottom - rect.top, false, true);
     if (!layout) {
         return;
     }
