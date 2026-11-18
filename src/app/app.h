@@ -161,6 +161,8 @@ private:
     void ApplyRenderTarget();
     void ApplyEnhance();
     void TickEnhance();
+    void ApplyLaunchPreset(int preset);
+    void LogHealth();
     void OpenAudioDevice();
     void ApplyControllerOutput();
     void TriggerRumble();
@@ -354,6 +356,8 @@ private:
     EnhanceParams enh_applied_{};
     bool enh_dirty_ = false;
     double enh_dirty_at_ = 0.0;
+    double health_at_ = -1.0;
+    std::string health_path_;
 
 
     // neural rendering (DLSSNR through the NGX worker)

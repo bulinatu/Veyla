@@ -744,6 +744,23 @@ bool Presenter::EnhanceFrameReadback(const uint8_t* rgba, int w, int h, bool src
     return EnhanceViewReadback(source_srv_.Get(), w, h, src_pq, out, ms);
 }
 
+bool Presenter::video_memory_used_mb(uint64_t& used, uint64_t& budget) const {
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgi_device;
+    Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+    Microsoft::WRL::ComPtr<IDXGIAdapter3> adapter3;
+    if (!device_ || FAILED(device_.As(&dxgi_device)) || FAILED(dxgi_device->GetAdapter(&adapter)) ||
+        FAILED(adapter.As(&adapter3))) {
+        return false;
+    }
+    DXGI_QUERY_VIDEO_MEMORY_INFO info{};
+    if (FAILED(adapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info))) {
+        return false;
+    }
+    used = info.CurrentUsage / (1024ull * 1024ull);
+    budget = info.Budget / (1024ull * 1024ull);
+    return true;
+}
+
 void Presenter::Clear(const float rgba[4]) {
     ID3D11RenderTargetView* rtv = rtv_.Get();
     context_->OMSetRenderTargets(1, &rtv, nullptr);

@@ -105,9 +105,13 @@ full-resolution screenshot (`tools/measure_frame.ps1`).
   worker (RGBA8 only); the tone map makes it correct SDR instead of broken.
 - **No 3D LUT / curves yet.** These are 11 scalar controls, not a grading
   suite; a LUT would be the next step and is documented as future work.
-- Cost: the grade itself is one full-screen pass; on this GPU it is below the
-  timer resolution of the frame probe. The readback is the same copy the FG
-  path already paid before this change.
+- Cost: the grade is one full-screen pass. When frame generation is on, the
+  graded path also copies 8.3 MB (1080p) / 14.2 MB (1440p) to a staging texture
+  and maps it, measured at **~5.0-5.6 ms per frame at 1440p** (the same CPU
+  readback the FG path already paid before this change). Without frame
+  generation there is no readback and the cost is below the frame probe's
+  resolution. `work p99` stayed at 5.9-6.3 ms with grading on and the worker
+  held 120 fps.
 
 ## 6. Files
 
@@ -121,3 +125,18 @@ full-resolution screenshot (`tools/measure_frame.ps1`).
   120-136, `ApplyEnhance`/`TickEnhance` (apply on change, save 1 s later),
   HUD `ENH xx ms` when FG is active.
 - `tools/measure_frame.ps1`: screenshot metrics used for the numbers above.
+
+## 7. Companion features shipped in the same build
+
+- **Launch presets** (`Performance` tab, and `Stream` tab of the in-stream
+  overlay): Launch = SR Ultra Quality + FG 2x at 1440p, Safe = FG 2x without
+  SR, SR only, Low latency = raw stream with frame buffer 0. Presets selected
+  without a session are saved and applied when the session starts; with a live
+  session they restart the FG worker once.
+- **Health log** at `%APPDATA%\BetterRemotePlay\health.log`, one line every
+  30 s while the app runs: preset, worker fps, DLSS ms, enhance ms, frame p99,
+  last frame work, late/stalls, source fps, 4v%, queue, drops, lost, decode
+  avg/max, arrival outliers, audio underruns, handles, VRAM used/budget.
+  Rotates to `health.log.1` at 2 MB.
+- Profile fixes: `hdr` is now loaded (it was saved but ignored), and every new
+  colour key is clamped on load.

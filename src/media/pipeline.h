@@ -146,6 +146,10 @@ public:
     // Render() and Present(): the backbuffer is only readable there.
     bool CaptureToBmp(const char* path);
 
+    // Local video memory usage of the process (MB) and the OS budget. Used by
+    // the health log; false when the adapter does not expose IDXGIAdapter3.
+    bool video_memory_used_mb(uint64_t& used, uint64_t& budget) const;
+
     int output_width() const { return cfg_.output_width; }
     int output_height() const { return cfg_.output_height; }
 

@@ -236,9 +236,13 @@ enum WidgetId {
     W_ConsoleTriggers = 50,
     W_Motion = 51,
     W_RenderTarget = 52,
+    // One-click launch fallbacks (Performance tab).
+    W_PresetLaunch = 110,
+    W_PresetSafe,
+    W_PresetSr,
+    W_PresetLow,
     // Display enhance (Colour tab). 120-136; 110-119 stay free for presets.
-    W_ColorOn = 120,
-    W_ColorExposure,
+    W_ColorOn = 120,    W_ColorExposure,
     W_ColorContrast,
     W_ColorHighlights,
     W_ColorShadows,
@@ -428,6 +432,10 @@ bool App::Init(Win32Window* window) {
     streaming_.SetMotionEnabled(motion_);
     th::SetHdr(hdr_);
     ApplyEnhance();
+    {
+        const std::filesystem::path profile_path = session::DefaultProfilePath();
+        health_path_ = (profile_path.parent_path() / "health.log").string();
+    }
 
     pad_.SetBackend(kInputBackends[input_source_]);
 
@@ -1541,6 +1549,18 @@ void App::ApplyDropdown(int id, int index) {
             ApplyEnhance();
             SaveProfile();
             break;
+        case W_PresetLaunch:
+            ApplyLaunchPreset(0);
+            break;
+        case W_PresetSafe:
+            ApplyLaunchPreset(1);
+            break;
+        case W_PresetSr:
+            ApplyLaunchPreset(2);
+            break;
+        case W_PresetLow:
+            ApplyLaunchPreset(3);
+            break;
         case W_ColorReset:
             profile_.sharpness = 35;
             profile_.color_exposure = 0;
@@ -1682,6 +1702,126 @@ void App::TickEnhance() {
         enh_dirty_ = false;
         SaveProfile();
     }
+}
+
+void App::ApplyLaunchPreset(int preset) {
+    switch (preset) {
+        case 0:  // Launch: DLSS SR Ultra Quality + FG 2x at 1440p
+            profile_.neural_sr = 1;
+            profile_.dlss_mode = 4;
+            profile_.dlss_fg = 2;
+            profile_.neural_nr = 0;
+            profile_.render_target = 2;
+            render_target_ = 2;
+            profile_.frame_buffer = 1;
+            stream_buffer_ = 1;
+            ApplyRenderTarget();
+            ApplyNeuralSettings();
+            ApplyDlssFrameGen();
+            stream_note_ = "Launch preset: DLSS SR Ultra Quality + FG 2x.";
+            break;
+        case 1:  // Safe: FG 2x on the raw stream
+            profile_.neural_sr = 0;
+            profile_.dlss_fg = 2;
+            profile_.neural_nr = 0;
+            ApplyNeuralSettings();
+            ApplyDlssFrameGen();
+            stream_note_ = "Safe preset: FG 2x without DLSS SR.";
+            break;
+        case 2:  // SR only
+            profile_.neural_sr = 1;
+            profile_.dlss_mode = 4;
+            profile_.dlss_fg = 0;
+            profile_.neural_nr = 0;
+            ApplyNeuralSettings();
+            ApplyDlssFrameGen();
+            stream_note_ = "SR-only preset: no frame generation.";
+            break;
+        case 3:  // Low latency: raw stream, no neural stages
+            profile_.neural_sr = 0;
+            profile_.dlss_fg = 0;
+            profile_.neural_nr = 0;
+            profile_.upscaler = 0;
+            upscale_ = 0;
+            presenter_.SetUpscaleMode(0);
+            profile_.render_target = 0;
+            render_target_ = 0;
+            profile_.frame_buffer = 0;
+            stream_buffer_ = 0;
+            ApplyNeuralSettings();
+            ApplyDlssFrameGen();
+            ApplyRenderTarget();
+            stream_note_ = "Low-latency preset: raw stream, no neural stages.";
+            break;
+        default:
+            break;
+    }
+    if (!stream_active_) {
+        // No session yet: persist the selection and let the connect path build
+        // the chain (creating DLSS before a stream exists needlessly tears it
+        // down again).
+        SaveProfile();
+        stream_note_ = "Preset saved; it applies when the session starts.";
+        return;
+    }
+    SaveProfile();
+}
+
+void App::LogHealth() {
+    if (health_path_.empty()) {
+        return;
+    }
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (fs::exists(health_path_, ec) && fs::file_size(health_path_, ec) > 2ull * 1024 * 1024) {
+        fs::rename(health_path_, health_path_ + ".1", ec);
+        ec.clear();
+    }
+    std::ofstream file(health_path_, std::ios::app | std::ios::binary);
+    if (!file) {
+        return;
+    }
+
+    SYSTEMTIME st{};
+    ::GetLocalTime(&st);
+    int four = 0;
+    const int held = std::clamp(video_hold_fill_, 0, static_cast<int>(video_holds_.size()));
+    for (int i = 0; i < held; ++i) {
+        if (video_holds_[static_cast<size_t>(i)] == 4) {
+            ++four;
+        }
+    }
+    const int four_pct = held > 0 ? (four * 100) / held : 0;
+    DWORD handles = 0;
+    ::GetProcessHandleCount(::GetCurrentProcess(), &handles);
+    uint64_t vram = 0;
+    uint64_t vram_budget = 0;
+    if (!presenter_.video_memory_used_mb(vram, vram_budget)) {
+        vram = vram_budget = 0;
+    }
+    const double src_fps = streaming_.fps();
+    const float budget_ms = 1000.0f / static_cast<float>(present_hz());
+
+    char line[512];
+    std::snprintf(line, sizeof(line),
+                  "%04d-%02d-%02dT%02d:%02d:%02d sr=%d mode=%d fg=%d nr=%d hdr=%d tgt=%d buf=%d | "
+                  "worker=%.1f dlss=%.2f enh=%.2f | frame_p99=%.2f work=%.2f late=%d stalls=%d | "
+                  "src=%.1f 4v=%d q=%d drops=%d lost=%d dec=%.2f/%.2f out=%d | "
+                  "audio=%d handles=%lu vram=%llu/%llu\n",
+                  st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+                  profile_.neural_sr, profile_.dlss_mode, profile_.dlss_fg, profile_.neural_nr,
+                  hdr_ ? 1 : 0, render_target_, stream_buffer_, fg_worker_fps_,
+                  dlss_sr_.last_ms(), presenter_.enhance_ms(), static_cast<double>(stat_p99_),
+                  frame_work_ms_, stat_late_, stat_stalls_, src_fps, four_pct,
+                  stream_stats_.queue, stream_stats_.buffer_drops + streaming_.video_queue_drops(),
+                  stream_stats_.lost, stream_stats_.decode_ms_avg, stream_stats_.decode_ms_max,
+                  stream_stats_.arrival_outliers, audio_.underruns(),
+                  static_cast<unsigned long>(handles),
+                  static_cast<unsigned long long>(vram),
+                  static_cast<unsigned long long>(vram_budget));
+    file << line;
+    file.flush();
+    (void)budget_ms;
 }
 
 HANDLE App::present_waitable() const {
@@ -2839,6 +2979,12 @@ void App::TickSession() {
     }
     screen_ = Screen::Stream;
     stream_note_.clear();
+    // Build the persisted neural chain now that a session exists (a preset may
+    // have been chosen while disconnected).
+    if (profile_.neural_sr > 0 || profile_.dlss_fg >= 2) {
+        ApplyNeuralSettings();
+        ApplyDlssFrameGen();
+    }
     std::fprintf(stderr, "[app] streaming started\n");
 }
 
@@ -3077,6 +3223,10 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     // (and persist a second after the last change) without touching the
     // capture or the colour itself.
     TickEnhance();
+    if (clock_ - health_at_ >= 30.0) {
+        health_at_ = clock_;
+        LogHealth();
+    }
 
     // Mouse activity drives the stream chrome and the OS cursor.
     if (pointer.x != last_mouse_x_ || pointer.y != last_mouse_y_ || pointer.clicked ||
@@ -4986,6 +5136,25 @@ void App::RenderSettings(double t) {
                          {kContentX, y + 58.0f, w - 64.0f, y + 84.0f}, 11.5f,
                          th::Rgba(th::kMuted));
             }
+
+            // One-click fallbacks for launch night.
+            y = 590.0f;
+            ui_.Text(L"Launch presets", {kContentX, y, w - 64.0f, y + 30.0f}, 16.0f,
+                     th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+            y += 38.0f;
+            DrawButton(L"Launch: SR + FG 2x",
+                       {kContentX, y, kContentX + 250.0f, y + 44.0f}, W_PresetLaunch, true);
+            DrawButton(L"Safe: FG 2x", {kContentX + 266.0f, y, kContentX + 516.0f, y + 44.0f},
+                       W_PresetSafe, false);
+            y += 54.0f;
+            DrawButton(L"SR only", {kContentX, y, kContentX + 250.0f, y + 44.0f}, W_PresetSr,
+                       false);
+            DrawButton(L"Low latency", {kContentX + 266.0f, y, kContentX + 516.0f, y + 44.0f},
+                       W_PresetLow, false);
+            y += 56.0f;
+            ui_.Text(L"Presets change the whole chain and restart the FG worker once; "
+                     L"apply them before playing, not during a fight.",
+                     {kContentX, y, w - 64.0f, y + 28.0f}, 11.5f, th::Rgba(th::kMuted));
             break;
         }
 
@@ -5892,6 +6061,18 @@ void App::RenderStreamSettings(double t) {
                           L"CUDA (NVDEC)", L"Software"},
                          std::clamp(profile_.decoder, 0, 6), y, W_Decoder);
             y += row;
+            ui_.Text(L"Quick presets", {kContentX, y, w - 64.0f, y + 22.0f}, 12.5f,
+                     th::Rgba(th::kMuted));
+            y += 26.0f;
+            DrawButton(L"Launch", {kContentX, y, kContentX + 150.0f, y + 40.0f},
+                       W_PresetLaunch, true);
+            DrawButton(L"Safe", {kContentX + 160.0f, y, kContentX + 310.0f, y + 40.0f},
+                       W_PresetSafe, false);
+            DrawButton(L"SR only", {kContentX + 320.0f, y, kContentX + 470.0f, y + 40.0f},
+                       W_PresetSr, false);
+            DrawButton(L"Low latency", {kContentX + 480.0f, y, kContentX + 630.0f, y + 40.0f},
+                       W_PresetLow, false);
+            y += 46.0f;
             break;
         }
     }
