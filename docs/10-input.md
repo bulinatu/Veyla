@@ -61,6 +61,23 @@ HID takes priority. Sony pads are found by VID/PID (`054C:0CE6`, `054C:05C4`, `0
 | USB | `0x01`, 64 bytes | `0x02`, 48 bytes |
 | Bluetooth | `0x31`, 78 bytes (`0x01` 10-byte simple mode also parsed) | `0x31`, 78-byte report, zero-padded to `OutputReportByteLength` (547 on Windows) |
 
+### Bluetooth checksum (fixed 18 Nov 2026)
+
+Sony signs the first 74 bytes of the Bluetooth `0x31` output report with a
+CRC32 seeded by processing the byte `0xA2` through the raw table after an
+`0xFFFFFFFF` init, then inverting the result:
+
+```
+crc = crc32_le(0xFFFFFFFF, &seed, 1);
+crc = ~crc32_le(crc, data, 74);
+```
+
+The old code used the zlib convention (`init = ~seed`), which produces a
+different value for every packet. The controller validated the checksum,
+rejected every Bluetooth output report, and silently ignored rumble, LEDs and
+trigger effects; USB has no checksum, which is why cable worked. Verified
+against `drivers/hid/hid-playstation.c` and by the Rumble test over Bluetooth.
+
 Detection is by `HIDP_CAPS.InputReportByteLength`: 64 = USB, 78 = Bluetooth extended, ≤11 = Bluetooth simple.
 
 ---
