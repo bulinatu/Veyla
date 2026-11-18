@@ -443,8 +443,14 @@ void Streaming::OnEvent(ChiakiEvent* event) {
             std::memcpy(&feedback_.right.bytes[1], event->trigger_effects.right, 10);
             feedback_.version = feedback_version_.fetch_add(1) + 1;
             if (probe) {
-                std::fprintf(stderr, "[pad] trigger effects L=%02x R=%02x\n",
-                             feedback_.left.bytes[0], feedback_.right.bytes[0]);
+                std::fprintf(stderr,
+                             "[pad] trigger effects L=%02x [%02x %02x %02x %02x] R=%02x [%02x %02x "
+                             "%02x %02x]\n",
+                             feedback_.left.bytes[0], feedback_.left.bytes[1],
+                             feedback_.left.bytes[2], feedback_.left.bytes[3],
+                             feedback_.left.bytes[4], feedback_.right.bytes[0],
+                             feedback_.right.bytes[1], feedback_.right.bytes[2],
+                             feedback_.right.bytes[3], feedback_.right.bytes[4]);
             }
             break;
         }

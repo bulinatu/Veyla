@@ -837,6 +837,20 @@ bool Gamepad::SendOutput(const PadOutput& output) {
     }
 
     static const bool probe = std::getenv("BRP_PAD_PROBE") != nullptr;
+    if (probe && (output.left_trigger || output.right_trigger)) {
+        static ULONGLONG last_trig = 0;
+        const ULONGLONG now = ::GetTickCount64();
+        if (now - last_trig > 500) {
+            last_trig = now;
+            std::fprintf(stderr,
+                         "[hid] triggers bt=%d L=%02x [%02x %02x %02x] R=%02x [%02x %02x %02x] "
+                         "intensity=0x%02X\n",
+                         bluetooth_ ? 1 : 0, output.left.bytes[0], output.left.bytes[1],
+                         output.left.bytes[2], output.left.bytes[3], output.right.bytes[0],
+                         output.right.bytes[1], output.right.bytes[2], output.right.bytes[3],
+                         output.intensity);
+        }
+    }
     if (probe && output.rumble) {
         static int last_weak = -1;
         static int last_strong = -1;
