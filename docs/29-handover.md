@@ -1,75 +1,109 @@
 # 29 - Handover (18 Nov 2026)
 
-Windows C++ PS5/PS4 Remote Play client built on the chiaki-ng session core, with
-DLSS Super Resolution, DLSS Frame Generation, GPU colour/sharpening, a PS5-like
-custom UI and native DualSense support. Roughly 15.9k lines under `src/`.
-Current build: `0.3`, standalone ZIP at `dist\BetterRemotePlay-0.3-standalone.zip`.
+Windows C++ PS5 Remote Play client on the chiaki-ng session core. DLSS Super
+Resolution, DLSS Frame Generation (through the closed NeuralScreen worker),
+GPU colour and sharpening, a custom PS5-style UI and native DualSense support.
+Build `0.3`. Last commit: `61310a8`. The ZIP in `dist\` predates this session
+and must be rebuilt with `tools\package_release.ps1`.
 
-## What works today
+## What works
 
 | Area | State |
 | --- | --- |
-| Video | 720p/1080p negotiated, HEVC, D3D11VA/D3D12VA/Vulkan/DXVA2/NVDEC/software, chroma bilinear/bicubic/lanczos. The 30/60 fps setting paces the client output; the console always encodes at its own rate (60). 1080p60 measured with 0 lost / 0 drops on LAN. |
-| Audio | Opus 48 kHz stereo -> WASAPI, device picker, 10-40 ms buffer, test tone, underrun counter. |
-| Presenter | Flip-discard swapchain, waitable vblank clock, 4-refresh cadence at 60 fps, F11 fullscreen, F12 screenshot, device-loss recovery. |
-| Upscalers | Bilinear, Catmull-Rom, Lanczos+RCAS, FSR1 EASU, DLSS SR (33/50/58/66/77 %) and DLAA with K/L/M presets. |
-| Frame generation | DLSS FG 2x through the NeuralScreen worker at 120 fps on 240 Hz, fed by DLSS SR at render resolution. Measured 120.0 fps displayed. |
-| Colour | Exposure, contrast, highlights, shadows, saturation, vibrance, hue, temperature, tint, gamma, sharpening; 4 presets + reset; applied before the FG worker. |
-| Controller | Native DualSense HID over USB and Bluetooth: buttons, sticks, touchpad, motion, lightbar, player LEDs, mic LED, rumble, adaptive triggers, console feedback relay. Steam Input/XInput fallback. |
-| Session | PSN sign-in, pairing, LAN discovery, wake from rest, probe, explicit disconnect (RST) that frees the console session. A remote failure returns Home with the reason; there is no automatic re-dial. |
-| UI | Home, Settings (10 tabs), in-stream sheet (Tab), HUD toggles, double-Esc confirmation, boot-style connecting animation. |
-| Diagnostics | `%APPDATA%\BetterRemotePlay\health.log` every 30 s; `nr-worker.log`; probes `BRP_FRAME_PROBE`, `BRP_DECODE_PROBE`, `BRP_PAD_PROBE`. |
+| Video | HEVC, 720p/1080p negotiated, D3D11VA/D3D12VA/Vulkan/DXVA2/NVDEC/software. 1080p60 on LAN: 0 lost, 0 drops. |
+| Stream smoothness | Streams start borderless fullscreen (F11 returns to the window). With SR on, 60 fps source on 240 Hz: 4 refreshes on 100 % of frames, 0 late ticks, interval p99 4.4 ms. |
+| Audio | Opus 48 kHz stereo to WASAPI, device picker, 10-40 ms buffer, test tone. |
+| Upscalers | Bilinear, Catmull-Rom, Lanczos+RCAS, FSR1, DLSS SR (33-77 %) and DLAA with K/L/M presets. |
+| Frame generation | DLSS FG 2x through the worker: 120.0 fps displayed on 240 Hz. 3x-6x are GPU-limited (~140-165 fps). |
+| Launch presets | Launch (SR UQ + FG 2x), SR only, Low latency. Saved while streaming; the chain applies at the next start. |
+| Colour | 11 controls and 4 presets, applied on the GPU before the FG worker. |
+| Controller | DualSense over USB and Bluetooth: buttons, sticks, touchpad, motion, lightbar, LEDs, rumble, adaptive triggers, console feedback. |
+| Session | PSN sign-in, pairing, LAN discovery, wake, probe. Disconnect sends an idle pad state and an RST, so the console frees the session at once. No automatic re-dial. |
+| UI | Start-up intro, boot loader, Home, Settings (10 tabs), in-stream sheet (Tab), double-Esc confirmation, connecting loader. |
+| Diagnostics | `%APPDATA%\BetterRemotePlay\health.log` every 30 s, `nr-worker.log`, probes `BRP_FRAME_PROBE`, `BRP_DECODE_PROBE`, `BRP_PAD_PROBE`. |
 
-## Known problems / limits
+## Changes in this session (since `ab5ecf5`)
 
-1. **FG 120 on 240 Hz is not vblank-phase locked.** Some frames hold 1 or 3
-   refreshes instead of 2, which is felt as a slight speed wobble while panning.
-   The worker presents on its own clock and is closed, so the app cannot align
-   it. Possible workaround: enable G-SYNC. Changing the monitor to 120 Hz was
-   rejected by the user and is not offered.
-2. **Windowed presentation judders at 60 fps (fixed: streams start fullscreen).**
-   Windowed, 62-84 % of source frames held 4 refreshes; fullscreen, 95-100 %.
-   The cause is DWM composition, not decode, SR or buffering. A stream now
-   enters borderless fullscreen on start; F11 returns to the window. Measured
-   with SR on: 4v 100 %, late 0, interval p99 4.4 ms.
-   Rejected along the way: MMCSS "Games" on the main thread (median late 16 vs 9,
-   reverted); jitter buffer 2 (no gain over 1); fps 30 in the profile, which
-   halves the source and was reset to 60.
-3. **FG without SR is not offered.** A worker restarted at 1080p without SR came
-   up in overlay mode and never presented. Safe fallbacks are SR only or raw.
-4. **Presets apply at the next session only (intended).** While streaming, a
-   preset saves the selection and the note says it applies on the next start.
-   Building the chain mid-session once broke the D3D12VA decoder ("Failed to map
-   D3D12 Buffer resource"). Note: the preset code previously applied the chain
-   even while streaming, contrary to its comment; fixed, build-verified only.
-5. **HDR through FG is SDR.** The worker only accepts RGBA8 (format 28), so the
-   graded readback tone-maps. Parent window can still be HDR; the worker cannot.
-6. **DLSS NR** works inside the worker but costs ~7-18 fps at 2x; **FG 3x-6x**
-   land between refreshes (~140-165 fps measured), so 2x is the only smooth claim.
-7. **Bluetooth triggers** depend on the console sending non-zero effect packets;
-   the 0x31 report CRC was fixed and rumble verified. Report is zero-padded to
-   Windows' 547-byte output length; the 78-byte report is correct.
-8. **Network**: PC side tuned and measured (docs/26); router and PS5 items are
-   still a fill-in checklist. Bitrate 100 Mbps tested clean; 50/75 not swept.
-9. **No self-update.** Distribution is the ZIP; updating is manual.
-10. **Structure debt**: `app.cpp` is ~5.7k lines, the Settings page and the
-    in-stream sheet duplicate several panels, and the legacy NVIDIA VFG and
-    Reflex paths are kept on purpose (features, not dead code).
+**Stream smoothness**
+- `38d6f5a` Streams start borderless fullscreen. Cause: windowed presentation
+  goes through DWM composition and held 4 refreshes on 62-84 % of frames;
+  fullscreen gave 95-100 %.
+- `f3d52d4` Presets only save while a session runs; the chain is built at the
+  next start. The old code applied the chain mid-stream, contrary to its comment.
+- Profile `fps` was 30 on the test machine (halves the source). Reset to 60.
+
+**Settings** (`7de3310`)
+- Display: HDR, decoder, chroma, Latency HUD (the only master switch).
+- Upscaling: upscaler, target, DLSS mode and preset, DLSS Frame Generation,
+  NVIDIA VFG (legacy).
+- Performance: frame buffer, Reflex, launch presets.
+- Debug: HUD sections only. Map in `docs/08-app.md`.
+
+**Visual pass**
+- `54e9819` Home hero with a console silhouette and accent line; Settings content
+  on one glass card; refined dropdown, slider and primary button states.
+- `bfe9887` Stream sheet uses the same tab names and grouping as Settings, with a
+  Performance tab, glass panel and 124 px tabs.
+- `1730ba1` Boot screen: the mark draws in, and a step card lists the real
+  start-up tasks. Connect loader shows from the first click, with the real phases
+  (check, wake, session, first frame).
+- `b9b2667` Home: three info cards from the profile (stream, enhancement,
+  game library). Invented demo titles, `GameEntry`, `DrawTile` and the dead
+  rail code are removed. `Renderer::TextWrapped` added for paragraphs.
+- `9ceca24`, `61310a8` Start-up intro ("RemotePlay but Better"): 3.6 s, four
+  acts (converging particles, letter-by-letter reveal, shock ring and rule,
+  glint and fade to black). Skippable with a click.
+
+**Rejected and reverted**
+- MMCSS "Games" on the main thread: median 16 late ticks per 480 vs 9 baseline.
+- Display mode switch to 120 Hz for FG: user declined.
+- Jitter buffer 2: no gain over 1.
+
+## Known problems and limits
+
+1. **FG 2x on 240 Hz still has a small phase wobble.** The worker presents on
+   its own clock and is closed, so the app cannot align it. G-SYNC is the
+   remaining untested option (a Windows setting, not a code change).
+2. **Game library is not shown.** Remote Play does not list installed games.
+   The PSN library endpoint needs the `psn:mobile.v2.core` scope, which belongs
+   to the official mobile client. The project ships no Sony keys or client
+   identities (About says so), so this is a product decision, not a bug.
+3. **FG without SR is not offered.** A worker restarted at 1080p without SR
+   came up in overlay mode and never presented.
+4. **HDR through FG is SDR.** The worker accepts only RGBA8 (format 28).
+5. **DLSS NR costs 7-18 fps at 2x.** NR runs in the worker.
+6. **Bluetooth triggers** depend on the console sending effect packets.
+7. **Network**: PC side measured (`docs/26`). Router and PS5 items are a
+   checklist. Bitrate 100 Mbps tested clean; 50/75 not swept.
+8. **Chroma and bitrate quality are not compared.** Lanczos chroma and 75 vs 100
+   Mbps need a side-by-side test on a real game.
+9. **Untested after the last edits:**
+   - the intro's final fade and the hand-off to boot (captured up to 2.8 s only);
+   - the Upscaling and Performance tabs inside the in-stream sheet (compiled, not
+     screenshotted);
+   - the boot card position after the last move.
+10. **No self-update.** Distribution is the ZIP.
+11. **Structure debt**: `app.cpp` is ~6k lines. Settings and the stream sheet
+    still repeat control code. The VFG and Reflex paths stay on purpose.
 
 ## Where things are
 
 | File | Purpose |
 | --- | --- |
-| `src/app/app.cpp` / `.h` | Screens, settings, frame loop, DLSS/NR/FG chain, presets, health log, recovery |
+| `src/app/app.cpp` / `.h` | Screens, intro, boot, loaders, Home, Settings, stream sheet, presets, health log, recovery |
+| `src/ui/ui_renderer.cpp` / `.h` | D2D/DirectWrite drawing, text (`Text`, `TextEllipsis`, `TextWrapped`), caches |
 | `src/media/pipeline.cpp` | Swapchain, pacing, upscale + sharpen + colour, graded readback |
 | `src/media/shaders.h` | HLSL: upscalers, CAS, colour grade, HDR encode |
 | `src/media/nv_dlss_sr.cpp` | DLSS SR/DLAA on D3D12, two output slots, async submit |
-| `src/media/nv_dlssnr.cpp` | Closed NeuralScreen worker: SHM/RNSZ/WNDO protocol, present mode |
+| `src/media/nv_dlssnr.cpp` | Closed NeuralScreen worker: SHM/RNSZ/WNDO protocol |
 | `src/session/streaming.cpp` | chiaki session, decode thread, jitter buffer, feedback, disconnect |
 | `src/platform/gamepad.cpp` | DualSense HID input/output, USB/BT reports, CRC |
+| `src/platform/win32_window.cpp` | Window, DPI, refresh rate, fullscreen chrome |
 | `src/session/profile.cpp` | JSON profile, defaults, clamps |
-| `tools/package_release.ps1` | Standalone ZIP |
-| `tools/measure_frame.ps1`, `measure_presents.ps1` | Screenshot/presentation measurements |
+| `docs/08-app.md` | UI: tab map, Home, loaders, intro choreography |
+| `docs/09-session.md` | Connect, disconnect, reconnect |
+| `docs/26-network-setup.md` | Network measurements and checklist |
+| `docs/27-color-and-sharpening.md` | Colour math and costs |
 
 ## Run and diagnose
 
@@ -80,16 +114,18 @@ build\Release\brp.exe                     # needs the DLLs next to it
 build\Release\nr-worker.log               # FG worker truth ([fg] displayed)
 ```
 
-Probes: `set BRP_FRAME_PROBE=1`, `BRP_DECODE_PROBE=1`, `BRP_PAD_PROBE=1`, then
-run from a console so stderr is visible.
+Rebuild: `cmake --build build-perf --config Release --target brp --parallel 8`,
+then copy `build-perf\Release\brp.exe` to `build\Release\brp.exe`. Close the
+running app first, or the copy fails with "being used by another process".
 
-Rebuild: `cmake --build build-perf --config Release --target brp --parallel 8`
-then copy `build-perf\Release\brp.exe` to `build\Release`.
+Frame measurement: `BRP_FRAME_PROBE=1` prints `[frame]` lines; `late` counts
+ticks over 1.5 x budget per 480 frames.
 
 ## Next, in priority order
 
-1. Evaluate G-SYNC for FG 2x on 240 Hz (no display mode change). Worker-side pacing stays out of scope.
-2. Finish router + PS5 settings and the bitrate/reconnect matrix (docs/26).
-3. Decide whether the legacy VFG and Reflex paths stay (maintenance vs features).
-4. Split `app.cpp` and share the Settings/overlay panels.
-5. Self-update (private repo + per-user key, or GitHub device flow).
+1. Test G-SYNC for FG 2x on 240 Hz (Windows setting only).
+2. Capture the untested items above (intro fade, sheet tabs, boot card).
+3. Side-by-side quality test: Lanczos vs bicubic chroma, 75 vs 100 Mbps.
+4. Decide on the game library: a separate client identity and terms, or no library.
+5. Rebuild the ZIP with `tools\package_release.ps1` and record its SHA256.
+6. Split `app.cpp` and share the Settings and sheet controls.
