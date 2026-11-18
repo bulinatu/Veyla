@@ -1756,15 +1756,13 @@ void App::ApplyLaunchPreset(int preset) {
         default:
             break;
     }
-    if (!stream_active_) {
-        // No session yet: persist the selection and let the connect path build
-        // the chain (creating DLSS before a stream exists needlessly tears it
-        // down again).
-        SaveProfile();
-        stream_note_ = "Preset saved; it applies when the session starts.";
-        return;
-    }
+    // Only the selection changes here. Building the chain mid-session restarts
+    // the FG worker and has been observed to upset the D3D12VA decoder, so the
+    // chain is built once, on connect (TickSession), or on the next start.
     SaveProfile();
+    stream_note_ = stream_active_
+                       ? "Preset saved. Disconnect and reconnect to apply it."
+                       : "Preset saved; it applies when the session starts.";
 }
 
 void App::LogHealth() {
@@ -2918,6 +2916,15 @@ void App::StartStream() {
     screen_ = Screen::Stream;
     stream_note_ = "Connecting to " + profile_.host + " ...";
 
+    // Build the persisted chain before any frames flow. Changing DLSS/worker
+    // state while D3D12VA is decoding has been observed to upset the decoder,
+    // so presets are only saved and land here.
+    ApplyRenderTarget();
+    if (profile_.neural_sr > 0 || profile_.dlss_fg >= 2) {
+        ApplyNeuralSettings();
+        ApplyDlssFrameGen();
+    }
+
     const session::Profile profile_copy = profile_;
     const int width = profile_copy.width;
     const int height = profile_copy.height;
@@ -2979,12 +2986,6 @@ void App::TickSession() {
     }
     screen_ = Screen::Stream;
     stream_note_.clear();
-    // Build the persisted neural chain now that a session exists (a preset may
-    // have been chosen while disconnected).
-    if (profile_.neural_sr > 0 || profile_.dlss_fg >= 2) {
-        ApplyNeuralSettings();
-        ApplyDlssFrameGen();
-    }
     std::fprintf(stderr, "[app] streaming started\n");
 }
 
@@ -6061,18 +6062,6 @@ void App::RenderStreamSettings(double t) {
                           L"CUDA (NVDEC)", L"Software"},
                          std::clamp(profile_.decoder, 0, 6), y, W_Decoder);
             y += row;
-            ui_.Text(L"Quick presets", {kContentX, y, w - 64.0f, y + 22.0f}, 12.5f,
-                     th::Rgba(th::kMuted));
-            y += 26.0f;
-            DrawButton(L"Launch", {kContentX, y, kContentX + 150.0f, y + 40.0f},
-                       W_PresetLaunch, true);
-            DrawButton(L"Safe", {kContentX + 160.0f, y, kContentX + 310.0f, y + 40.0f},
-                       W_PresetSafe, false);
-            DrawButton(L"SR only", {kContentX + 320.0f, y, kContentX + 470.0f, y + 40.0f},
-                       W_PresetSr, false);
-            DrawButton(L"Low latency", {kContentX + 480.0f, y, kContentX + 630.0f, y + 40.0f},
-                       W_PresetLow, false);
-            y += 46.0f;
             break;
         }
     }
