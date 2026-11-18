@@ -1,6 +1,6 @@
 # 28 - Code audit and polish pass
 
-Scope: every file under `src/` (23k lines), plus the build. Method: a clean
+Scope: every file under `src/` (~15.9k lines), plus the build. Method: a clean
 `/W4 /permissive-` build with warnings surfaced, a definition/reference scan for
 unused functions and members, and a duplication review of the UI code.
 
@@ -84,5 +84,5 @@ No behaviour change; the compiler needs no fences on x86 for these flags.
 - Clean `/W4` build, no warnings from `src/`.
 - Runtime: session starts, source 60 fps, `4v` 91-100%, `drops 0`, `lost 0`,
   pad on Bluetooth with `output OK`.
-- Diff: 7 files, ~47 insertions / 62 deletions before the atomic change; the
-  atomic conversion touches `app.h` plus one `.load()` site.
+- Code diff: 7 files, +52 / -62 lines (this document is separate). The atomic
+  conversion touches four declarations in `app.h` plus one `.load()` site.
