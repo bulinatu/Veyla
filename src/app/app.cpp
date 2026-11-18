@@ -4850,79 +4850,103 @@ void App::DrawPopup() {
 void App::RenderIntro(double t) {
     const float w = ui_w_;
     const float h = ui_h_;
+    const float tf = static_cast<float>(t);
+    const float cx = w * 0.5f;
 
-    ui_.BeginFrame();
-
-    ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(th::kBgTop), th::Rgba(th::kBgBottom));
-    // Two aurora glows that drift slowly, so the background is never still.
-    ui_.FillRadial(w * 0.5f + std::sin(static_cast<float>(t) * 0.4f) * w * 0.12f, h * 0.36f,
-                   w * 0.46f, th::Rgba(th::kAccent, 0.14f), th::Rgba(th::kAccent, 0.0f));
-    ui_.FillRadial(w * 0.5f - std::cos(static_cast<float>(t) * 0.3f) * w * 0.16f, h * 0.70f,
-                   w * 0.38f, th::Rgba(0x3E2170, 0.22f), th::Rgba(0x3E2170, 0.0f));
-
-    auto ease = [](float x) {
+    auto clamp01 = [](float x) { return std::clamp(x, 0.0f, 1.0f); };
+    auto ease_out = [](float x) {
         x = std::clamp(x, 0.0f, 1.0f);
         return 1.0f - std::pow(1.0f - x, 3.0f);
     };
 
-    // RemotePlay first, then "but" appears under it, then "Better" completes
-    // the line to the right; the pair re-centres as it appears.
-    const float remote = ease(static_cast<float>((t - 0.05) / 0.75));
-    const float but = ease(static_cast<float>((t - 1.00) / 0.60));
-    const float better = ease(static_cast<float>((t - 1.70) / 0.55));
-    const float outro = static_cast<float>(std::clamp((t - 3.05) / 0.50, 0.0, 1.0));
-    const float fade = 1.0f - outro;
+    // Everything fades in from black at the start and out to black at the end,
+    // so the hand-off to the boot screen is a cut to a dark frame, not a jump.
+    const float outro = clamp01((tf - 3.00f) / 0.60f);
+    const float fade = clamp01(tf / 0.45f) * (1.0f - outro);
 
-    DrawBrandMark(w * 0.5f, h * 0.30f, ease(static_cast<float>(t / 0.90)), static_cast<float>(t), fade);
+    ui_.BeginFrame();
+    ui_.FillLinearV({0.0f, 0.0f, w, h}, th::Rgba(th::kBgTop), th::Rgba(th::kBgBottom));
+    ui_.FillRadial(cx + std::sin(tf * 0.4f) * w * 0.12f, h * 0.36f, w * 0.46f,
+                   th::Rgba(th::kAccent, 0.14f * fade), th::Rgba(th::kAccent, 0.0f));
+    ui_.FillRadial(cx - std::cos(tf * 0.3f) * w * 0.16f, h * 0.70f, w * 0.38f,
+                   th::Rgba(0x3E2170, 0.22f * fade), th::Rgba(0x3E2170, 0.0f));
+
+    // Act 1: particles converge from the edges onto the mark and vanish into it.
+    const float mx = cx;
+    const float my = h * 0.30f;
+    const float reach = std::hypot(w, h) * 0.62f;
+    for (int i = 0; i < 64; ++i) {
+        const float fi = static_cast<float>(i);
+        const float delay = (fi / 64.0f) * 0.45f;
+        const float p = ease_out((tf - delay) / 1.10f);
+        if (p <= 0.0f) {
+            continue;
+        }
+        const float a = fi * 2.39996f;  // golden angle: an even spread without clumps
+        const float r = reach * (1.0f - p) + 6.0f;
+        const float alpha = std::sin(p * 3.14159f) * 0.85f * fade;
+        ui_.FillCircle(mx + std::cos(a) * r, my + std::sin(a) * r, 1.2f + static_cast<float>(i % 3) * 0.5f,
+                       th::Rgba(i % 4 == 0 ? th::kAccentWarm : th::kAccent, alpha));
+    }
+
+    // The mark draws itself in, then a shock ring leaves it.
+    DrawBrandMark(mx, my, clamp01(tf / 0.90f), tf, fade);
+    const float shock = clamp01((tf - 1.95f) / 0.90f);
+    if (shock > 0.0f && shock < 1.0f) {
+        ui_.StrokeCircle(mx, my, 60.0f + 300.0f * ease_out(shock),
+                         th::Rgba(th::kAccent, (1.0f - shock) * 0.6f * fade), 2.0f);
+    }
 
     const float size1 = std::clamp(h * 0.064f, 42.0f, 88.0f);
     const float size2 = size1 * 0.62f;
     const float gap = size2 * 0.30f;
+    const float y1 = h * 0.62f;
+    const float y2 = y1 + size1 * 0.95f;
 
     const float w_remote_word = ui_.TextWidth(L"Remote", size1, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    const float w_play_word = ui_.TextWidth(L"Play", size1, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    const float w_remote = w_remote_word + w_play_word;
-    const float w_better = ui_.TextWidth(L"Better", size2, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const float w_play = ui_.TextWidth(L"Play", size1, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const float w_remote = w_remote_word + w_play;
     const float w_but = ui_.TextWidth(L"but", size2, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const float w_better = ui_.TextWidth(L"Better", size2, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    const float x_remote = cx - w_remote * 0.5f;
+    const float x_but = cx - (w_but + gap + w_better) * 0.5f;
+    const float x_better = x_but + w_but + gap;
 
-    // Centre the two-line lockup as one block, both horizontally and vertically.
-    const float step = size1 * 0.95f;
-    const float y1 = h * 0.62f - step * 0.5f + (1.0f - remote) * 10.0f;
-    const float y2 = y1 + step + (1.0f - but) * 12.0f;
+    // Act 2: each letter rises and fades in, staggered from the left. Positions
+    // come from the prefix widths, so kerning matches the static layout.
+    auto reveal_word = [&](const wchar_t* word, float x, float cy, float size, float start,
+                           uint32_t rgb, float lift) {
+        const std::wstring text(word);
+        for (size_t i = 0; i < text.size(); ++i) {
+            const float local = ease_out((tf - start - static_cast<float>(i) * 0.045f) / 0.35f);
+            if (local <= 0.0f) {
+                continue;
+            }
+            const float ox = i == 0 ? 0.0f
+                                    : ui_.TextWidth(text.substr(0, i).c_str(), size,
+                                                    DWRITE_FONT_WEIGHT_SEMI_BOLD);
+            const std::wstring ch = text.substr(i, 1);
+            const float cw = ui_.TextWidth(ch.c_str(), size, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+            const float dy = (1.0f - local) * lift;
+            ui_.Text(ch.c_str(), {x + ox, cy - size + dy, x + ox + cw + 2.0f, cy + size + dy}, size,
+                     th::Rgba(rgb, local * fade), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        }
+    };
+    reveal_word(L"Remote", x_remote, y1, size1, 0.70f, th::kInk, size1 * 0.25f);
+    reveal_word(L"Play", x_remote + w_remote_word, y1, size1, 1.05f, th::kAccent, size1 * 0.25f);
+    reveal_word(L"but", x_but, y2, size2, 1.95f, th::kAccent, size2 * 0.25f);
+    reveal_word(L"Better", x_better, y2, size2, 2.25f, th::kInk, size2 * 0.25f);
 
-    const float x_remote = w * 0.5f - w_remote * 0.5f;
-    ui_.Text(L"Remote",
-             {x_remote, y1 - size1, x_remote + w_remote_word, y1 + size1}, size1,
-             th::Rgba(th::kInk, remote * fade), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    ui_.Text(L"Play",
-             {x_remote + w_remote_word, y1 - size1, x_remote + w_remote, y1 + size1}, size1,
-             th::Rgba(th::kAccent, remote * fade), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-
-    // Width-weighted centring: as each word appears the line stays centred.
-    const float wb = w_but * but;
-    const float wbe = w_better * better;
-    const float total2 = wb + wbe + gap * better;
-    float x2 = w * 0.5f - total2 * 0.5f;
-    if (but > 0.001f) {
-        ui_.Text(L"but", {x2, y2 - size2, x2 + wb, y2 + size2}, size2,
-                 th::Rgba(th::kAccent, but * fade), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        x2 += wb + gap * better;
-    }
-    if (better > 0.001f) {
-        ui_.Text(L"Better", {x2, y2 - size2, x2 + wbe, y2 + size2}, size2,
-                 th::Rgba(th::kInk, better * fade), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    }
-
-    // A glint crosses the finished line, and an accent rule grows beneath it.
-    if (better >= 0.99f) {
-        const float phase = std::fmod(static_cast<float>(t) * 0.45f, 1.8f);
-        const float gx = w * 0.5f - w_remote * 0.5f - 60.0f + phase * (w_remote + 120.0f);
-        ui_.FillRadial(gx, y1, size1 * 0.9f, th::Rgba(0xFFFFFF, 0.22f * fade),
+    // Act 3: an accent rule grows under the lockup, then a glint crosses it.
+    const float rule = 260.0f * ease_out((tf - 2.35f) / 0.55f);
+    ui_.FillRounded({cx - rule * 0.5f, y2 + size2 + 12.0f, cx + rule * 0.5f, y2 + size2 + 14.0f},
+                    1.0f, th::Rgba(th::kAccent, 0.85f * fade));
+    const float glint = clamp01((tf - 2.55f) / 0.70f);
+    if (glint > 0.0f && glint < 1.0f) {
+        const float gx = x_remote - 80.0f + glint * (w_remote + 160.0f);
+        ui_.FillRadial(gx, y1, size1 * 0.9f, th::Rgba(0xFFFFFF, 0.25f * fade),
                        th::Rgba(0xFFFFFF, 0.0f));
     }
-    const float rule = 240.0f * better;
-    ui_.FillRounded({w * 0.5f - rule * 0.5f, y2 + size2 + 12.0f, w * 0.5f + rule * 0.5f, y2 + size2 + 14.0f},
-                    1.0f, th::Rgba(th::kAccent, 0.85f * fade));
 
     ui_.EndFrame();
 }

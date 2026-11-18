@@ -271,3 +271,17 @@ src/platform/win32_window.*   window, mouse/keyboard, per-monitor DPI
 - Two aurora glows drift behind it; a light glint crosses the finished line and
   an accent rule grows beneath it.
 - The mark is `DrawBrandMark`, shared with the boot screen's `DrawBootLogo`.
+
+## Start-up intro choreography (18 Nov 2026)
+
+The intro runs 3.6 s and can be skipped with a click. Four acts:
+
+1. **0 to 1.1 s**: 64 particles converge from the edges on a golden-angle spread
+   and vanish into the mark. The mark draws itself in over 0.9 s.
+2. **0.7 to 2.6 s**: "Remote", "Play", "but", "Better" reveal letter by letter,
+   each letter rising and fading in. Positions come from prefix widths, so the
+   kerning matches the static layout.
+3. **1.95 s**: a shock ring leaves the mark. At 2.35 s an accent rule grows under
+   the lockup.
+4. **2.55 to 3.6 s**: a glint crosses the line; everything fades to black over
+   the last 0.6 s so the hand-off to the boot screen is clean.
