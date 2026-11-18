@@ -226,7 +226,7 @@ private:
     bool hud_ = true;
     bool hdr_ = false;
     int stream_buffer_ = 1;
-    int pad_rate_hz_ = 250;
+    std::atomic<int> pad_rate_hz_{250};
     int render_target_ = 0;
     std::thread pad_thread_;
     std::atomic<bool> pad_run_{false};
@@ -261,8 +261,8 @@ private:
     int trigger_strength_ = 5;
     int player_leds_ = 0;
     int mic_led_ = 0;
-    bool console_rumble_ = true;
-    bool console_triggers_ = true;
+    std::atomic<bool> console_rumble_{true};
+    std::atomic<bool> console_triggers_{true};
     bool motion_ = true;
     uint32_t feedback_version_ = 0;
     double rumble_until_ = 0.0;
@@ -276,7 +276,6 @@ private:
     int audio_device_ = 0;
     int audio_buffer_ms_ = 20;
     bool audio_failed_ = false;
-    bool audio_opened_ = false;
 
     // startup / boot sequence
     struct BootTask {
@@ -325,7 +324,7 @@ private:
     net::Reachability probe_;
     session::Streaming streaming_;
     media::DecodedFrame stream_frame_;
-    bool stream_active_ = false;
+    std::atomic<bool> stream_active_{false};
     bool stream_connecting_ = false;
     std::thread session_thread_;
     std::atomic<bool> session_started_{false};
@@ -424,7 +423,6 @@ private:
     // worker tells us how many frames it actually displayed; without that
     // number a 6x setting that only reaches 165 fps looks like it works.
     double fg_worker_fps_ = 0.0;
-    int fg_worker_mult_ = 0;
     double fg_worker_at_ = -1.0;
     void SampleFgWorker();
 

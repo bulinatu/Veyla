@@ -48,7 +48,6 @@ public:
                    std::vector<Frame>& sequence, std::string& detail);
 
     bool runtime_loaded() const { return runtime_loaded_; }
-    bool effect_ready() const { return effect_ != nullptr; }
     const std::string& status() const { return status_; }
     double last_generate_ms() const { return last_generate_ms_; }
 

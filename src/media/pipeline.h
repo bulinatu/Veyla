@@ -51,11 +51,10 @@ struct EnhanceParams {
 
 // Owns the D3D11 device, the flip-model swapchain, and the post-process chain.
 //
-// Frame shape today:  synthetic source -> upscale -> present
-// Frame shape in Phase 2:  RTP -> hw decode -> color -> upscale -> [fg] -> present
-//
-// The point of this class is that the *presentation* contract is fixed now:
-// one texture in, one presented frame out, per-frame GPU timing always on.
+// Frame shape: decoded source (or an explicit source view) -> upscale ->
+// contrast-adaptive sharpening -> colour grade -> HDR/SDR encode -> present.
+// With frame generation the same shader runs into an offscreen RGBA8 target
+// that is read back and handed to the worker, so both outputs match.
 class Presenter {
 public:
     Presenter() = default;
@@ -94,7 +93,6 @@ public:
     UINT present_refresh_count() const { return last_present_refresh_; }
 
     void SetUpscaleMode(int mode);
-    int upscale_mode() const { return cfg_.upscale_mode; }
 
     void SetEnhance(const EnhanceParams& params) { enh_ = params; }
     const EnhanceParams& enhance() const { return enh_; }

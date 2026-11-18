@@ -54,9 +54,6 @@ public:
     // the NVIDIA pipeline order, where NR runs on the upscaled frame.
     bool Readback(std::vector<uint8_t>& out, std::string& detail);
     // Reads the previous completed output without waiting. Used to feed the
-    // frame-generation worker while the next SR frame is in flight.
-    bool ReadbackLast(std::vector<uint8_t>& out, std::string& detail);
-
     bool Process(const uint8_t* rgba, int width, int height, Frame& out, std::string& detail);
 
     bool runtime_loaded() const { return runtime_loaded_; }
@@ -77,7 +74,7 @@ private:
                         std::string& detail);
     bool ClearGuides(std::string& detail);
     bool CreateFeature(int preset, int quality, std::string& detail);
-    bool Submit(std::string& detail);
+    bool Submit();
     bool WaitPending(std::string& detail);
     bool ReadbackSlot(int slot, std::vector<uint8_t>& out, std::string& detail);
     std::string ErrorText(int result) const;

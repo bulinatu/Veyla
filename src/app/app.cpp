@@ -189,17 +189,6 @@ void DrawIcon(ui::Renderer& ui, Icon icon, float cx, float cy, float s, D2D1_COL
     }
 }
 
-const std::vector<std::wstring>& PercentLabels() {
-    static const std::vector<std::wstring> labels = {
-        L"0.00", L"0.25", L"0.50", L"0.75", L"1.00",
-        L"1.25", L"1.50", L"1.75", L"2.00"};
-    return labels;
-}
-
-int PercentIndex(int value) {
-    return std::clamp(value, 0, 200) / 25;
-}
-
 const std::vector<std::wstring>& UpscalerLabels() {
     static const std::vector<std::wstring> labels = {
         L"Bilinear", L"Catmull-Rom", L"Catmull-Rom + Sharpen", L"Lanczos + RCAS",
@@ -346,6 +335,32 @@ int BufferIndex(int ms) {
         }
     }
     return 1;
+}
+
+// Shared by the dropdown label and the click handler so the two can never
+// drift apart (they used to be two hand-written arrays).
+constexpr int kBitrates[] = {20000, 35000, 50000, 75000, 100000};
+constexpr int kBitrateCount = static_cast<int>(std::size(kBitrates));
+
+int BitrateIndex(int kbps) {
+    for (int i = 0; i < kBitrateCount; ++i) {
+        if (kBitrates[i] == kbps) {
+            return i;
+        }
+    }
+    return 2;  // 50 Mbps
+}
+
+constexpr int kPadRates[] = {60, 125, 250, 500, 1000};
+constexpr int kPadRateCount = static_cast<int>(std::size(kPadRates));
+
+int PadRateIndex(int hz) {
+    for (int i = 0; i < kPadRateCount; ++i) {
+        if (kPadRates[i] == hz) {
+            return i;
+        }
+    }
+    return 2;  // 250 Hz
 }
 
 TriggerEffect BuildTriggerEffect(int effect, int strength) {
@@ -1501,13 +1516,13 @@ void App::ApplyDropdown(int id, int index) {
             streaming_.SetMotionEnabled(motion_);
             SaveProfile();
             break;
-        case W_Bitrate: {
-            static const int kBitrates[] = {20000, 35000, 50000, 75000, 100000};
-            profile_.bitrate_kbps = kBitrates[std::clamp(index, 0, 4)];
-            std::string save_detail;
-            session::Save(profile_, session::DefaultProfilePath(), save_detail);
+        case W_Bitrate:
+            profile_.bitrate_kbps = kBitrates[std::clamp(index, 0, kBitrateCount - 1)];
+            {
+                std::string save_detail;
+                session::Save(profile_, session::DefaultProfilePath(), save_detail);
+            }
             break;
-        }
         case W_InputSource:
             input_source_ = std::clamp(index, 0, 2);
             pad_.SetBackend(kInputBackends[input_source_]);
@@ -1623,7 +1638,6 @@ void App::OpenAudioDevice() {
     const std::string id =
         audio_devices_.empty() ? std::string() : audio_devices_[audio_device_].id;
     audio_failed_ = !audio_.Open(id, audio_buffer_ms_);
-    audio_opened_ = true;
 }
 
 void App::TriggerRumble() {
@@ -1878,7 +1892,6 @@ void App::NoteSourceFrame() {
 void App::SampleFgWorker() {
     if (profile_.dlss_fg < 2 || !stream_active_) {
         fg_worker_fps_ = 0.0;
-        fg_worker_mult_ = 0;
         return;
     }
     if (clock_ - fg_worker_at_ < 1.0) {
@@ -1918,11 +1931,8 @@ void App::SampleFgWorker() {
         return;
     }
     double fps = 0.0;
-    int multiplier = 0;
-    if (std::sscanf(text.c_str() + pos, "[fg] displayed %lf FPS (real + generated, %dx)",
-                    &fps, &multiplier) == 2) {
+    if (std::sscanf(text.c_str() + pos, "[fg] displayed %lf FPS", &fps) == 1) {
         fg_worker_fps_ = fps;
-        fg_worker_mult_ = multiplier;
     }
 }
 
@@ -2781,7 +2791,7 @@ void App::PadThreadMain() {
     auto probe_at = std::chrono::steady_clock::now();
     int probe_loops = 0;
     while (pad_run_.load()) {
-        const int hz = std::clamp(pad_rate_hz_, 60, 1000);
+        const int hz = std::clamp(pad_rate_hz_.load(), 60, 1000);
         const auto period = std::chrono::microseconds(1000000 / hz);
         next += period;
         const auto now = std::chrono::steady_clock::now();
@@ -5477,12 +5487,7 @@ void App::RenderSettings(double t) {
 
             {
                 int bitrate_index = 2;
-                const int rates[] = {20000, 35000, 50000, 75000, 100000};
-                for (int i = 0; i < 5; ++i) {
-                    if (rates[i] == profile_.bitrate_kbps) {
-                        bitrate_index = i;
-                    }
-                }
+                bitrate_index = BitrateIndex(profile_.bitrate_kbps);
                 DrawDropdown(L"Bitrate",
                              {L"20 Mbps", L"35 Mbps", L"50 Mbps", L"75 Mbps", L"100 Mbps"},
                              bitrate_index, y, W_Bitrate);
@@ -5992,12 +5997,7 @@ void App::RenderStreamSettings(double t) {
             y += row;
             {
                 int rate_index = 2;
-                const int rates[] = {60, 125, 250, 500, 1000};
-                for (int i = 0; i < 5; ++i) {
-                    if (rates[i] == pad_rate_hz_) {
-                        rate_index = i;
-                    }
-                }
+                rate_index = PadRateIndex(pad_rate_hz_);
                 DrawDropdown(L"Report rate", {L"60 Hz", L"125 Hz", L"250 Hz", L"500 Hz",
                                               L"1000 Hz"},
                              rate_index, y, W_PadRate);

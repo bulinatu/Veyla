@@ -61,7 +61,7 @@ void ProbePort(uint16_t port, const char* version, int timeout_ms,
     sockaddr_in target{};
     target.sin_family = AF_INET;
     target.sin_port = ::htons(port);
-    target.sin_addr.s_addr = ::inet_addr("255.255.255.255");
+    ::InetPtonA(AF_INET, "255.255.255.255", &target.sin_addr);
 
     char packet[128];
     const int packet_len = std::snprintf(packet, sizeof(packet),

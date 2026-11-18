@@ -357,7 +357,7 @@ bool NvDlssSr::ClearGuides(std::string& detail) {
     const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     list_->ClearUnorderedAccessViewFloat(gpu0, cpu0, motion12_.Get(), zero, 0, nullptr);
     list_->ClearUnorderedAccessViewFloat(gpu1, cpu1, depth12_.Get(), zero, 0, nullptr);
-    return Submit(detail) && WaitPending(detail);
+    return Submit() && WaitPending(detail);
 }
 
 bool NvDlssSr::CreateFeature(int preset, int quality, std::string& detail) {
@@ -394,13 +394,13 @@ bool NvDlssSr::CreateFeature(int preset, int quality, std::string& detail) {
         return false;
     }
     feature_ = feature;
-    if (!Submit(detail) || !WaitPending(detail)) {
+    if (!Submit() || !WaitPending(detail)) {
         return false;
     }
     return true;
 }
 
-bool NvDlssSr::Submit(std::string& detail) {
+bool NvDlssSr::Submit() {
     list_->Close();
     ID3D12CommandList* lists[] = {list_.Get()};
     queue_->ExecuteCommandLists(1, lists);
@@ -522,7 +522,7 @@ bool NvDlssSr::Process(const uint8_t* rgba, int width, int height, Frame& out,
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     barrier(output12_[slot].Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
             D3D12_RESOURCE_STATE_COMMON);
-    if (!Submit(detail)) {
+    if (!Submit()) {
         return false;
     }
     pending_slot_ = slot;
@@ -548,14 +548,6 @@ bool NvDlssSr::Readback(std::vector<uint8_t>& out, std::string& detail) {
         }
         last_output_slot_ = pending_slot_;
         have_output_ = true;
-    }
-    return ReadbackSlot(last_output_slot_, out, detail);
-}
-
-bool NvDlssSr::ReadbackLast(std::vector<uint8_t>& out, std::string& detail) {
-    if (!have_output_) {
-        detail = "DLSS SR has no completed output yet";
-        return false;
     }
     return ReadbackSlot(last_output_slot_, out, detail);
 }
@@ -596,7 +588,8 @@ bool NvDlssSr::ReadbackSlot(int slot, std::vector<uint8_t>& out, std::string& de
     return true;
 }
 
-void NvDlssSr::Shutdown() {    if (feature_ && api_ && api_->release) {
+void NvDlssSr::Shutdown() {
+    if (feature_ && api_ && api_->release) {
         if (queue_ && fence12_) {
             // Drain before releasing the feature.
             const UINT64 value = ++fence_value_;
