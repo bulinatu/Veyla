@@ -1956,15 +1956,32 @@ void App::LogVideoCadence() {
                                         stream_stats_.elapsed
                                   : 0.0;
     const unsigned long long misses = presenter_.present_misses();
+
+    float feed_p50 = 0.0f;
+    float feed_p99 = 0.0f;
+    float feed_max = 0.0f;
+    const int feed_n = static_cast<int>(feed_ms_.size());
+    if (feed_n > 0) {
+        std::vector<float> sorted(feed_ms_.begin(), feed_ms_.end());
+        std::sort(sorted.begin(), sorted.end());
+        const auto pick = [&](double q) {
+            return sorted[std::min(sorted.size() - 1, static_cast<size_t>(q * (sorted.size() - 1)))];
+        };
+        feed_p50 = pick(0.50);
+        feed_p99 = pick(0.99);
+        feed_max = sorted.back();
+        feed_ms_.clear();
+    }
     std::fprintf(stderr,
                  "[video] src %.1f fps  select 3v %d%%  4v %d%%  5v %d%%  |  screen 3v %d%%  "
                  "4v %d%%  5v %d%%  (n=%d, stats=%s)  |  arrival %.1f ms outliers %d  |  "
-                 "present misses +%llu (total %llu)  |  render %.2f ui %.2f src %.2f ms\n",
+                 "feed p50 %.1f p99 %.1f max %.1f (n=%d)  |  present misses +%llu (total %llu)"
+                 "  |  render %.2f ui %.2f src %.2f ms\n",
                  source_fps, pct(3), pct(4), pct(5), spct(3), spct(4), spct(5),
                  screen_hold_fill_, presenter_.present_stats_available() ? "yes" : "no",
-                 stream_stats_.arrival_ms, stream_stats_.arrival_outliers,
-                 misses - last_present_misses_, misses, phase_render_ms_, phase_ui_ms_,
-                 phase_source_ms_);
+                 stream_stats_.arrival_ms, stream_stats_.arrival_outliers, feed_p50, feed_p99,
+                 feed_max, feed_n, misses - last_present_misses_, misses, phase_render_ms_,
+                 phase_ui_ms_, phase_source_ms_);
     last_present_misses_ = misses;
 }
 
@@ -2583,6 +2600,13 @@ void App::SubmitNrFrameData(std::vector<uint8_t>&& rgba, int width, int height, 
     if (rgba.empty() || width <= 0 || height <= 0) {
         return;
     }
+    if (last_feed_at_ >= 0.0) {
+        feed_ms_.push_back(static_cast<float>((clock_ - last_feed_at_) * 1000.0));
+        while (feed_ms_.size() > 900) {
+            feed_ms_.pop_front();
+        }
+    }
+    last_feed_at_ = clock_;
     NrFrame job;
     job.rgba = std::move(rgba);
     job.width = width;

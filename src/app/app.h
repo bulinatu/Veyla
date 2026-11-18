@@ -436,6 +436,9 @@ private:
     std::array<uint8_t, 120> screen_holds_{};
     int screen_hold_pos_ = 0;
     int screen_hold_fill_ = 0;
+    // Intervals between frames handed to the FG worker (diagnostic).
+    std::deque<float> feed_ms_;
+    double last_feed_at_ = -1.0;
     double video_phase_ = 0.0;
     double next_source_at_ = 0.0;
     bool source_updated_ = false;

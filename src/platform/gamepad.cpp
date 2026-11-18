@@ -64,10 +64,18 @@ void InitCrc() {
     crc_ready = true;
 }
 
-// Sony's Bluetooth output reports carry a CRC32 seeded with 0xA2.
+// Sony's Bluetooth output reports sign the first 74 bytes with a CRC32 whose
+// seed is the byte 0xA2 fed through the raw table after an 0xFFFFFFFF init,
+// then inverted. This is exactly hid-playstation.c:
+//   crc = crc32_le(0xFFFFFFFF, &seed, 1);
+//   crc = ~crc32_le(crc, data, len - 4);
+// Using the zlib-style "init = ~seed" instead produced a valid-looking but
+// wrong CRC, and the controller silently ignored every Bluetooth report, so
+// rumble/LED/trigger effects only worked over USB.
 uint32_t Crc32Seed(uint32_t seed, const uint8_t* data, size_t length) {
     InitCrc();
-    uint32_t crc = ~seed;
+    uint32_t crc = 0xFFFFFFFFu;
+    crc = (crc >> 8) ^ Crc32Table[(crc ^ static_cast<uint8_t>(seed)) & 0xFF];
     for (size_t i = 0; i < length; ++i) {
         crc = (crc >> 8) ^ Crc32Table[(crc ^ data[i]) & 0xFF];
     }
