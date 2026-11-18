@@ -27,11 +27,14 @@ Current build: `0.3`, standalone ZIP at `dist\BetterRemotePlay-0.3-standalone.zi
    The worker presents on its own clock and is closed, so the app cannot align
    it. Possible workaround: enable G-SYNC. Changing the monitor to 120 Hz was
    rejected by the user and is not offered.
-2. **Plain 60 fps path also shows rare cadence slips**: 3v/5v holds (~3 %) and a
-   few late 240 Hz ticks per 2 s, with every neural stage off. Not decode.
-   Tested and rejected: registering the main thread with MMCSS "Games". A/B over
-   24 windows of 480 frames at Home (late ticks per window): baseline median 9,
-   MMCSS median 16, so it was reverted. The cause is not main-thread scheduling.
+2. **Windowed presentation judders at 60 fps (fixed: streams start fullscreen).**
+   Windowed, 62-84 % of source frames held 4 refreshes; fullscreen, 95-100 %.
+   The cause is DWM composition, not decode, SR or buffering. A stream now
+   enters borderless fullscreen on start; F11 returns to the window. Measured
+   with SR on: 4v 100 %, late 0, interval p99 4.4 ms.
+   Rejected along the way: MMCSS "Games" on the main thread (median late 16 vs 9,
+   reverted); jitter buffer 2 (no gain over 1); fps 30 in the profile, which
+   halves the source and was reset to 60.
 3. **FG without SR is not offered.** A worker restarted at 1080p without SR came
    up in overlay mode and never presented. Safe fallbacks are SR only or raw.
 4. **Presets apply at the next session only (intended).** While streaming, a

@@ -3019,6 +3019,13 @@ void App::TickSession() {
     }
 
     stream_active_ = true;
+    // Windowed presentation goes through DWM composition, which adds a refresh
+    // of jitter: measured 62-84% of source frames at 4 refreshes windowed, and
+    // 95-100% fullscreen. A stream therefore starts borderless fullscreen; F11
+    // returns to the window.
+    if (!borderless_) {
+        ToggleFullscreen();
+    }
     video_holds_.fill(0);
     video_hold_pos_ = 0;
     video_hold_fill_ = 0;
