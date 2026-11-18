@@ -914,3 +914,34 @@ Cut lines, in order, if behind:
   `hue30.png`, `fg-graded.png`.
 - Package: `dist/BetterRemotePlay-0.3-standalone.zip`, hash recorded,
   known-good EXE + profile archived.
+
+---
+
+## 17. Execution record (18 Nov, 09:00-12:00)
+
+Shipped, verified on the reference machine:
+
+- **Colour + sharpening** (Settings > Color, overlay > Colour): 11 controls,
+  4 presets, Reset. Neutral = identity; the pass runs on the GPU and the FG
+  worker receives the graded frame (`docs/27`).
+- **Sharpening 0 -> 95**: Laplacian variance +97.0% at 2560x1440 (scene luma
+  delta -0.19%). **Saturation 0**: mean saturation 0.000.
+- **FG**: `displayed 120.0 FPS (2x)` across the tests; source 4v 96-100%,
+  `drops 0`, `lost 0`, decode 4.3-5.0 ms, `work p99` 5.9-6.3 ms (grading on).
+- **Health log**: `%APPDATA%\BetterRemotePlay\health.log`, 30 s cadence, with
+  worker fps, enhance ms, frame p99, work, cadence, drops/lost, decode, audio,
+  handles, VRAM.
+- **Presets**: saved only; applied at the start of the next session. Live
+  reconfiguration of DLSS/FG mid-stream broke the D3D12VA decoder once
+  ("Failed to map D3D12 Buffer resource"), so the app refuses to do it and
+  says "Disconnect and reconnect to apply it".
+- **Network**: PC NIC changes applied and verified (Green Ethernet, Gigabit
+  Lite, Power Saving Mode, LSO v2, RSC disabled); 100-ping 0% loss, 0 ms;
+  zero NIC errors/discards (`docs/26`). Router and PS5 items need the admin
+  session and are listed as a fill-in checklist.
+- **Package**: rebuilt after the last source change, hash compared, clean
+  profile boot tested, ZIP inspected.
+
+Not done today: router admin changes, PS5 settings, bitrate sweep 50/75,
+cable-pull reconnect test (needs the user), HDR matrix.
+
