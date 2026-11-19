@@ -230,13 +230,43 @@ public VFX programming guide.
 - HUD: `FG <worker fps> fps  content <unique fps> fps  <pass-through|Nx>`.
 - Settings: frame generation is Off/On; the old 2x-6x list is gone.
 
+### Measured on the reference machine (RTX 4090, 1440p, 240 Hz)
+
+| Case | Result |
+| --- | --- |
+| 60 fps content, 120 target, 2x | 120.0 fps displayed (earlier runs and this one) |
+| 30 fps content, 120 target, 4x | ~92 fps displayed |
+| 30 fps content, 120 target, 3x (after the guard) | ~80 fps displayed |
+| 30 fps content, 90 target, 3x | same ~80 fps; the worker, not the app, is the limit |
+
+So duplicate skipping and the live multiplier work, but the worker cannot hold
+120 fps for 30 fps content at 1440p. That is a worker limit, not a pacing bug
+in the app. Worth noting: decode sat at 8-9 ms and the jitter buffer reported
+29 drops during the 30 fps run, which does not happen in the 60 fps path.
+
 ### RIFE, measured
 
-RIFE 4.25 lite (ONNX, TensorRT 10, RTX 4090, fp16, `trtexec`):
-1080p (1088x1920) GPU compute **6.4 ms mean, p99 8.6 ms**; host round trip
-12.3 ms with pageable buffers. That fits 30 -> 90 fps at 1080p, not 30 -> 120.
-The 1440p engine is built for the same comparison. RIFE is not wired into the
-app: the package has no TensorRT/CUDA runtime or inference code, and adding it
-means about 2 GB of NVIDIA runtime plus per-GPU engine builds. The NVIDIA path
-(DLSS Frame Generation through the worker) stays the default because it costs
-about 1 ms per frame.
+RIFE 4.25 lite (ONNX, TensorRT 10, RTX 4090, fp16, `trtexec`, static shapes):
+
+| Resolution | GPU compute mean | p99 | Host round trip |
+| --- | --- | --- | --- |
+| 1080p (1088x1920) | 6.4 ms | 8.6 ms | 12.3 ms |
+| 1440p (1472x2560) | 11.0 ms | 12.5 ms | 21.8 ms |
+
+What that allows: 30 -> 60 fps at either size (one frame per 33 ms), and
+30 -> 90 at 1080p (two frames per 33 ms, 13 ms); 30 -> 90 at 1440p needs 22 ms
+per 33 ms window, which leaves little for decode, SR and present. 60 -> 120 at
+1440p needs one frame every 8.3 ms, so it is out of reach.
+
+RIFE is **not** wired into the app. It would need a TensorRT/CUDA/cuDNN runtime
+(~2 GB), the inference wrapper, and an engine built per GPU; DLSS Frame
+Generation does the same job in about 1 ms through NGX. The NVIDIA path stays
+the default. RIFE remains a candidate only as an experimental 1080p engine for
+30 fps games, and that is a product decision, not a missing line of code.
+
+### The two NVIDIA methods
+
+- **DLSS Frame Generation** (NGX, through the worker): the default. ~1 ms.
+- **NVIDIA VFG** (nvidia-vfx runtime, the same family SmoovPlay offers): kept as
+  the legacy alternate path in Settings > Upscaling. It is queue-based and
+  presents through the parent, so it is slower to react than the NGX worker.
