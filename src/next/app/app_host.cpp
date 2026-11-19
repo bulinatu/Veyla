@@ -23,6 +23,8 @@ AppPaths AppPaths::Default() {
         std::filesystem::path(root) / "BetterRemotePlayNext" / "next.log";
     paths.legacy_settings =
         std::filesystem::path(root) / "BetterRemotePlay" / "session.json";
+    paths.session_file =
+        std::filesystem::path(root) / "BetterRemotePlayNext" / "session.json";
     return paths;
 }
 

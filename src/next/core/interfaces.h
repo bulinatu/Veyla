@@ -46,6 +46,11 @@ public:
     virtual Status Connect(const ConsoleSettings& console) = 0;
     virtual void Disconnect() = 0;
     virtual StreamSnapshot Snapshot() const = 0;
+    virtual Status Pair(std::uint32_t pin) = 0;
+    virtual Status StartDiscovery() = 0;
+    virtual std::vector<ConsoleCandidate> Discovered() const = 0;
+    virtual bool HasCredentials() const = 0;
+    virtual void Poll() = 0;
 };
 
 class IAiEngine {

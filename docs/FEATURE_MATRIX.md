@@ -5,10 +5,10 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 
 | Feature | Reference today | Next target | Plan | Stage | Notes |
 | --- | --- | --- | --- | --- | --- |
-| PS5 discovery | Working | Same | R behind `IStreamingService` | 4 | UDP, verified on LAN |
-| PSN login | Working | Same | R behind `IAuthService` | 4 | browser redirect paste |
-| PIN pairing | Working | Same | R behind `IPairingService` | 4 | 8-digit PIN |
-| Session request/wake | Working | Same | R behind `IStreamingService` | 4 | chiaki-ng |
+| PS5 discovery | Working | **Working in brpnext** | R behind `IStreamingService` | 4 | UDP, Console page, verified on LAN |
+| PSN login | Working | **Working in brpnext** | R behind `IStreamingService` | 4 | browser + clipboard redirect |
+| PIN pairing | Working | **Working in brpnext** | R behind `IStreamingService` | 4 | 8-digit PIN field |
+| Session request/wake | Working | **Working in brpnext** | R behind `IStreamingService` | 4 | chiaki-ng, rest-mode wake |
 | Reconnect | Working | Same | R + new state machine | 4 | keep RST behaviour |
 | Video decode | D3D11VA/D3D12VA/Vulkan/DXVA2/NVDEC/SW | Same | R behind `IVideoDecoder` | 5 | 8-10 ms at 1080p |
 | HDR10 | Working | Same | R + validated metadata | 5 | no tone-map recreation |
@@ -36,7 +36,7 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 | Main UI | PS5 purple, immediate mode | New NVIDIA-style design system | N | 3 | dark default + light |
 | Sidebar navigation | Absent | Persistent + collapsed | N | 3 | 9 pages |
 | Dashboard | Hero card | Real system overview | N | 3 | no fake stats |
-| Console page | Settings tab | Dedicated page | N | 4 | connection + auth |
+| Console page | Settings tab | **Working** | N | 4 | discovery, PSN, pairing, connect, live stats |
 | Streaming page | Settings tab | Dedicated page | N | 5 | groups, live state |
 | AI Video Engine page | Upscaling tab | Dedicated page (SR/FG/GPU) | N | 6 | capability-driven |
 | Display page | Settings tab | Dedicated page | N | 5 | real modes only |
@@ -64,6 +64,8 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
   `ui/theme` (dark/light tokens) and `brp_next_tests` (79 assertions).
 - Stage 3 shell is working as `brpnext.exe`: sidebar, theme switching, Home,
   Settings, Profiles, Diagnostics, AI/Display/Console/Streaming/Overlay pages,
-  real system facts and persistent typed configuration. Streaming and AI
-  execution are still Stages 4-7; those pages say so.
-- `brp.exe` 0.4.9 still builds and runs; no streaming code was moved.
+  real system facts and persistent typed configuration.
+- Stage 4 streaming service is working: discovery, PSN, pairing, rest-mode
+  wake, connect/disconnect and live session stats on the Console page.
+- Video presentation and AI execution are Stages 5-7; those pages say so.
+- `brp.exe` 0.4.9 still builds and runs; no streaming code was removed.

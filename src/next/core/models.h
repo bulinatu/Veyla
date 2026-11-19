@@ -157,13 +157,27 @@ struct Profile {
 // Read-only snapshots. Services publish these; UI never reads live internals.
 // ---------------------------------------------------------------------------
 
+struct ConsoleCandidate {
+    std::string address;
+    std::string name;
+    std::string target_id;
+    std::string device_type;
+    std::string status;
+};
+
 struct StreamSnapshot {
     bool connected = false;
     bool streaming = false;
+    bool connecting = false;
+    bool pairing = false;
+    bool discovering = false;
+    bool has_credentials = false;
     std::string console_name;
     std::string console_address;
+    std::string target_id;
     std::string state;  // idle, connecting, streaming, failed
     std::string message;
+    std::string pairing_message;
     std::string codec;
     int source_width = 0;
     int source_height = 0;

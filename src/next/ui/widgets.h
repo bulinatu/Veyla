@@ -40,6 +40,8 @@ public:
                 const wchar_t* format, bool enabled = true);
     bool NavItem(int id, const D2D1_RECT_F& rect, const wchar_t* label, bool selected,
                  int text_left = 14, bool enabled = true);
+    // Invisible click target for custom-drawn controls (e.g. the PIN field).
+    bool HitTarget(int id, const D2D1_RECT_F& rect, bool enabled = true);
 
     void Card(const D2D1_RECT_F& rect);
     void Section(const D2D1_RECT_F& rect, const wchar_t* label);

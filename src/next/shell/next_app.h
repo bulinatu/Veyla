@@ -22,6 +22,7 @@ class Renderer;
 namespace brp::next {
 
 class SettingsControls;
+class StreamingService;
 
 class NextApp {
 public:
@@ -55,6 +56,8 @@ private:
     void RefreshProfiles();
     void Toast(const std::wstring& text, bool error = false);
     void ProbeIfNeeded(double now);
+    void HandlePinInput();
+    std::wstring ClipboardText() const;
     std::wstring W(const std::string& text) const;
     std::wstring Summary(const Profile& profile) const;
 
@@ -62,6 +65,7 @@ private:
     std::unique_ptr<brp::Presenter> presenter_;
     std::unique_ptr<brp::ui::Renderer> renderer_;
     std::unique_ptr<AppHost> host_;
+    std::shared_ptr<StreamingService> streaming_;
     AppPaths paths_;
     SystemInfo system_;
     AppSettings settings_;
@@ -71,6 +75,8 @@ private:
     int settings_category_ = 0;
     int selected_profile_ = -1;
     bool collapsed_ = false;
+    std::string pin_;
+    bool pin_focus_ = false;
     float scale_ = 1.0f;
     float logical_width_ = 1600.0f;
     float logical_height_ = 900.0f;

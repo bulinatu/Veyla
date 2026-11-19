@@ -236,8 +236,7 @@ bool Widgets::Slider(int id, const D2D1_RECT_F& rect, const wchar_t* label, floa
     return changed;
 }
 
-bool Widgets::NavItem(int id, const D2D1_RECT_F& rect, const wchar_t* label,
-                      bool selected, int text_left, bool enabled) {
+bool Widgets::NavItem(int id, const D2D1_RECT_F& rect, const wchar_t* label,                      bool selected, int text_left, bool enabled) {
     const bool hover = enabled && Hover(rect);
     hovered_ = hovered_ || hover;
     interactable_hovered_ = interactable_hovered_ || hover;
@@ -258,6 +257,13 @@ bool Widgets::NavItem(int id, const D2D1_RECT_F& rect, const wchar_t* label,
                                  : theme_.text_faint),
                    selected ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL);
     return clicked;
+}
+
+bool Widgets::HitTarget(int id, const D2D1_RECT_F& rect, bool enabled) {
+    const bool hover = enabled && Hover(rect);
+    hovered_ = hovered_ || hover;
+    interactable_hovered_ = interactable_hovered_ || hover;
+    return Pressed(id, rect, enabled);
 }
 
 void Widgets::Card(const D2D1_RECT_F& rect) {    renderer_.FillRounded(rect, static_cast<float>(theme_.radius_lg),

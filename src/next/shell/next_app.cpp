@@ -4,6 +4,7 @@
 #include "media/pipeline.h"
 #include "platform/win32_window.h"
 #include "shell/settings_controls.h"
+#include "streaming/streaming_service.h"
 #include "ui/ui_renderer.h"
 
 #include <windows.h>
@@ -173,6 +174,9 @@ int NextApp::Run() {
         std::this_thread::sleep_for(std::chrono::milliseconds(15));
     }
     ::timeEndPeriod(1);
+    if (streaming_) {
+        streaming_->Disconnect();
+    }
     host_->Shutdown();
     return 0;
 }
@@ -211,6 +215,22 @@ bool NextApp::Init() {
     }
     settings_ = host_->Settings();
     system_ = ProbeSystem();
+
+    streaming_ = std::make_shared<StreamingService>(paths_.session_file,
+                                                    paths_.legacy_settings);
+    streaming_->Load();
+    host_->Services().Set<IStreamingService>(
+        std::static_pointer_cast<IStreamingService>(streaming_));
+    {
+        const session::Profile profile = streaming_->Profile();
+        if (settings_.console.address.empty()) {
+            settings_.console.address = profile.host;
+        }
+        if (settings_.console.name.empty()) {
+            settings_.console.name = profile.name;
+        }
+    }
+
     RefreshProfiles();
     Resize();
     started_ = SecondsNow();
@@ -248,6 +268,10 @@ void NextApp::Resize() {
 
 void NextApp::Frame() {
     ProbeIfNeeded(now_);
+    if (streaming_) {
+        streaming_->Poll();
+    }
+    HandlePinInput();
     Render();
     const double delta = std::max(0.0, now_ - last_frame_);
     last_frame_ = now_;
@@ -559,59 +583,199 @@ void NextApp::RenderConsole(Widgets& widgets) {
     const float w = ContentWidth();
     renderer_->Text(L"Console", Rect(x, 58, x + w, 92), 26.0f, ToD2D(theme.text),
                     DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Saved console identity and connection behaviour",
+    renderer_->Text(L"Discovery, PSN account, pairing and session control",
                     Rect(x, 92, x + w, 112), 12.0f, ToD2D(theme.text_dim));
 
-    float y = 132.0f;
-    widgets.Card(Rect(x, y, x + w, y + 250.0f));
-    widgets.Section(Rect(x + 18, y + 14, x + w - 18, y + 30), L"SAVED CONSOLE");
-    renderer_->Text(settings_.console.name.empty()
-                        ? L"No console saved yet"
-                        : Widen(settings_.console.name).c_str(),
-                    Rect(x + 18, y + 40, x + w - 18, y + 70), 20.0f, ToD2D(theme.text),
-                    DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(settings_.console.address.empty()
+    const StreamSnapshot snapshot = streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
+    const session::Profile profile = streaming_ ? streaming_->Profile() : session::Profile{};
+    Color state_color = theme.text_dim;
+    if (snapshot.connected) {
+        state_color = theme.success;
+    } else if (snapshot.state == "connecting" || snapshot.pairing) {
+        state_color = theme.warning;
+    } else if (snapshot.state == "failed") {
+        state_color = theme.error;
+    }
+
+    float y = 124.0f;
+    widgets.Card(Rect(x, y, x + w, y + 180.0f));
+    widgets.StatusPill(Rect(x + 18, y + 14, x + 150, y + 44),
+                       Widen(snapshot.state).c_str(), state_color, true);
+    widgets.StatusPill(Rect(x + w - 160, y + 14, x + w - 18, y + 44),
+                       snapshot.has_credentials ? L"PAIRED" : L"NOT PAIRED",
+                       snapshot.has_credentials ? theme.success : theme.warning, true);
+    const std::wstring name = snapshot.console_name.empty()
+                                  ? L"No console selected"
+                                  : Widen(snapshot.console_name);
+    renderer_->TextEllipsis(name.c_str(), Rect(x + 18, y + 50, x + w - 200, y + 78),
+                            18.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    renderer_->Text(snapshot.console_address.empty()
                         ? L"Address: not set"
-                        : (L"Address: " + Widen(settings_.console.address)).c_str(),
-                    Rect(x + 18, y + 72, x + w - 18, y + 94), 12.0f,
+                        : (L"Address: " + Widen(snapshot.console_address)).c_str(),
+                    Rect(x + 18, y + 80, x + w - 200, y + 102), 11.5f,
                     ToD2D(theme.text_dim));
-    renderer_->Text(
-        L"PSN identity and pairing credentials stay in the legacy session until the "
-        L"streaming service migration in Stage 4.",
-        Rect(x + 18, y + 100, x + w - 18, y + 122), 11.0f, ToD2D(theme.text_faint));
+    renderer_->TextEllipsis(Widen(snapshot.message).c_str(),
+                            Rect(x + 18, y + 104, x + w - 18, y + 126), 11.0f,
+                            ToD2D(snapshot.connected ? theme.success : theme.text_dim));
 
-    bool changed = false;
-    if (widgets.Toggle(2101, Rect(x + 18, y + 132, x + 360, y + 180),
-                       L"Discover on startup", settings_.console.auto_discover)) {
-        changed = true;
+    const float button_w = 158.0f;
+    if (widgets.Button(2501, Rect(x + 18, y + 132, x + 18 + button_w, y + 170),
+                       snapshot.discovering ? L"Searching..." : L"Discover", false,
+                       !snapshot.discovering)) {
+        const Status status = streaming_->StartDiscovery();
+        if (!status.ok()) {
+            Toast(Widen(status.message()), true);
+        } else {
+            Toast(L"Searching for consoles...");
+        }
     }
-    if (widgets.Toggle(2102, Rect(x + 18, y + 182, x + 360, y + 230),
-                       L"Reconnect automatically", settings_.console.auto_reconnect)) {
-        changed = true;
+    if (snapshot.connected) {
+        if (widgets.Button(2502, Rect(x + 18 + button_w + 10, y + 132,
+                                      x + 18 + button_w * 2 + 10, y + 170),
+                           L"Disconnect", false)) {
+            streaming_->Disconnect();
+            Toast(L"Disconnected");
+        }
+    } else {
+        if (widgets.Button(2502, Rect(x + 18 + button_w + 10, y + 132,
+                                      x + 18 + button_w * 2 + 10, y + 170),
+                           L"Connect", true,
+                           !snapshot.connecting && snapshot.has_credentials)) {
+            ConsoleSettings console = settings_.console;
+            if (console.address.empty()) {
+                console.address = snapshot.console_address;
+            }
+            const Status status = streaming_->Connect(console);
+            Toast(status.ok() ? L"Connecting..." : Widen(status.message()), !status.ok());
+        }
     }
-    float delay = static_cast<float>(settings_.console.reconnect_delay_ms);
-    if (widgets.Slider(2103, Rect(x + 380, y + 160, x + w - 18, y + 210),
-                       L"Reconnect delay", delay, 100.0f, 10000.0f, 100.0f, L"%.0f ms")) {
-        settings_.console.reconnect_delay_ms = static_cast<int>(std::lround(delay));
-        changed = true;
-    }
-    if (changed) {
-        Apply();
+    if (widgets.Button(2503, Rect(x + (button_w + 10) * 2 + 18, y + 132,
+                                  x + (button_w + 10) * 2 + 138, y + 170),
+                       L"Save session", false)) {
+        const Status status = streaming_->SaveProfile();
+        Toast(status.ok() ? L"Session saved" : Widen(status.message()), !status.ok());
     }
 
-    y += 266.0f;
-    widgets.Card(Rect(x, y, x + w, y + 94.0f));
-    widgets.StatusPill(Rect(x + 18, y + 16, x + 150, y + 44), L"STAGE 4",
-                       theme.warning, true);
-    renderer_->Text(L"Discovery, PSN sign-in, pairing and session control move here next.",
-                    Rect(x + 162, y + 16, x + w - 18, y + 44), 12.0f,
-                    ToD2D(theme.text_dim));
-    renderer_->Text(L"The working brp.exe still owns those paths until the new service "
-                    L"passes the same tests.",
-                    Rect(x + 18, y + 50, x + w - 18, y + 74), 11.0f,
+    y += 194.0f;
+    widgets.Card(Rect(x, y, x + w, y + 142.0f));
+    widgets.Section(Rect(x + 18, y + 12, x + w - 18, y + 28), L"DISCOVERY");
+    const auto candidates = streaming_ ? streaming_->Discovered() : std::vector<ConsoleCandidate>{};
+    if (snapshot.discovering) {
+        renderer_->Text(L"Broadcasting on the LAN; this takes about 1.5 s.",
+                        Rect(x + 18, y + 40, x + w - 18, y + 66), 11.5f,
+                        ToD2D(theme.text_dim));
+    } else if (candidates.empty()) {
+        renderer_->Text(L"No consoles found yet. Press Discover while the PS5 is awake.",
+                        Rect(x + 18, y + 40, x + w - 18, y + 66), 11.5f,
+                        ToD2D(theme.text_faint));
+    } else {
+        float cy = y + 38.0f;
+        for (std::size_t i = 0; i < candidates.size() && i < 3; ++i) {
+            const auto& console = candidates[i];
+            const std::wstring line = Widen(console.name.empty() ? console.address
+                                                                 : console.name) +
+                                      L"  -  " + Widen(console.address);
+            renderer_->TextEllipsis(line.c_str(), Rect(x + 18, cy, x + w - 200, cy + 26),
+                                    12.5f, ToD2D(theme.text));
+            if (widgets.Button(2510 + static_cast<int>(i),
+                               Rect(x + w - 170, cy - 4, x + w - 18, cy + 28),
+                               L"Use", false)) {
+                if (streaming_->SetConsole(console).ok()) {
+                    settings_.console.name = console.name;
+                    settings_.console.address = console.address;
+                    Apply();
+                    Toast(L"Console selected");
+                } else {
+                    Toast(L"Could not save the console", true);
+                }
+            }
+            cy += 32.0f;
+        }
+    }
+
+    y += 156.0f;
+    widgets.Card(Rect(x, y, x + w, y + 106.0f));
+    widgets.Section(Rect(x + 18, y + 12, x + w - 18, y + 28), L"PSN ACCOUNT");
+    renderer_->Text(profile.psn_numeric_id.empty()
+                        ? L"No PSN account linked"
+                        : (L"Linked: numeric id " + Widen(profile.psn_numeric_id)).c_str(),
+                    Rect(x + 18, y + 38, x + w - 380, y + 62), 13.0f,
+                    ToD2D(profile.psn_numeric_id.empty() ? theme.warning : theme.success),
+                    DWRITE_FONT_WEIGHT_MEDIUM);
+    if (widgets.Button(2520, Rect(x + w - 360, y + 34, x + w - 190, y + 72),
+                       L"Open PSN login", false)) {
+        std::string detail;
+        const Status status = streaming_->OpenPsnLogin(detail);
+        Toast(status.ok() ? L"Browser opened; sign in and copy the final URL"
+                          : Widen(detail),
+              !status.ok());
+    }
+    if (widgets.Button(2521, Rect(x + w - 180, y + 34, x + w - 18, y + 72),
+                       L"Paste redirect", false)) {
+        const std::wstring text = ClipboardText();
+        if (text.empty()) {
+            Toast(L"Clipboard is empty", true);
+        } else {
+            std::string detail;
+            const Status status = streaming_->CompletePsnLogin(Narrow(text), detail);
+            Toast(status.ok() ? L"PSN account linked" : Widen(detail), !status.ok());
+        }
+    }
+
+    y += 120.0f;
+    widgets.Card(Rect(x, y, x + w, y + 110.0f));
+    widgets.Section(Rect(x + 18, y + 12, x + w - 18, y + 28), L"PAIRING PIN");
+    const D2D1_RECT_F pin_rect = Rect(x + 18, y + 48, x + 238, y + 88);
+    renderer_->FillRounded(pin_rect, 8.0f, ToD2D(theme.surface_alt));
+    renderer_->StrokeRounded(pin_rect, 8.0f,
+                            ToD2D(pin_focus_ ? theme.accent : theme.border), 1.2f);
+    std::wstring pin_text = Widen(pin_);
+    while (pin_text.size() < 8) {
+        pin_text += L"_";
+    }
+    renderer_->Text(pin_text.c_str(), Rect(pin_rect.left + 12, pin_rect.top,
+                                          pin_rect.right - 12, pin_rect.bottom),
+                    16.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    if (widgets.HitTarget(2523, pin_rect)) {
+        pin_focus_ = true;
+    }
+    if (widgets.Button(2522, Rect(x + 252, y + 48, x + 420, y + 88), L"Pair",
+                       true, pin_.size() == 8)) {
+        try {
+            const Status status = streaming_->Pair(static_cast<std::uint32_t>(
+                std::stoul(pin_)));
+            Toast(status.ok() ? L"Pairing..." : Widen(status.message()), !status.ok());
+        } catch (...) {
+            Toast(L"The PIN must be 8 digits", true);
+        }
+    }
+    renderer_->Text((L"PS5: Settings > System > Remote Play > Link Device. "
+                     + Widen(snapshot.pairing_message)).c_str(),
+                    Rect(x + 18, y + 92, x + w - 18, y + 110), 10.5f,
                     ToD2D(theme.text_faint));
-}
 
+    y += 124.0f;
+    widgets.Card(Rect(x, y, x + w, y + 92.0f));
+    widgets.Section(Rect(x + 18, y + 12, x + w - 18, y + 28), L"STREAM");
+    if (snapshot.connected) {
+        wchar_t line[256] = {};
+        std::swprintf(line, 256,
+                      L"Source %.1f fps  |  decode %.2f ms  |  bitrate %.0f kbps  |  "
+                      L"loss %.2f%%",
+                      snapshot.source_fps, snapshot.decode_ms, snapshot.bitrate_kbps,
+                      snapshot.loss_percent);
+        renderer_->Text(line, Rect(x + 18, y + 38, x + w - 18, y + 64), 12.5f,
+                        ToD2D(theme.success), DWRITE_FONT_WEIGHT_MEDIUM);
+        renderer_->Text(L"Session is live; video presentation moves here in Stage 5.",
+                        Rect(x + 18, y + 66, x + w - 18, y + 86), 10.5f,
+                        ToD2D(theme.text_faint));
+    } else {
+        renderer_->Text(L"Not streaming. The session service is real; the media presenter "
+                        L"is wired in Stage 5.",
+                        Rect(x + 18, y + 38, x + w - 18, y + 66), 11.5f,
+                        ToD2D(theme.text_faint));
+    }
+}
 void NextApp::RenderStreaming(Widgets& widgets) {
     const ThemeTokens& theme = widgets.Tokens();
     const float x = ContentX();
@@ -1133,6 +1297,39 @@ void NextApp::ProbeIfNeeded(double now) {
         system_ = ProbeSystem();
         last_probe_ = now;
     }
+}
+
+void NextApp::HandlePinInput() {
+    const int key = window_->ConsumeKey();
+    const int character = window_->ConsumeChar();
+    if (!pin_focus_) {
+        return;
+    }
+    if (key == VK_ESCAPE) {
+        pin_focus_ = false;
+        return;
+    }
+    if (key == VK_BACK && !pin_.empty()) {
+        pin_.pop_back();
+    }
+    if (character >= '0' && character <= '9' && pin_.size() < 8) {
+        pin_.push_back(static_cast<char>(character));
+    }
+}
+
+std::wstring NextApp::ClipboardText() const {
+    std::wstring text;
+    if (!window_ || !::OpenClipboard(window_->hwnd())) {
+        return text;
+    }
+    if (HANDLE data = ::GetClipboardData(CF_UNICODETEXT)) {
+        if (const auto* chars = static_cast<const wchar_t*>(::GlobalLock(data))) {
+            text = chars;
+            ::GlobalUnlock(data);
+        }
+    }
+    ::CloseClipboard();
+    return text;
 }
 
 std::wstring NextApp::W(const std::string& text) const { return Widen(text); }

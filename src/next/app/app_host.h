@@ -19,6 +19,7 @@ struct AppPaths {
     std::filesystem::path profiles_dir;
     std::filesystem::path log_file;
     std::filesystem::path legacy_settings;
+    std::filesystem::path session_file;
 
     static AppPaths Default();
 };

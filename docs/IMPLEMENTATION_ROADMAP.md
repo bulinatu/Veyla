@@ -73,16 +73,28 @@ settings survive restart, profiles and diagnostics work, no fake connected
 state. Verified manually on the reference 4090; `brp.exe` still builds and
 runs unchanged.
 
-## Stage 4 - Streaming service (next)
+## Stage 4 - Streaming service (working preview)
 
-- `IStreamingService` wrapper over chiaki-ng; discovery, PSN, pairing,
-  connect/disconnect, state snapshots.
-- Console page with real discovery/auth/pairing/status.
-- Diagnostics-only decoded-frame preview at native quality (no AI).
-- Old app still the only way to stream until parity tests pass.
+Deliverables present:
 
-Acceptance: connect, stream, audio, controller and reconnect on the reference
-PS5; no protocol edits.
+- `StreamingService` (`brp_next_streaming`) wraps the real chiaki-ng session,
+  profile, discovery, PSN auth and pairing code. No protocol rewrite.
+- Loads the legacy `session.json` once into
+  `%APPDATA%\BetterRemotePlayNext\session.json`, so the old app is untouched.
+- Asynchronous discovery (UDP), PSN browser login + clipboard redirect import,
+  8-digit PIN pairing, wake-on-LAN/rest-mode wake, TCP reachability check and
+  a background session start.
+- Console page driven by real state: idle/connecting/streaming/failed,
+  credentials, address, discovery results, PSN account, PIN field, connect and
+  disconnect, live source fps/decode/bitrate/loss.
+- Graceful disconnect sends the session teardown (RST) on normal exit.
+
+Measured on the reference PS5: session request, streaminfo, 1080p60 profile,
+decode ~8.1 ms, loss 0.00 %, source cadence ~20-30 fps on the menu. Video
+presentation is Stage 5; frames are decoded and drained for stats, not shown.
+
+Not yet: the media pipeline and presenter (Stage 5), controller/audio binding
+in the new app (Stage 5), AI execution (Stage 6).
 
 ## Stage 5 - Media and presentation
 
@@ -161,7 +173,9 @@ Acceptance: clean install on a machine without the dev tree, update from
 - Stage 3: shell working (`brpnext.exe`), with streaming/AI execution and the
   independent overlay deferred to Stages 4-7. No page claims a connection it
   does not have.
-- Stage 4 onward: not started.
+- Stage 4: streaming service working — discovery, PSN, pairing, wake, connect
+  and live session stats. Video presentation is Stage 5.
+- Stage 5 onward: not started.
 
 ## Guardrails
 
