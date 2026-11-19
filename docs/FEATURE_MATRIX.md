@@ -62,10 +62,13 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
   `config` (typed settings, legacy import, profiles), `diagnostics` (logger,
   rolling p50/p95/p99, report), `app` (navigation, DI registry, AppHost),
   `ui/theme` (dark/light tokens) and `brp_next_tests` (79 assertions).
-- Stage 3 shell is working as `brpnext.exe`: sidebar, theme switching, Home,
-  Settings, Profiles, Diagnostics, AI/Display/Console/Streaming/Overlay pages,
-  real system facts and persistent typed configuration.
-- Stage 4 streaming service is working: discovery, PSN, pairing, rest-mode
-  wake, connect/disconnect and live session stats on the Console page.
-- Video presentation and AI execution are Stages 5-7; those pages say so.
-- `brp.exe` 0.4.9 still builds and runs; no streaming code was removed.
+- Stage 3 shell is working as `brpnext.exe`.
+- Stage 4 streaming service is working: discovery, PSN, pairing, wake,
+  connect/disconnect and live stats.
+- Stage 5 media presentation is working: full-window video, audio and
+  controller input on the real session.
+- Stage 6 is partial: DLSS SR 1080p -> 1440p is working and verified; RIFE
+  and DLSS-G execution are disabled in the new UI until Stage 6b.
+- Stage 7 independent overlay and diagnostics are working (basic widget set).
+- Stage 8 settings/profiles/reset/import/export/compatibility warnings work.
+- `brp.exe` 0.4.9 still builds and runs.

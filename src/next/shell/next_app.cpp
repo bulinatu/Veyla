@@ -1,6 +1,7 @@
 #include "shell/next_app.h"
 
 #include "diagnostics/metrics.h"
+#include "media/nv_dlss_sr.h"
 #include "media/pipeline.h"
 #include "platform/win32_window.h"
 #include "shell/settings_controls.h"
@@ -170,11 +171,20 @@ int NextApp::Run() {
             Resize();
         }
         now_ = SecondsNow();
+        if (watching_ && presenter_->frame_waitable()) {
+            ::WaitForSingleObject(presenter_->frame_waitable(), 8);
+        }
         Frame();
-        std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        if (!watching_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        }
     }
     ::timeEndPeriod(1);
+    StopPadThread();
+    overlay_.Destroy();
+    audio_.Close();
     if (streaming_) {
+        streaming_->SetAudio(nullptr);
         streaming_->Disconnect();
     }
     host_->Shutdown();
@@ -205,6 +215,7 @@ bool NextApp::Init() {
     if (!renderer_->BindSwapchain(presenter_->backbuffer())) {
         return false;
     }
+    presenter_->SetUpscaleMode(2);
 
     StartupReport report;
     const Status status = host_->Initialize(report);
@@ -235,6 +246,8 @@ bool NextApp::Init() {
     Resize();
     started_ = SecondsNow();
     last_frame_ = started_;
+    haptic_strength_.store(settings_.controller.rumble_strength);
+    StartPadThread();
     if (report.legacy_imported) {
         Toast(L"Legacy profile imported into the new configuration.");
     }
@@ -270,8 +283,39 @@ void NextApp::Frame() {
     ProbeIfNeeded(now_);
     if (streaming_) {
         streaming_->Poll();
+        if (watch_on_connect_ && streaming_->Connected()) {
+            watch_on_connect_ = false;
+            ToggleWatch(true);
+        }
+        if (watching_ && !streaming_->Connected()) {
+            ToggleWatch(false);
+            Toast(L"Stream ended", true);
+        }
     }
     HandlePinInput();
+    if (streaming_ && streaming_->Connected() && settings_.overlay.enabled) {
+        const double interval = std::max(0.05, settings_.overlay.interval_ms / 1000.0);
+        if (last_overlay_update_ < 0.0 || now_ - last_overlay_update_ >= interval) {
+            const StreamSnapshot snapshot = streaming_->Snapshot();
+            std::vector<std::wstring> lines;
+            wchar_t buffer[160] = {};
+            std::swprintf(buffer, 160, L"%dx%d  |  %.1f fps", snapshot.source_width,
+                          snapshot.source_height, snapshot.source_fps);
+            lines.emplace_back(buffer);
+            std::swprintf(buffer, 160, L"decode %.2f ms  |  %.0f kbps  |  loss %.2f%%",
+                          snapshot.decode_ms, snapshot.bitrate_kbps,
+                          snapshot.loss_percent);
+            lines.emplace_back(buffer);
+            lines.emplace_back(dlss_ready_ ? L"DLSS SR 1440p active" : L"native presentation");
+            if (watching_) {
+                lines.emplace_back(L"ESC  Back to console");
+            }
+            overlay_.Update(lines, settings_.overlay.opacity, settings_.overlay.position);
+            last_overlay_update_ = now_;
+        }
+    } else if (overlay_.visible()) {
+        overlay_.Hide();
+    }
     Render();
     const double delta = std::max(0.0, now_ - last_frame_);
     last_frame_ = now_;
@@ -284,6 +328,14 @@ void NextApp::Frame() {
 
 void NextApp::Render() {
     const ThemeTokens& theme = ThemeFor(settings_.general.theme);
+    if (watching_) {
+        PresentVideo();
+        renderer_->BeginFrame();
+        RenderWatchOverlay();
+        renderer_->EndFrame();
+        presenter_->PresentNow(true);
+        return;
+    }
     const float clear[4] = {theme.background.r / 255.0f, theme.background.g / 255.0f,
                             theme.background.b / 255.0f, 1.0f};
     presenter_->Clear(clear);
@@ -634,6 +686,9 @@ void NextApp::RenderConsole(Widgets& widgets) {
                                       x + 18 + button_w * 2 + 10, y + 170),
                            L"Disconnect", false)) {
             streaming_->Disconnect();
+            streaming_->SetAudio(nullptr);
+            audio_.Close();
+            watch_on_connect_ = false;
             Toast(L"Disconnected");
         }
     } else {
@@ -645,8 +700,15 @@ void NextApp::RenderConsole(Widgets& widgets) {
             if (console.address.empty()) {
                 console.address = snapshot.console_address;
             }
+            OpenAudio();
+            streaming_->SetAudio(audio_.is_open() ? &audio_ : nullptr);
             const Status status = streaming_->Connect(console);
-            Toast(status.ok() ? L"Connecting..." : Widen(status.message()), !status.ok());
+            if (status.ok()) {
+                watch_on_connect_ = true;
+                Toast(L"Connecting...");
+            } else {
+                Toast(Widen(status.message()), true);
+            }
         }
     }
     if (widgets.Button(2503, Rect(x + (button_w + 10) * 2 + 18, y + 132,
@@ -654,6 +716,13 @@ void NextApp::RenderConsole(Widgets& widgets) {
                        L"Save session", false)) {
         const Status status = streaming_->SaveProfile();
         Toast(status.ok() ? L"Session saved" : Widen(status.message()), !status.ok());
+    }
+    if (snapshot.connected && !watching_) {
+        if (widgets.Button(2504, Rect(x + (button_w + 10) * 3 + 18, y + 132,
+                                      x + (button_w + 10) * 3 + 158, y + 170),
+                           L"Watch stream")) {
+            ToggleWatch(true);
+        }
     }
 
     y += 194.0f;
@@ -755,7 +824,7 @@ void NextApp::RenderConsole(Widgets& widgets) {
                     ToD2D(theme.text_faint));
 
     y += 124.0f;
-    widgets.Card(Rect(x, y, x + w, y + 92.0f));
+    widgets.Card(Rect(x, y, x + w, y + 124.0f));
     widgets.Section(Rect(x + 18, y + 12, x + w - 18, y + 28), L"STREAM");
     if (snapshot.connected) {
         wchar_t line[256] = {};
@@ -766,12 +835,25 @@ void NextApp::RenderConsole(Widgets& widgets) {
                       snapshot.loss_percent);
         renderer_->Text(line, Rect(x + 18, y + 38, x + w - 18, y + 64), 12.5f,
                         ToD2D(theme.success), DWRITE_FONT_WEIGHT_MEDIUM);
-        renderer_->Text(L"Session is live; video presentation moves here in Stage 5.",
-                        Rect(x + 18, y + 66, x + w - 18, y + 86), 10.5f,
-                        ToD2D(theme.text_faint));
+        const brp::PadState pad_state = pad_.snapshot();
+        const std::wstring audio = audio_.is_open()
+                                       ? L"Audio: " + Widen(audio_.device_name()) +
+                                             L" (" +
+                                             std::to_wstring(settings_.audio.buffer_ms) +
+                                             L" ms)"
+                                       : (audio_note_.empty() ? L"Audio: unavailable"
+                                                              : audio_note_);
+        renderer_->Text(audio.c_str(), Rect(x + 18, y + 66, x + w - 18, y + 88), 10.5f,
+                        ToD2D(theme.text_dim));
+        renderer_->Text((pad_state.connected
+                             ? L"Controller: " + Widen(pad_state.name)
+                             : L"Controller: not detected")
+                            .c_str(),
+                        Rect(x + 18, y + 88, x + w - 18, y + 110), 10.5f,
+                        ToD2D(theme.text_dim));
     } else {
-        renderer_->Text(L"Not streaming. The session service is real; the media presenter "
-                        L"is wired in Stage 5.",
+        renderer_->Text(L"Not streaming. Connect to start a real session; video then opens "
+                        L"in the Watch view.",
                         Rect(x + 18, y + 38, x + w - 18, y + 66), 11.5f,
                         ToD2D(theme.text_faint));
     }
@@ -794,7 +876,7 @@ void NextApp::RenderStreaming(Widgets& widgets) {
                     L"below are already persistent.",
                     Rect(x + 18, 180, x + w - 18, 204), 11.0f, ToD2D(theme.text_faint));
 
-    SettingsControls controls(widgets, settings_, system_);
+    SettingsControls controls(widgets, settings_, system_, false);
     controls.Reset();
     const float end = controls.Streaming(x, 238, w);
     if (controls.Changed()) {
@@ -833,7 +915,7 @@ void NextApp::RenderAi(Widgets& widgets) {
     capability_card(2, L"RIFE TensorRT", system_.rife_lite, L"engine");
     capability_card(3, L"TensorRT runtime", system_.tensorrt_runtime, L"nvinfer_10");
 
-    SettingsControls controls(widgets, settings_, system_);
+    SettingsControls controls(widgets, settings_, system_, false);
     controls.Reset();
     const float end = controls.Ai(x, 220, w);
     if (controls.Changed()) {
@@ -876,7 +958,7 @@ void NextApp::RenderDisplay(Widgets& widgets) {
     renderer_->Text(L"Mode switching is Stage 5; this page reads the real current modes.",
                     Rect(x + 18, 236, x + w - 18, 258), 10.5f, ToD2D(theme.text_faint));
 
-    SettingsControls controls(widgets, settings_, system_);
+    SettingsControls controls(widgets, settings_, system_, false);
     controls.Reset();
     const float end = controls.Display(x, 292, w);
     if (controls.Changed()) {
@@ -929,7 +1011,7 @@ void NextApp::RenderOverlay(Widgets& widgets) {
                     Rect(ox + 12, oy + 64, ox + box_w - 12, oy + 86), 10.0f,
                     ToD2D(theme.text_faint));
 
-    SettingsControls controls(widgets, settings_, system_);
+    SettingsControls controls(widgets, settings_, system_, false);
     controls.Reset();
     const float end = controls.Overlay(x, 328, w);
     if (controls.Changed()) {
@@ -997,9 +1079,13 @@ void NextApp::RenderProfiles(Widgets& widgets) {
         renderer_->Text(Widen(profile.name).c_str(),
                         Rect(x + 18, y + 10, x + w - 460, y + 34), 15.0f,
                         ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        renderer_->Text(Summary(profile).c_str(),
-                        Rect(x + 18, y + 36, x + w - 460, y + 60), 11.0f,
-                        ToD2D(theme.text_dim));
+        const std::wstring warning = ProfileWarning(profile);
+        const std::wstring summary = Summary(profile) +
+                                     (warning.empty() ? std::wstring()
+                                                      : L"  |  needs " + warning);
+        renderer_->TextEllipsis(summary.c_str(),
+                                Rect(x + 18, y + 36, x + w - 460, y + 60), 11.0f,
+                                ToD2D(warning.empty() ? theme.text_dim : theme.warning));
         if (profile.is_default) {
             widgets.StatusPill(Rect(x + w - 450, y + 20, x + w - 370, y + 48), L"DEFAULT",
                                theme.accent, true);
@@ -1009,7 +1095,9 @@ void NextApp::RenderProfiles(Widgets& widgets) {
                            true)) {
             settings_ = profile.settings;
             Apply();
-            Toast(L"Profile applied");
+            Toast(warning.empty() ? std::wstring(L"Profile applied")
+                                  : L"Applied; missing: " + warning,
+                  !warning.empty());
         }
         if (widgets.Button(3201 + index * 10, Rect(bx + 84, y + 18, bx + 162, y + 54),
                            L"Default", false)) {
@@ -1209,7 +1297,7 @@ void NextApp::RenderSettings(Widgets& widgets) {
         RenderAbout(widgets, px + 18, 146, pw - 36);
         return;
     }
-    SettingsControls controls(widgets, settings_, system_);
+    SettingsControls controls(widgets, settings_, system_, false);
     controls.Reset();
     float cy = 146.0f;
     switch (settings_category_) {
@@ -1265,9 +1353,26 @@ void NextApp::RenderAbout(Widgets& widgets, float x, float y, float width) {
         const std::wstring folder = paths_.settings_file.parent_path().wstring();
         ::ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     }
+    if (widgets.Button(9502, Rect(x + 210, ly + 8, x + 410, ly + 46), L"Reset settings",
+                       false)) {
+        const Status status = host_->ResetSettings();
+        if (status.ok()) {
+            settings_ = host_->Settings();
+            haptic_strength_.store(settings_.controller.rumble_strength);
+            dlss_ready_ = false;
+            dlss_failed_ = false;
+            if (dlss_sr_) {
+                dlss_sr_->Shutdown();
+            }
+            Toast(L"Settings reset to defaults");
+        } else {
+            Toast(Widen(status.message()), true);
+        }
+    }
 }
 
 void NextApp::Apply() {
+    const AiSettings previous_ai = settings_.ai;
     const Status status = host_->ApplySettings(settings_);
     if (!status.ok()) {
         Toast(Widen(status.message()), true);
@@ -1275,6 +1380,16 @@ void NextApp::Apply() {
         return;
     }
     settings_ = host_->Settings();
+    haptic_strength_.store(settings_.controller.rumble_strength);
+    if (previous_ai.super_resolution != settings_.ai.super_resolution ||
+        previous_ai.sr_output != settings_.ai.sr_output ||
+        previous_ai.sr_quality != settings_.ai.sr_quality) {
+        dlss_ready_ = false;
+        dlss_failed_ = false;
+        if (dlss_sr_) {
+            dlss_sr_->Shutdown();
+        }
+    }
     Toast(L"Saved");
 }
 
@@ -1302,6 +1417,10 @@ void NextApp::ProbeIfNeeded(double now) {
 void NextApp::HandlePinInput() {
     const int key = window_->ConsumeKey();
     const int character = window_->ConsumeChar();
+    if (watching_ && key == VK_ESCAPE) {
+        ToggleWatch(false);
+        return;
+    }
     if (!pin_focus_) {
         return;
     }
@@ -1334,6 +1453,21 @@ std::wstring NextApp::ClipboardText() const {
 
 std::wstring NextApp::W(const std::string& text) const { return Widen(text); }
 
+std::wstring NextApp::ProfileWarning(const Profile& profile) const {
+    const AiSettings& ai = profile.settings.ai;
+    if (ai.super_resolution && !system_.dlss_sr) {
+        return L"DLSS SR runtime missing";
+    }
+    if (ai.frame_generation) {
+        if (ai.fg_backend == AiBackend::DlssFg && !system_.nr_worker) {
+            return L"DLSS FG worker missing";
+        }
+        if (ai.fg_backend == AiBackend::Rife && !system_.rife_lite) {
+            return L"RIFE engine missing";
+        }
+    }
+    return {};
+}
 std::wstring NextApp::Summary(const Profile& profile) const {
     const auto& s = profile.settings;
     std::wstring summary =
@@ -1350,4 +1484,257 @@ std::wstring NextApp::Summary(const Profile& profile) const {
     return summary;
 }
 
+void NextApp::PresentVideo() {
+    if (!streaming_) {
+        return;
+    }
+    const auto snapshot = streaming_->Snapshot();
+    const double content =
+        snapshot.source_fps > 1.0 ? snapshot.source_fps : settings_.streaming.fps;
+    const int refresh = std::max(24, window_->refresh_hz());
+    video_phase_ += content / static_cast<double>(refresh);
+    bool due = video_phase_ >= 1.0 - 1e-9;
+    if (due) {
+        video_phase_ -= 1.0;
+    } else {
+        video_phase_ = std::max(0.0, video_phase_);
+    }
+    if (due) {
+        media::DecodedFrame frame;
+        if (streaming_->TakeFrame(frame, settings_.streaming.frame_buffer, true)) {
+            video_frame_ = std::move(frame);
+            have_frame_ = true;
+        }
+    }
+    if (have_frame_ && !video_frame_.rgba.empty()) {
+        const int width = video_frame_.width;
+        const int height = video_frame_.height;
+        if (EnsureDlssSr(width, height)) {
+            brp::media::NvDlssSr::Frame sr_frame;
+            std::string detail;
+            if (dlss_sr_->Process(video_frame_.rgba.data(), width, height, sr_frame,
+                                  detail)) {
+                presenter_->SetSourceView(sr_frame.srv.Get(), dlss_sr_->out_width(),
+                                          dlss_sr_->out_height(), video_frame_.pq);
+                presenter_->SetSourceFinal(false);
+                presenter_->Render(now_);
+                return;
+            }
+            dlss_failed_ = true;
+            Toast(L"DLSS SR: " + Widen(detail), true);
+        }
+        presenter_->SetSourceFrame(video_frame_.rgba.data(), width, height,
+                                   video_frame_.pq);
+        presenter_->SetSourceFinal(false);
+        presenter_->Render(now_);
+    } else {
+        const float background[4] = {0.015f, 0.017f, 0.022f, 1.0f};
+        presenter_->Clear(background);
+    }
+}
+
+void NextApp::RenderWatchOverlay() {
+    const ThemeTokens& theme = ThemeFor(settings_.general.theme);
+    const StreamSnapshot snapshot = streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
+    if (settings_.overlay.enabled) {
+        renderer_->Text(L"ESC  Back to console",
+                        Rect(logical_width_ - 240, logical_height_ - 34,
+                             logical_width_ - 16, logical_height_ - 10),
+                        10.5f, ToD2D(theme.text_dim), DWRITE_FONT_WEIGHT_MEDIUM,
+                        DWRITE_TEXT_ALIGNMENT_TRAILING);
+        return;
+    }
+    renderer_->FillRect(Rect(0, 0, logical_width_, 42.0f),
+                        ToD2D(Color{theme.surface.r, theme.surface.g, theme.surface.b, 225}));
+    renderer_->FillRect(Rect(0, 41.0f, logical_width_, 42.0f), ToD2D(theme.accent));
+    renderer_->Text(L"LIVE", Rect(16, 0, 66, 42), 11.0f, ToD2D(theme.accent),
+                    DWRITE_FONT_WEIGHT_BOLD);
+    float stats_left = 72.0f;
+    if (dlss_ready_) {
+        renderer_->Text(L"DLSS", Rect(70, 0, 122, 42), 10.5f, ToD2D(theme.success),
+                        DWRITE_FONT_WEIGHT_BOLD);
+        stats_left = 126.0f;
+    }
+    wchar_t stats[256] = {};
+    std::swprintf(stats, 256, L"%dx%d  |  %.1f fps  |  decode %.2f ms  |  %.0f kbps  |  loss %.2f%%",
+                  snapshot.source_width, snapshot.source_height, snapshot.source_fps,
+                  snapshot.decode_ms, snapshot.bitrate_kbps, snapshot.loss_percent);
+    renderer_->Text(stats, Rect(stats_left, 0, logical_width_ - 250, 42), 11.5f,
+                    ToD2D(theme.text), DWRITE_FONT_WEIGHT_MEDIUM);
+    renderer_->Text(L"ESC  Back to console", Rect(logical_width_ - 230, 0,
+                                                 logical_width_ - 16, 42),
+                    11.0f, ToD2D(theme.text_dim), DWRITE_FONT_WEIGHT_MEDIUM,
+                    DWRITE_TEXT_ALIGNMENT_TRAILING);
+}
+
+void NextApp::ToggleWatch(bool watching) {
+    if (watching) {
+        if (!streaming_ || !streaming_->Connected()) {
+            Toast(L"Connect to a console first", true);
+            return;
+        }
+        media::DecodedFrame stale;
+        for (int i = 0; i < 8 && streaming_->TakeFrame(stale, 0, false); ++i) {
+            // Drop pre-watch frames so the first shown frame is current.
+        }
+        watching_ = true;
+        have_frame_ = false;
+        video_phase_ = 0.0;
+        window_->SetCursorHidden(true);
+        presenter_->SetUpscaleMode(2);
+    } else {
+        watching_ = false;
+        have_frame_ = false;
+        window_->SetCursorHidden(false);
+    }
+}
+
+void NextApp::StartPadThread() {
+    if (pad_run_.load()) {
+        return;
+    }
+    pad_.SetBackend(brp::Gamepad::Backend::Auto);
+    pad_run_.store(true);
+    pad_thread_ = std::thread([this]() {
+        using Clock = std::chrono::steady_clock;
+        Clock::time_point last_haptics = Clock::now();
+        bool haptics_on = false;
+        while (pad_run_.load()) {
+            pad_.Poll();
+            if (streaming_ && streaming_->Connected()) {
+                streaming_->SendController(pad_.snapshot());
+                brp::PadConsoleFeedback feedback = streaming_->Feedback();
+                uint16_t left = 0;
+                uint16_t right = 0;
+                if (streaming_->TakeHaptics(left, right)) {
+                    last_haptics = Clock::now();
+                    haptics_on = true;
+                    const int strength = haptic_strength_.load();
+                    if (strength > 0) {
+                        double scale = 1.0;
+                        switch (strength) {
+                            case 1: scale = 0.2; break;
+                            case 2: scale = 0.5; break;
+                            case 4: scale = 2.0; break;
+                            case 5: scale = 5.0; break;
+                            default: break;
+                        }
+                        const auto to_motor = [scale](uint16_t amplitude) -> uint8_t {
+                            if (amplitude < 100) {
+                                return 0;
+                            }
+                            double scaled = amplitude * scale;
+                            if (scaled < 512.0) {
+                                scaled = 512.0;
+                            }
+                            return static_cast<uint8_t>(
+                                std::clamp(static_cast<int>(scaled) >> 8, 0, 255));
+                        };
+                        feedback.rumble = true;
+                        feedback.haptics = true;
+                        feedback.strong = to_motor(left);
+                        feedback.weak = to_motor(right);
+                        ++feedback.version;
+                    }
+                } else if (haptics_on &&
+                           Clock::now() - last_haptics > std::chrono::milliseconds(100)) {
+                    feedback.rumble = false;
+                    feedback.haptics = false;
+                    feedback.strong = 0;
+                    feedback.weak = 0;
+                    ++feedback.version;
+                    haptics_on = false;
+                }
+                pad_.SetConsoleFeedback(feedback);
+            }
+            pad_.PumpOutput();
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+        }
+    });
+}
+
+void NextApp::StopPadThread() {
+    pad_run_.store(false);
+    if (pad_thread_.joinable()) {
+        pad_thread_.join();
+    }
+    pad_.SetConsoleFeedback(brp::PadConsoleFeedback{});
+    pad_.PumpOutput();
+}
+
+bool NextApp::OpenAudio() {
+    if (audio_.is_open()) {
+        return true;
+    }
+    const std::string device =
+        settings_.audio.device == "default" ? std::string() : settings_.audio.device;
+    if (audio_.Open(device, settings_.audio.buffer_ms)) {
+        audio_note_.clear();
+        return true;
+    }
+    audio_note_ = L"Audio device unavailable";
+    return false;
+}
+
+bool NextApp::EnsureDlssSr(int input_width, int input_height) {
+    if (!settings_.ai.super_resolution || !system_.dlss_sr || dlss_failed_) {
+        return false;
+    }
+    if (dlss_ready_ && dlss_in_w_ == input_width && dlss_in_h_ == input_height) {
+        return true;
+    }
+    int out_w = 2560;
+    int out_h = 1440;
+    if (settings_.ai.sr_output == Resolution::R2160) {
+        out_w = 3840;
+        out_h = 2160;
+    } else if (settings_.ai.sr_output == Resolution::R1080) {
+        out_w = 1920;
+        out_h = 1080;
+    }
+    if (out_w <= input_width || out_h <= input_height) {
+        out_w = 2560;
+        out_h = 1440;
+    }
+    if (!dlss_sr_) {
+        dlss_sr_ = std::make_unique<brp::media::NvDlssSr>();
+    }
+    if (!dlss_sr_->runtime_loaded()) {
+        std::filesystem::path directory(system_.exe_dir);
+        if (!std::filesystem::exists(directory / "nvngx_dlss.dll")) {
+            const std::filesystem::path nested =
+                directory / "nvidia-ngx" / "runtime";
+            if (std::filesystem::exists(nested / "nvngx_dlss.dll")) {
+                directory = nested;
+            }
+        }
+        std::string detail;
+        if (!dlss_sr_->LoadRuntime(directory.wstring(), detail)) {
+            dlss_failed_ = true;
+            Toast(L"DLSS runtime: " + Widen(detail), true);
+            return false;
+        }
+    }
+    int quality = 2;
+    switch (settings_.ai.sr_quality) {
+        case 0:
+        case 1: quality = 0; break;
+        case 2: quality = 1; break;
+        default: quality = 2; break;
+    }
+    std::string detail;
+    if (!dlss_sr_->Initialize(presenter_->device(), presenter_->context(), input_width,
+                              input_height, out_w, out_h, 12, quality, detail)) {
+        dlss_failed_ = true;
+        Toast(L"DLSS SR: " + Widen(detail), true);
+        return false;
+    }
+    dlss_ready_ = true;
+    dlss_in_w_ = input_width;
+    dlss_in_h_ = input_height;
+    return true;
+}
+
 }  // namespace brp::next
+
+

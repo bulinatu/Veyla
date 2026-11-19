@@ -2,9 +2,14 @@
 
 #include "core/interfaces.h"
 #include "core/models.h"
+#include "media/decoder.h"
 #include "session/pairing.h"
 #include "session/profile.h"
 #include "session/streaming.h"
+
+namespace brp::audio {
+class Engine;
+}
 
 #include <atomic>
 #include <chrono>
@@ -45,6 +50,15 @@ public:
     Status CompletePsnLogin(const std::string& redirect, std::string& detail);
     session::Profile Profile() const;
     std::string ProfilePath() const { return next_path_.string(); }
+
+    // Stage 5 media/input surface.
+    void SetAudio(brp::audio::Engine* engine);
+    void SetMotionEnabled(bool enabled);
+    bool TakeFrame(media::DecodedFrame& out, int buffer, bool paced);
+    void SendController(const brp::PadState& state);
+    brp::PadConsoleFeedback Feedback() const;
+    bool TakeHaptics(std::uint16_t& left, std::uint16_t& right);
+    bool Connected() const;
 
 private:
     void JoinConnect();

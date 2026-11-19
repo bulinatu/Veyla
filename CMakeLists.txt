@@ -357,6 +357,7 @@ add_executable(brpnext
     src/next/ui/widgets.cpp
     src/next/ui/theme.cpp
     src/next/platform/system_info.cpp
+    src/next/overlay/overlay_window.cpp
 )
 target_link_libraries(brpnext PRIVATE brp_next_core brp_next_streaming brp_ui brp_media comdlg32 shell32 winmm)
 set_target_properties(brpnext PROPERTIES WIN32_EXECUTABLE TRUE)

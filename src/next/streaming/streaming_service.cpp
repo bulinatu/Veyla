@@ -373,6 +373,33 @@ Status StreamingService::CompletePsnLogin(const std::string& redirect, std::stri
     return Status::Ok();
 }
 
+void StreamingService::SetAudio(brp::audio::Engine* engine) {
+    streaming_.SetAudio(engine);
+}
+
+void StreamingService::SetMotionEnabled(bool enabled) {
+    streaming_.SetMotionEnabled(enabled);
+}
+
+bool StreamingService::TakeFrame(media::DecodedFrame& out, int buffer, bool paced) {
+    return streaming_.TakeFrame(out, buffer, paced);
+}
+
+void StreamingService::SendController(const brp::PadState& state) {
+    streaming_.SendController(state);
+}
+
+brp::PadConsoleFeedback StreamingService::Feedback() const {
+    return streaming_.feedback();
+}
+
+bool StreamingService::TakeHaptics(std::uint16_t& left, std::uint16_t& right) {
+    return streaming_.TakeHaptics(left, right);
+}
+
+bool StreamingService::Connected() const {
+    return streaming_.state() == session::StreamState::Streaming;
+}
 session::Profile StreamingService::Profile() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return profile_;

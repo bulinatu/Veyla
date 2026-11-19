@@ -96,48 +96,66 @@ presentation is Stage 5; frames are decoded and drained for stats, not shown.
 Not yet: the media pipeline and presenter (Stage 5), controller/audio binding
 in the new app (Stage 5), AI execution (Stage 6).
 
-## Stage 5 - Media and presentation
+## Stage 5 - Media and presentation (working)
 
-- `IVideoDecoder` wrapper, frame pool, HDR metadata.
-- `IPresenter` wrapper with waitable pacing, borderless/windowed, F11.
-- Streaming page with live input/output/network/audio/controller sections.
-- Display page with real modes only.
+- `brpnext` opens the real decoder and presents decoded frames through the
+  D3D11 presenter in a full-window Watch view (Esc returns to Console).
+- Audio engine is opened on Connect and attached to the session; the DualSense
+  input runs on a 250 Hz worker (buttons/sticks/triggers) and console
+  feedback/haptics are written back through the existing HID path.
+- Console page shows live source fps, decode, bitrate, loss, audio device and
+  controller presence.
+- DLSS SR is applied per decoded frame inside the Watch path (see Stage 6).
+- Verified on the PS5: 1920x1080, decode ~7.9-8.8 ms, loss 0.00 %, 28-30 fps
+  menu content, full-window video with the overlay.
 
-Acceptance: native 1080p60 and 30 fps streams, audio sync, HDR on/off,
-240 Hz pacing, same latency envelope as the reference.
+Not yet: borderless fullscreen/F11 in `brpnext` (windowed presentation is
+working), HDR toggle in the new presenter, and measured A/V sync under load.
 
-## Stage 6 - AI Video Engine
+## Stage 6 - AI Video Engine (partial: DLSS SR working)
 
-- `IAiEngine` + `ISuperResolution` + `IFrameGenerator` + `IOpticalFlow`.
-- DLSS SR first, then RIFE, then DLSS-G with capability reporting.
-- AI page driven by capabilities; no unsupported mode visible.
-- Simultaneous SR + FG, with the 2x ceiling explicit.
-- Optional TensorRT SR backend only if measured and labelled.
+Working:
 
-Acceptance: 1080p30 -> 1440p60, 1080p60 -> 1440p120, SR + FG with 0
-drops/late/stalls in a 10-minute run; RIFE 30 -> 60 parity; worker logs
-clean.
+- DLSS Super Resolution: 1920x1080 -> 2560x1440, NGX preset L, quality from
+  the typed AI settings; log line `[dlss] SR initialized 1920x1080 -> 2560x1440`.
+- Capability checks for DLSS SR, the DLSS-G worker, RIFE lite/heavy and the
+  TensorRT runtime; unavailable backends are labelled missing.
+- AI settings are persisted; SR can be changed live and reinitializes.
 
-## Stage 7 - Overlay and diagnostics
+Deliberately not enabled yet:
 
-- Independent layered overlay window with widgets and layouts.
-- Diagnostics page: live series, p50/p95/p99, GPU/VRAM/temp, decode/SR/FG/
-  present timings, queue depths.
-- Benchmark runner and JSON/CSV report.
+- RIFE 30 -> 60 and DLSS-G 60 -> 120 execution in `brpnext`. The RIFE engine
+  and worker exist, but the new frame scheduler is not wired. The Frame
+  Generation control is disabled in the new app and says Stage 6b; the UI does
+  not pretend it is active.
+- Simultaneous SR + FG is therefore not claimed in the new app yet.
 
-Acceptance: overlay does not change cadence within noise; diagnostics match
-`testing.log`; report reproducible.
+Next: port the RIFE pair scheduler and/or the DLSS-G worker presenter, then
+measure 30 -> 60 and 60 -> 120.
 
-## Stage 8 - Settings and profiles completion
+## Stage 7 - Overlay and diagnostics (working, basic)
 
-- Full settings tree, reset-to-default, import/export, migration from 0.4.9.
-- Profiles with compatibility validation and default profile.
-- Change notifications and restart-required indicators.
-- Notifications center with deduplication.
+- Independent layered top-level overlay (`OverlayWindow`, GDI, click-through,
+  no focus): stats lines, opacity, four positions, refresh interval.
+- It never enters the video swapchain; updating it does not touch cadence.
+- Diagnostics page has real UI frame p50/p95/p99, system facts and a report
+  writer.
+- The overlay shows source resolution/fps, decode, bitrate, loss, DLSS SR state
+  and the Esc hint.
 
-Acceptance: every setting maps to a real field and effect; invalid
-combinations are blocked with a reason.
+Not yet: drag/rearrange widgets, per-widget toggles beyond the current lines,
+GPU temperature/power series, and the automated benchmark report.
 
+## Stage 8 - Settings and profiles (working)
+
+- 11 categories, typed controls, atomic save, reset to defaults.
+- Profiles: create from current, apply, default, delete, import/export JSON,
+  and a compatibility warning when a profile needs a missing backend.
+- Notifications via toasts with error/success colours.
+- Legacy `session.json` and settings import; separate next-app data folder.
+
+Not yet: automatic profile selection by console/game, notification history
+center, and full restart-required classification.
 ## Stage 9 - Integration and benchmark matrix
 
 - Automated 1080p30/60 -> 1440p/2160p runs, p50/p95/p99, drops, VRAM.
@@ -184,3 +202,13 @@ Acceptance: clean install on a machine without the dev tree, update from
 - Never expose 4x/6x DLSS-G or 30 -> 120 on this runtime.
 - Never populate statistics with constants.
 - Every new module compiles independently and has an owner interface.
+
+## Current position update (after Stages 5-8)
+
+- Stage 5: video, audio and controller are live in `brpnext`; DLSS SR is
+  applied to the decoded 1080p frame.
+- Stage 6: DLSS SR is working; RIFE and DLSS-G execution are explicitly not
+  enabled yet (control disabled, labelled Stage 6b).
+- Stage 7: independent layered overlay and diagnostics are working.
+- Stage 8: settings, profiles, reset, import/export and compatibility warnings
+  are working.

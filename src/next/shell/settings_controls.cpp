@@ -138,8 +138,12 @@ std::wstring MonitorLabel(const DisplayInfo& display, int index) {
 }  // namespace
 
 SettingsControls::SettingsControls(Widgets& widgets, AppSettings& settings,
-                                   const SystemInfo& system)
-    : widgets_(widgets), settings_(settings), system_(system) {}
+                                   const SystemInfo& system,
+                                   bool frame_generation_wired)
+    : widgets_(widgets),
+      settings_(settings),
+      system_(system),
+      frame_generation_wired_(frame_generation_wired) {}
 
 void SettingsControls::Reset() {
     id_ = 0;
@@ -327,7 +331,7 @@ float SettingsControls::Ai(float x, float y, float width) {
         backends.push_back(AiBackend::Rife);
         labels.push_back(L"RIFE (TensorRT)");
     }
-    const bool fg_available = !backends.empty();
+    const bool fg_available = frame_generation_wired_ && !backends.empty();
     if (widgets_.Toggle(Next(), Row(x, y, width), L"Frame generation",
                         settings_.ai.frame_generation, fg_available)) {
         Touch();
@@ -352,7 +356,9 @@ float SettingsControls::Ai(float x, float y, float width) {
         }
     } else {
         widgets_.Label(Row(x, y, width),
-                       L"FG backend: none installed (NeuralScreen worker or RIFE engine)",
+                       frame_generation_wired_
+                           ? L"FG backend: none installed (NeuralScreen worker or RIFE engine)"
+                           : L"Frame generation execution lands in Stage 6b; DLSS SR is active.",
                        widgets_.Tokens().text_faint, 13.0f, DWRITE_FONT_WEIGHT_MEDIUM);
     }
     y += kRow + kGap;

@@ -10,7 +10,8 @@ namespace brp::next {
 // Each function draws a group at (x, y, width) and returns the next y.
 class SettingsControls {
 public:
-    SettingsControls(Widgets& widgets, AppSettings& settings, const SystemInfo& system);
+    SettingsControls(Widgets& widgets, AppSettings& settings, const SystemInfo& system,
+                     bool frame_generation_wired = true);
 
     void Reset();
     bool Changed() const { return changed_; }
@@ -35,6 +36,7 @@ private:
     const SystemInfo& system_;
     int id_ = 0;
     bool changed_ = false;
+    bool frame_generation_wired_ = true;
 };
 
 }  // namespace brp::next
