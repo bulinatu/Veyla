@@ -321,14 +321,10 @@ float SettingsControls::Ai(float x, float y, float width) {
     }
     y += kRow + kGap;
 
-    std::vector<AiBackend> backends;
-    std::vector<std::wstring> labels;
-    // brpnext currently executes RIFE; the DLSS-G worker presenter is Stage 6c.
-    if (system_.rife_lite) {
-        backends.push_back(AiBackend::Rife);
-        labels.push_back(L"RIFE (TensorRT)");
-    }
-    const bool fg_available = frame_generation_wired_ && !backends.empty();
+    std::vector<AiBackend> backends = {AiBackend::DlssFg, AiBackend::Rife};
+    std::vector<std::wstring> labels = {L"DLSS FG 2x", L"RIFE (TensorRT)"};
+    std::vector<bool> item_enabled = {false, system_.rife_lite};
+    const bool fg_available = frame_generation_wired_ && item_enabled[1];
     if (widgets_.Toggle(Next(), Row(x, y, width), L"Frame generation",
                         settings_.ai.frame_generation, fg_available)) {
         Touch();
@@ -336,25 +332,26 @@ float SettingsControls::Ai(float x, float y, float width) {
     y += kRow + kGap;
 
     if (fg_available) {
-        int backend_index = 0;
-        const auto found = std::find(backends.begin(), backends.end(),
-                                     settings_.ai.fg_backend);
-        if (found != backends.end()) {
-            backend_index = static_cast<int>(found - backends.begin());
+        int backend_index = 1;
+        for (std::size_t i = 0; i < backends.size(); ++i) {
+            if (backends[i] == settings_.ai.fg_backend) {
+                backend_index = static_cast<int>(i);
+                break;
+            }
         }
         if (widgets_.Choice(Next(), Row(x, y, width), L"FG backend", labels,
-                            backend_index, settings_.ai.frame_generation)) {
-            settings_.ai.fg_backend = backends[static_cast<std::size_t>(backend_index)];
-            Touch();
-        }
-        if (found == backends.end() && settings_.ai.frame_generation) {
-            settings_.ai.fg_backend = backends.front();
-            Touch();
+                            backend_index, settings_.ai.frame_generation,
+                            &item_enabled)) {
+            if (item_enabled[static_cast<std::size_t>(backend_index)]) {
+                settings_.ai.fg_backend =
+                    backends[static_cast<std::size_t>(backend_index)];
+                Touch();
+            }
         }
     } else {
         widgets_.Label(Row(x, y, width),
                        frame_generation_wired_
-                           ? L"FG backend: none installed (NeuralScreen worker or RIFE engine)"
+                           ? L"FG selectable backends: RIFE engine missing"
                            : L"Frame generation execution lands in Stage 6b; DLSS SR is active.",
                        widgets_.Tokens().text_faint, 13.0f, DWRITE_FONT_WEIGHT_MEDIUM);
     }
@@ -394,12 +391,12 @@ float SettingsControls::Ai(float x, float y, float width) {
     }
 
     if (settings_.ai.frame_generation &&
-        settings_.ai.fg_backend == AiBackend::DlssFg &&
-        settings_.ai.target_fps > settings_.streaming.fps * 2) {
-        widgets_.Label(Rect(x, y, x + width, y + 34),
-                       L"DLSS FG is 2x in this runtime: the target above will be capped.",
+        settings_.ai.fg_backend == AiBackend::DlssFg) {
+        widgets_.Label(Rect(x, y, x + width, y + 38),
+                       L"DLSS-G 60->120 is visible as a reference option only; it is not "
+                       L"selectable in brpnext (Stage 6c). Choose RIFE for 30->60.",
                        widgets_.Tokens().warning, 12.0f, DWRITE_FONT_WEIGHT_MEDIUM);
-        y += 36.0f;
+        y += 40.0f;
     }
     if (settings_.ai.frame_generation && settings_.ai.fg_backend == AiBackend::Rife) {
         widgets_.Label(Rect(x, y, x + width, y + 34),
@@ -409,7 +406,6 @@ float SettingsControls::Ai(float x, float y, float width) {
     }
     return y;
 }
-
 float SettingsControls::Gpu(float x, float y, float width) {
     widgets_.Label(Row(x, y, width),
                    system_.gpu.present ? (L"Adapter: " + Widen(system_.gpu.name)).c_str()

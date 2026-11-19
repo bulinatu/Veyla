@@ -931,26 +931,34 @@ void NextApp::RenderAi(Widgets& widgets) {
 
     const float gap = 12.0f;
     const float card_w = (w - gap * 3.0f) / 4.0f;
-    auto capability_card = [&](int index, const wchar_t* title, bool available,
-                               const wchar_t* detail) {
+    auto capability_card = [&](int index, const wchar_t* title, const wchar_t* status,
+                               bool good, const wchar_t* detail) {
         const float cx = x + (card_w + gap) * index;
         widgets.Card(Rect(cx, 124, cx + card_w, 204));
         renderer_->Text(title, Rect(cx + 14, 136, cx + card_w - 14, 160), 13.0f,
                         ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        widgets.StatusPill(Rect(cx + 14, 166, cx + 120, 194),
-                           available ? L"AVAILABLE" : L"MISSING",
-                           available ? theme.success : theme.warning, true);
-        renderer_->Text(detail, Rect(cx + 126, 166, cx + card_w - 10, 194), 10.0f,
+        widgets.StatusPill(Rect(cx + 14, 166, cx + 150, 194), status,
+                           good ? theme.success : theme.warning, true);
+        renderer_->Text(detail, Rect(cx + 156, 166, cx + card_w - 10, 194), 10.0f,
                         ToD2D(theme.text_faint));
     };
-    capability_card(0, L"DLSS Super Resolution", system_.dlss_sr, L"nvngx_dlss.dll");
-    capability_card(1, L"DLSS Frame Generation", system_.nr_worker, L"nr worker");
-    capability_card(2, L"RIFE TensorRT", system_.rife_lite, L"engine");
-    capability_card(3, L"TensorRT runtime", system_.tensorrt_runtime, L"nvinfer_10");
-
+    capability_card(0, L"DLSS Super Resolution",
+                    system_.dlss_sr ? L"AVAILABLE" : L"MISSING", system_.dlss_sr,
+                    L"nvngx_dlss.dll");
+    capability_card(1, L"DLSS Frame Generation",
+                    system_.nr_worker ? L"STAGE 6C" : L"MISSING", false,
+                    L"reference only");
+    capability_card(2, L"RIFE TensorRT", system_.rife_lite ? L"AVAILABLE" : L"MISSING",
+                    system_.rife_lite, L"30 -> 60");
+    capability_card(3, L"TensorRT runtime",
+                    system_.tensorrt_runtime ? L"AVAILABLE" : L"MISSING",
+                    system_.tensorrt_runtime, L"nvinfer_10");
+    renderer_->Text(L"DLSS-G 60 -> 120 is visible as a reference option only; RIFE is the "
+                    L"executable 30 -> 60 path in this build.",
+                    Rect(x, 210, x + w, 230), 10.5f, ToD2D(theme.text_faint));
     SettingsControls controls(widgets, settings_, system_, true);
     controls.Reset();
-    const float end = controls.Ai(x, 220, w);
+    const float end = controls.Ai(x, 232, w);
     if (controls.Changed()) {
         Apply();
     }
@@ -1496,8 +1504,8 @@ std::wstring NextApp::ProfileWarning(const Profile& profile) const {
         return L"DLSS SR runtime missing";
     }
     if (ai.frame_generation) {
-        if (ai.fg_backend == AiBackend::DlssFg && !system_.nr_worker) {
-            return L"DLSS FG worker missing";
+        if (ai.fg_backend == AiBackend::DlssFg) {
+            return L"DLSS-G 60->120 is reference-only (Stage 6c)";
         }
         if (ai.fg_backend == AiBackend::Rife && !system_.rife_lite) {
             return L"RIFE engine missing";

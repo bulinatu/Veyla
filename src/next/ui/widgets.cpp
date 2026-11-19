@@ -97,7 +97,8 @@ bool Widgets::Button(int id, const D2D1_RECT_F& rect, const wchar_t* label, bool
 }
 
 bool Widgets::Choice(int id, const D2D1_RECT_F& rect, const wchar_t* label,
-                     const std::vector<std::wstring>& items, int& index, bool enabled) {
+                     const std::vector<std::wstring>& items, int& index, bool enabled,
+                     const std::vector<bool>* item_enabled) {
     hovered_ = hovered_ || Hover(rect);
     const float label_width = 300.0f;
     renderer_.Text(label, Rect(rect.left, rect.top, rect.left + label_width, rect.bottom),
@@ -118,13 +119,15 @@ bool Widgets::Choice(int id, const D2D1_RECT_F& rect, const wchar_t* label,
             break;
         }
         const D2D1_RECT_F pill = Rect(x, rect.top + 6.0f, x + width, rect.bottom - 6.0f);
+        const bool item_ok = !item_enabled || i >= item_enabled->size() ||
+                              (*item_enabled)[i];
         const bool selected = static_cast<int>(i) == index;
-        const bool hover = enabled && Hover(pill);
+        const bool hover = enabled && item_ok && Hover(pill);
         hovered_ = hovered_ || hover;
         interactable_hovered_ = interactable_hovered_ || hover;
         Color fill = selected ? theme_.accent : theme_.surface_alt;
         Color text = selected ? theme_.accent_text : theme_.text_dim;
-        if (!enabled) {
+        if (!enabled || !item_ok) {
             fill = theme_.surface_alt;
             text = theme_.text_faint;
         } else if (hover && !selected) {
@@ -140,7 +143,7 @@ bool Widgets::Choice(int id, const D2D1_RECT_F& rect, const wchar_t* label,
                        Rect(pill.left + 8, pill.top, pill.right - 8, pill.bottom),
                        static_cast<float>(theme_.font_small), ToD2D(text),
                        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
-        if (hover && input_.clicked) {
+        if (hover && item_ok && input_.clicked) {
             index = static_cast<int>(i);
             changed = true;
         }

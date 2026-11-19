@@ -128,9 +128,11 @@ Working:
 
 Deliberately not enabled yet:
 
-- DLSS-G 60 -> 120 in `brpnext`: the worker presenter is still Stage 6c and is
-  not selectable in the new AI page. DLSS SR and RIFE are mutually exclusive
-  in the new Watch path (RIFE runs at 1080p, then the presenter upscales).
+- DLSS-G 60 -> 120 in `brpnext`: **skipped by decision**. The option is visible
+  in the FG backend list but greyed out and cannot be selected; the capability
+  card says STAGE 6C / reference only. RIFE is the executable path. DLSS SR and
+  RIFE are mutually exclusive in the new Watch path (RIFE runs at 1080p, then
+  the presenter upscales).
 - Simultaneous SR + RIFE is not claimed.
 
 Next: DLSS-G worker presenter for 60 -> 120, then a side-by-side SR+RIFE mode.

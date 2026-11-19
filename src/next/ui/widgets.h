@@ -32,7 +32,8 @@ public:
     bool Button(int id, const D2D1_RECT_F& rect, const wchar_t* label,
                 bool primary = true, bool enabled = true);
     bool Choice(int id, const D2D1_RECT_F& rect, const wchar_t* label,
-                const std::vector<std::wstring>& items, int& index, bool enabled = true);
+                const std::vector<std::wstring>& items, int& index, bool enabled = true,
+                const std::vector<bool>* item_enabled = nullptr);
     bool Toggle(int id, const D2D1_RECT_F& rect, const wchar_t* label, bool& value,
                 bool enabled = true);
     bool Slider(int id, const D2D1_RECT_F& rect, const wchar_t* label, float& value,

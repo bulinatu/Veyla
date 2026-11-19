@@ -25,7 +25,7 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 | Custom TensorRT SR | Not implemented | Optional/experimental | N | 6 | only if measured worthwhile |
 | RTX VSR | Removed | **Excluded** | - | - | explicit requirement |
 | RIFE 30->60 | Working (4.25 lite / 4.26 heavy) | **Working in brpnext** | R behind `IFrameGenerator` | 6 | 29 gen/s, 58 shown/s verified |
-| DLSS-G 60->120 | Working after 0.4.9 | Reference app only | R behind `IFrameGenerator` | 6c | 2x ceiling; worker presenter pending in brpnext |
+| DLSS-G 60->120 | Working after 0.4.9 | **Reference-only option (disabled)** | R | 6c skipped | visible in AI page, not selectable |
 | DLSS-G 30->120 | Impossible on this runtime | Not offered | - | - | runtime refuses >2x |
 | NVIDIA VFG legacy | Optional, working | Keep or drop | R | 6 | only if it beats DLSS-G |
 | NVOF/NvOFFRUC backend | Not implemented | Evaluate | N | 6 | quality win required |
