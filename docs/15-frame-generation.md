@@ -403,3 +403,21 @@ Measured after both fixes, live session, 30 fps game:
 
 Test hooks: `BRP_RIFE_SIM30` halves a 60 fps source to exercise the 30 -> 60
 path; `BRP_RIFE_FORCE_GEN` generates on every pair regardless of content.
+
+### The 30 fps setting was ignored (fixed 19 Nov 2026)
+
+The session always requested `CHIAKI_VIDEO_FPS_PRESET_60`, whatever the
+Connection tab said. A 30 fps choice therefore still arrived at 60 fps with
+every other frame duplicated. The request now follows `profile.fps`.
+
+Measured after the fix, Connection FPS = 30, RIFE on:
+
+```
+[rife] 60 fps shown, 30 generated, 21.2 ms/frame,
+       cadence avg 16.68 ms max 20.90 ms, content 30.0 fps, dupes 0
+health: src=28.6  drops=0  lost=0  audio underruns=0
+```
+
+The console honours the request: 28.6 fps arrive, no duplicates, half the
+frames to decode, and RIFE makes the 60. The duplicate detector still matters
+for games that ignore the hint or for the 60 fps setting.

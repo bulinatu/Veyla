@@ -125,9 +125,13 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
                 sizeof(info_.regist_key));
     std::memcpy(info_.morning, profile.credentials.rp_key.data(), sizeof(info_.morning));
 
-    chiaki_connect_video_profile_preset(&info_.video_profile,
-                                        CHIAKI_VIDEO_RESOLUTION_PRESET_1080p,
-                                        CHIAKI_VIDEO_FPS_PRESET_60);
+    // The requested stream rate follows the profile. This used to be hardcoded
+    // to 60, which is why a 30 fps setting still arrived at 60 with duplicated
+    // frames. The console may ignore the hint; the duplicate detector covers
+    // that case.
+    chiaki_connect_video_profile_preset(
+        &info_.video_profile, CHIAKI_VIDEO_RESOLUTION_PRESET_1080p,
+        profile.fps >= 50 ? CHIAKI_VIDEO_FPS_PRESET_60 : CHIAKI_VIDEO_FPS_PRESET_30);
     if (width > 1920 || height > 1080) {
         // The console's Remote Play encoder advertises 1920x1080 as its only
         // profile and aborts the stream ("AvCap failed to initialize video")
