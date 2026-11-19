@@ -100,6 +100,12 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
     }
 }
 
+# --- optional RIFE engine (TensorRT, built for one GPU architecture) --------
+$rife = Join-Path $release "rife"
+if (Test-Path $rife) {
+    Copy-Item -LiteralPath $rife -Destination (Join-Path $dest "rife") -Recurse -Force
+}
+
 # --- readme -----------------------------------------------------------------
 $readme = @"
 BetterRemotePlay $version - standalone build
@@ -144,6 +150,11 @@ Features and runtimes
 - nvidia-vfx\runtime\ contains the optional legacy NVIDIA VFG runtime. RTX VSR
   has been removed from the client; DLSS SR/DLAA, DLSS NR and DLSS Frame
   Generation are the supported neural paths.
+- rife\ contains a TensorRT engine for RIFE 4.25 lite, built for the GPU of the
+  machine this package came from. RIFE also needs TensorRT 10.16 and CUDA 13 on
+  the PC: point BRP_TENSORRT_DIR at a folder with nvinfer_10.dll and
+  cudart64_13.dll. Without them the app falls back to NVIDIA frame generation.
+  An engine built for another GPU will not load; rebuild it with trtexec.
 - The app is not affiliated with Sony Interactive Entertainment. No Sony
   artwork, code, keys or fonts are included.
 
@@ -156,6 +167,10 @@ Settings worth knowing
   DLSS Frame Generation 2x at 1440p; also SR only and Low latency. Presets are
   saved and applied at the start of the next session (reconnect), never while
   streaming.
+- Settings > Upscaling > Interpolation engine: NVIDIA DLSS FG (fast) or RIFE
+  4.25 lite (TensorRT). RIFE output is 60 fps (one generated frame per pair, so
+  a 30 fps game plays at 60) or pass-through. Output frame rate (60/90/120) is
+  the NVIDIA control and only appears for that engine.
 - Health log: %APPDATA%\BetterRemotePlay\health.log, one line every 30 seconds
   (worker fps, frame timing, source cadence, drops, decode, audio, handles,
   VRAM). Rotates at 2 MB.
