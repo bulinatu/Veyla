@@ -6,7 +6,7 @@ GPU colour and sharpening, a custom PS5-style UI and native DualSense support.
 Build `0.3`. Run `git log -1` for the current commit.
 
 Standalone ZIP (rebuilt 19 Nov 2026, 14:14): `dist\BetterRemotePlay-0.3-standalone.zip`,
-581.9 MB, SHA256 `3A6F099652B55CBBDF229886767A76B7AAF8548908141544C43A4E6E3545A1E3`.
+602.0 MB, SHA256 `3A6F099652B55CBBDF229886767A76B7AAF8548908141544C43A4E6E3545A1E3`.
 `dist\BetterRemotePlay\brp.exe` matches `build\Release\brp.exe` (SHA256
 `CD7FCA972F37E663053C19D624521B7ABBE61DDA18AEDCC358A097E25A17492B`), and the
 package includes `rife\rife425_1080.engine` (12.5 MB, built for the reference
