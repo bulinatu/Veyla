@@ -511,7 +511,7 @@ p.rife_output = p.rife_output == 0 ? 0 : 60;
     p.reflex = std::clamp(p.reflex, 0, 2);
     p.haptic_intensity = std::clamp(p.haptic_intensity, 0, 5);
     p.testing_log = p.testing_log != 0 ? 1 : 0;
-    p.rife_blend = std::clamp(p.rife_blend, 0, 50);
+    p.rife_blend = std::clamp(p.rife_blend, 0, 40);
     p.rife_safe_motion = p.rife_safe_motion != 0 ? 1 : 0;
     p.sharpness = std::clamp(p.sharpness, 0, 100);
     p.color_on = std::clamp(p.color_on, 0, 1);

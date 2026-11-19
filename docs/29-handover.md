@@ -224,3 +224,10 @@ rebuild its engine.
   frame, +3-5 ms. Reduces the "vanishing head" on fast turns.
 - Motion safety (default On, threshold 22) only at very large frame changes.
 - Both in Settings > Upscaling when the RIFE engine is selected.
+
+## 0.4.7 - frozen NPCs
+
+- Duplicate detection tightened from mean < 1.2 / 96 outliers to < 0.45 / 24:
+  small independent motion in a static scene was being skipped as a duplicate.
+- Default RIFE blend lowered 20 -> 10 % (ghosting of moving bodies); note in the
+  UI explains the head/ghost trade-off.

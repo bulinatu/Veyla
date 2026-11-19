@@ -950,7 +950,7 @@ void App::RenderBoot(double t) {
              th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    ui_.Text(L"v0.4.6", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
+    ui_.Text(L"v0.4.7", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
              th::Rgba(th::kMuted, 0.55f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
 }
@@ -3064,7 +3064,10 @@ bool App::FrameIsDuplicate(const media::DecodedFrame& frame) {
         const double mean = static_cast<double>(sum) /
                             (static_cast<double>(samples.size()) * 3.0);
         last_frame_diff_ = mean;
-        duplicate = mean < 1.2 && outliers < 96;  // under ~1.5 % of channels
+        // Strict: a mostly static scene with one small moving NPC can have a
+        // low mean difference. Treating that as a duplicate froze the NPC for
+        // the skipped frames. Only near-identical frames count now.
+        duplicate = mean < 0.45 && outliers < 24;
     }
     frame_samples_ = samples;
     frame_sig_valid_ = true;
@@ -6373,8 +6376,8 @@ void App::RenderSettings(double t) {
                 ui_.Text(L"RIFE generates one frame per pair: a 30 fps game plays at 60. "
                          L"90/120 need the NVIDIA engine. The model is fixed (4.25 lite). "
                          L"DLSS SR is bypassed here; neural rendering, when on, runs on the 1080p "
-                         L"stream before RIFE. Clarity comes from the upscaler and "
-                         L"sharpening below.",
+                         L"stream before RIFE. Blend hides the vanishing head but can ghost "
+                         L"objects that move independently; set it Off if bodies look frozen.",
                          {kContentX, y + 2.0f, w - 64.0f, y + 46.0f}, 11.5f,
                          th::Rgba(th::kMuted));
                 y += 50.0f;
@@ -6756,7 +6759,7 @@ void App::RenderSettings(double t) {
             break;
         }
         case Tab::About: {
-            ui_.Text(L"BetterRemotePlay 0.4.6", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
+            ui_.Text(L"BetterRemotePlay 0.4.7", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
                      th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 48.0f;
             ui_.Text(L"A PS5 to PC Remote Play client with a real post-process pipeline: "

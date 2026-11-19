@@ -546,3 +546,19 @@ visible only with the RIFE engine:
 
 Values are saved in the profile. If the head still flickers, raise the blend;
 if drops return, lower it or turn motion safety off.
+
+### 0.4.7 - "NPCs look frozen"
+
+Two independent causes, both fixed or reduced:
+
+- **Duplicate detection was too loose.** A mostly static scene with one small
+  moving NPC can have a low mean difference. At `mean < 1.2` those frames were
+  classified as duplicates and skipped, so the NPC only updated every other
+  frame: it looked stopped while the camera moved normally. Threshold is now
+  `mean < 0.45` with under 24 outlier channels, which still absorbs decoder
+  noise but not motion.
+- **Blend ghosts independent motion.** Mixing 20 % of the previous frame into
+  generated ones hides the vanishing head but leaves a faint copy of moving
+  bodies. Default is now 10 %, and the settings note says to set it Off if
+  bodies look frozen. The trade-off is: blend Off -> head can flicker; blend
+  20-40 % -> head stays but moving objects ghost.

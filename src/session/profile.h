@@ -100,7 +100,7 @@ struct Profile {
     int console_triggers = 1;
     int haptic_intensity = 3;  // 0 off, 1 very weak, 2 weak, 3 normal, 4 strong, 5 very strong
     int testing_log = 0;       // 1 = write testing.log every second
-    int rife_blend = 20;       // percent of the previous real frame mixed into generated ones
+    int rife_blend = 10;       // percent of the previous real frame mixed into generated ones
     int rife_safe_motion = 1;  // skip interpolation on very large frame changes
     int motion = 1;
 
