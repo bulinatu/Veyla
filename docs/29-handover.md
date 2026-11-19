@@ -187,3 +187,13 @@ rebuild its engine.
   instead of a warped midpoint (the "vanishing head" on turns).
 - Health log records `eng=RIFE|NVIDIA`, `rife=<fps>/<ms>` and `cad=<ms>`.
 - `BRP_RIFE_SAFE_MOTION=0` disables the fast-motion guard for comparison.
+
+## 0.4.3 - testing.log
+
+- `%APPDATA%\BetterRemotePlay\testing.log`: header with OS, CPU, GPU, display,
+  profile and RIFE paths, then one line per second while streaming (src,
+  content, RIFE shown/ms, cadence avg/max, generated, queue, FG worker, late,
+  stalls, present misses, decode, drops, lost, buffer, audio underruns) with a
+  `!!` marker on anomalies. Rotates at 4 MB.
+- Settings > About > Open diagnostics folder.
+- Field reference in `docs/31-diagnostics.md`.

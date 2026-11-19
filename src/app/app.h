@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <filesystem>
+#include <fstream>
 
 #include "app/rife_setup.h"
 #include "audio/audio_engine.h"
@@ -163,6 +164,9 @@ private:
     void TickEnhance();
     void ApplyLaunchPreset(int preset);
     void LogHealth();
+    void OpenTestingLog();
+    void LogTestingLine();
+    void TestingEvent(const char* fmt, ...);
     void OpenAudioDevice();
     void ApplyControllerOutput();
     void TriggerRumble();
@@ -432,6 +436,7 @@ private:
     int rife_sample_n_ = 0;
     double rife_gap_ema_ = 0.0;
     double rife_cadence_ms_ = 0.0;
+    double rife_cadence_max_ms_ = 0.0;
     double last_frame_diff_ = 0.0;
     RifeSetup rife_setup_;
     bool setup_modal_ = false;
@@ -450,6 +455,9 @@ private:
     double enh_dirty_at_ = 0.0;
     double health_at_ = -1.0;
     std::string health_path_;
+    std::ofstream testing_;
+    double testing_at_ = -1.0;
+    unsigned long long testing_misses_ = 0;
 
 
     // neural rendering (DLSSNR through the NGX worker)

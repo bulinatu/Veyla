@@ -10,9 +10,12 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
+#include <cstdarg>`n#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <shellapi.h>
+#include <winreg.h>
+#include <dxgi.h>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -278,6 +281,7 @@ enum WidgetId {
     W_SetupStart,
     W_SetupClose,
     W_HapticIntensity = 99,
+    W_OpenLogs = 106,
     W_PsnLogin = 90,
     W_PsnOpen,
     W_PsnPaste,
@@ -425,6 +429,8 @@ bool App::Init(Win32Window* window) {
     } else {
         session_note_ = "No console configured yet.";
     }
+
+    OpenTestingLog();
 
     // Apply persisted UI settings.
     hdr_ = profile_.hdr;
@@ -941,7 +947,7 @@ void App::RenderBoot(double t) {
              th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    ui_.Text(L"v0.4.2", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
+    ui_.Text(L"v0.4.3", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
              th::Rgba(th::kMuted, 0.55f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
 }
@@ -1514,6 +1520,11 @@ void App::ApplyDropdown(int id, int index) {
                                : "RIFE: one generated frame between each pair.";
             break;
         }
+        case W_OpenLogs: {
+            const std::wstring dir = Widen(EnvString("APPDATA") + "\\\\BetterRemotePlay");
+            ::ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        }
         case W_HapticIntensity: {
             profile_.haptic_intensity = std::clamp(index, 0, 5);
             SaveProfile();
@@ -1939,6 +1950,141 @@ void App::ApplyLaunchPreset(int preset) {
     stream_note_ = std::string(note) + (live ? " Applied." : " Applies when the session starts.");
 }
 
+namespace {
+std::string Narrow(const wchar_t* text) {
+    if (!text || !*text) {
+        return {};
+    }
+    const int size = ::WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0, nullptr, nullptr);
+    std::string out(static_cast<size_t>(size > 0 ? size - 1 : 0), '\0');
+    if (size > 1) {
+        ::WideCharToMultiByte(CP_UTF8, 0, text, -1, out.data(), size, nullptr, nullptr);
+    }
+    return out;
+}
+}  // namespace
+
+void App::TestingEvent(const char* fmt, ...) {
+    if (!testing_.is_open()) {
+        return;
+    }
+    char text[512];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf_s(text, sizeof(text), _TRUNCATE, fmt, args);
+    va_end(args);
+    SYSTEMTIME st{};
+    ::GetLocalTime(&st);
+    testing_ << '[' << st.wHour << ':' << st.wMinute << ':' << st.wSecond << "] " << text
+             << '\n';
+    testing_.flush();
+}
+
+void App::OpenTestingLog() {
+    namespace fs = std::filesystem;
+    const std::string dir = EnvString("APPDATA") + "\\BetterRemotePlay";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    const fs::path path = fs::path(dir) / "testing.log";
+    if (fs::exists(path, ec) && fs::file_size(path, ec) > 4ull * 1024ull * 1024ull) {
+        fs::remove(fs::path(dir) / "testing.1.log", ec);
+        fs::rename(path, fs::path(dir) / "testing.1.log", ec);
+    }
+    testing_.open(path, std::ios::out | std::ios::app);
+    if (!testing_.is_open()) {
+        return;
+    }
+    SYSTEMTIME st{};
+    ::GetLocalTime(&st);
+    testing_ << "=== BetterRemotePlay testing log ===\n";
+    testing_ << "local=" << st.wYear << '-' << st.wMonth << '-' << st.wDay << ' ' << st.wHour
+             << ':' << st.wMinute << ':' << st.wSecond << "\n";
+
+    wchar_t value[256] = {};
+    DWORD size = sizeof(value);
+    ::RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+                   L"ProductName", RRF_RT_REG_SZ, nullptr, value, &size);
+    const std::string product = Narrow(value);
+    size = sizeof(value);
+    ::RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+                   L"CurrentBuild", RRF_RT_REG_SZ, nullptr, value, &size);
+    testing_ << "os=" << product << " build " << Narrow(value) << "\n";
+
+    size = sizeof(value);
+    ::RegGetValueW(HKEY_LOCAL_MACHINE,
+                   L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+                   L"ProcessorNameString", RRF_RT_REG_SZ, nullptr, value, &size);
+    testing_ << "cpu=" << Narrow(value) << " cores=" << std::thread::hardware_concurrency()
+             << "\n";
+
+    IDXGIFactory1* factory = nullptr;
+    if (SUCCEEDED(::CreateDXGIFactory1(__uuidof(IDXGIFactory1),
+                                       reinterpret_cast<void**>(&factory)))) {
+        IDXGIAdapter1* adapter = nullptr;
+        if (factory->EnumAdapters1(0, &adapter) == S_OK && adapter) {
+            DXGI_ADAPTER_DESC1 desc{};
+            if (adapter->GetDesc1(&desc) == S_OK) {
+                testing_ << "gpu=" << Narrow(desc.Description) << " vram="
+                         << (desc.DedicatedVideoMemory / (1024ull * 1024ull)) << "MB\n";
+            }
+            adapter->Release();
+        }
+        factory->Release();
+    }
+    testing_ << "display=" << refresh_hz_ << "Hz window=" << ui_w_ << 'x' << ui_h_
+             << " fullscreen=" << (borderless_ ? 1 : 0) << " hdr=" << (hdr_ ? 1 : 0)
+             << "\n";
+    testing_ << "profile: engine=" << (profile_.fg_engine == 1 ? "RIFE" : "NVIDIA")
+             << " target=" << profile_.fg_target << " sr=" << profile_.neural_sr
+             << " mode=" << profile_.dlss_mode << " fg=" << profile_.dlss_fg
+             << " nr=" << profile_.neural_nr << " fps=" << profile_.fps
+             << " bitrate=" << profile_.bitrate_kbps << " decoder=" << profile_.decoder
+             << " chroma=" << profile_.chroma << " buf=" << profile_.frame_buffer
+             << " haptics=" << profile_.haptic_intensity << "\n";
+
+    const fs::path rife = ExeDirPath() / "rife";
+    const fs::path engine = rife / "rife425_1080.engine";
+    std::string runtime = EnvString("BRP_TENSORRT_DIR");
+    if (runtime.empty()) {
+        std::ifstream marker(rife / "runtime.txt");
+        std::getline(marker, runtime);
+    }
+    testing_ << "rife: runtime=" << runtime << " engine_bytes="
+             << (fs::exists(engine, ec) ? fs::file_size(engine, ec) : 0ull) << "\n";
+    testing_.flush();
+}
+
+void App::LogTestingLine() {
+    if (!testing_.is_open()) {
+        return;
+    }
+    const unsigned long long misses = presenter_.present_misses();
+    const unsigned long long miss_delta =
+        misses > testing_misses_ ? misses - testing_misses_ : 0;
+    testing_misses_ = misses;
+    // Idle presentation legitimately shows fewer frames than refreshes, so a
+    // miss only means something while streaming.
+    const bool bad = stat_late_ > 0 || rife_cadence_max_ms_ > 30.0 ||
+                     (stream_active_ && miss_delta > 3) || stream_stats_.lost > 0 ||
+                     audio_.underruns() > 0;
+    char line[640];
+    std::snprintf(line, sizeof(line),
+                  "t=%.1f %s fps=%.1f src=%.1f content=%.1f rife=%.1f/%.2f cad=%.2f/%.2f "
+                  "gen=%d q=%zu fg=%.1f late=%d stalls=%d miss=%llu dec=%.2f/%.2f "
+                  "drops=%d lost=%d buf=%d aud=%d\n",
+                  clock_, bad ? "!!" : "  ", stream_active_ ? stream_stats_.elapsed > 0.0
+                                                                   ? static_cast<double>(stream_stats_.frames) / stream_stats_.elapsed
+                                                                   : 0.0
+                                                             : 0.0,
+                  static_cast<double>(streaming_.fps()), fg_content_hz_, rife_out_fps_,
+                  rife_ms_, rife_cadence_ms_, rife_cadence_max_ms_, rife_generated_,
+                  rife_out_.size(), fg_worker_fps_, stat_late_, stat_stalls_, miss_delta,
+                  stream_stats_.decode_ms_avg, stream_stats_.decode_ms_max,
+                  stream_stats_.buffer_drops + streaming_.video_queue_drops(),
+                  stream_stats_.lost, stream_stats_.buffer, audio_.underruns());
+    testing_ << line;
+    testing_.flush();
+}
 void App::LogHealth() {
     if (health_path_.empty()) {
         return;
@@ -3016,6 +3162,7 @@ bool App::EnsureRife() {
     if (!instance->Load(runtime, engine, profile_.width, profile_.height, detail)) {
         rife_note_ = L"RIFE: " + Widen(detail);
         std::fprintf(stderr, "[rife] load failed: %s\n", detail.c_str());
+        TestingEvent("RIFE load failed: %s", detail.c_str());
         // An engine built for another TensorRT version or GPU cannot be fixed
         // in place. Remove it so Home offers "Set up RIFE" and rebuilds one for
         // this machine instead of failing every session.
@@ -3273,6 +3420,7 @@ void App::RifePresentDue() {
                                ? rife_interval_sum_ * 1000.0 / rife_interval_n_
                                : 0.0;
         rife_cadence_ms_ = avg;
+        rife_cadence_max_ms_ = rife_interval_max_ * 1000.0;
         if (std::getenv("BRP_FG_PROBE")) {
             std::fprintf(stderr,
                          "[rife] %.0f fps shown, %d generated, %.1f ms/frame, "
@@ -3707,6 +3855,7 @@ void App::TickSession() {
                              "30 seconds, then press Connect again."
                            : (error.empty() ? "Could not start the session." : error);
         std::fprintf(stderr, "[app] start failed: %s\n", error.c_str());
+        TestingEvent("session failed: %s", error.c_str());
         return;
     }
 
@@ -3763,6 +3912,9 @@ void App::TickSession() {
     screen_ = Screen::Stream;
     stream_note_.clear();
     std::fprintf(stderr, "[app] streaming started\n");
+    TestingEvent("session started host=%s engine=%s target=%d sr=%d fg=%d nr=%d",
+                 profile_.host.c_str(), profile_.fg_engine == 1 ? "RIFE" : "NVIDIA",
+                 profile_.fg_target, profile_.neural_sr, profile_.dlss_fg, profile_.neural_nr);
 }
 
 void App::TickPendingConnect() {
@@ -4005,6 +4157,16 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
     if (clock_ - health_at_ >= 30.0) {
         health_at_ = clock_;
         LogHealth();
+    }
+    // One line per second while streaming: this is the file to send when
+    // something stutters on another PC.
+    if (testing_at_ < 0.0) {
+        testing_at_ = clock_;
+    } else if (clock_ - testing_at_ >= 1.0) {
+        testing_at_ = clock_;
+        LogTestingLine();
+        rife_generated_ = 0;
+        rife_dupes_ = 0.0;
     }
 
     // Mouse activity drives the stream chrome and the OS cursor.
@@ -6502,7 +6664,7 @@ void App::RenderSettings(double t) {
             break;
         }
         case Tab::About: {
-            ui_.Text(L"BetterRemotePlay 0.4.2", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
+            ui_.Text(L"BetterRemotePlay 0.4.3", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
                      th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 48.0f;
             ui_.Text(L"A PS5 to PC Remote Play client with a real post-process pipeline: "
@@ -6514,6 +6676,12 @@ void App::RenderSettings(double t) {
                      L"or assets are included.",
                      {kContentX, y, w - 64.0f, y + 56.0f}, 13.0f, th::Rgba(th::kMuted));
             y += 60.0f;
+            DrawButton(L"Open diagnostics folder",
+                       {kContentX, y, kContentX + 300.0f, y + 44.0f}, W_OpenLogs, false);
+            y += 56.0f;
+            ui_.Text(L"testing.log is written there every second while streaming.",
+                     {kContentX, y, w - 64.0f, y + 24.0f}, 12.0f, th::Rgba(th::kMuted));
+            y += 30.0f;
             ui_.Text(L"Docs: docs/01-landscape.md … docs/12-steam-input.md",
                      {kContentX, y, w - 64.0f, y + 40.0f}, 13.0f, th::Rgba(th::kMuted));
             break;
