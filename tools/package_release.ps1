@@ -28,6 +28,11 @@ if (-not (Test-Path (Join-Path $release "brp.exe"))) {
     throw "build\Release\brp.exe not found. Build the Release target first."
 }
 
+$running = Get-Process brp -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -and $_.Path.StartsWith($dest, [System.StringComparison]::OrdinalIgnoreCase) }
+if ($running) {
+    throw "brp.exe is running from $dest. Close it before packaging."
+}
 if (Test-Path $dest) {
     Remove-Item -LiteralPath $dest -Recurse -Force
 }
@@ -107,7 +112,10 @@ if (Test-Path $rife) {
 }
 
 # --- keep runtime logs from the build machine out of the package -------------
-Get-ChildItem -LiteralPath $dest -Recurse -File -Include *.jsonl,*.log -ErrorAction SilentlyContinue |
+# Filter on Extension: -Include with -LiteralPath matched every file and wiped
+# the package once.
+Get-ChildItem -LiteralPath $dest -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -eq '.jsonl' -or $_.Extension -eq '.log' } |
     Remove-Item -Force -ErrorAction SilentlyContinue
 
 # --- readme -----------------------------------------------------------------
