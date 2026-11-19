@@ -270,3 +270,46 @@ the default. RIFE remains a candidate only as an experimental 1080p engine for
 - **NVIDIA VFG** (nvidia-vfx runtime, the same family SmoovPlay offers): kept as
   the legacy alternate path in Settings > Upscaling. It is queue-based and
   presents through the parent, so it is slower to react than the NGX worker.
+
+## RIFE through TensorRT, working probe (19 Nov 2026)
+
+`tools/rife_probe` loads a TensorRT engine through `src/media/rife.cpp` and times
+interpolation on synthetic frames. Nothing is linked against the TensorRT or
+CUDA SDKs: `nvinfer_10.dll` and `cudart64_13.dll` are loaded from a directory the
+user points at, and the factory symbols are resolved with `GetProcAddress`.
+
+```
+rife_probe.exe --runtime=<dir> --engine=<file.engine> [--iters=40] [--ts=0.5] [--reverse=1]
+```
+
+**Runtime requirement.** The machine needs the TensorRT 10.16 and CUDA 13
+runtime DLLs. On the reference PC they come from an existing vs-mlrt install
+(`...\vs-plugins\vsmlrt-cuda`), which is why the app treats them as a
+user-supplied runtime, like the NVIDIA VFX runtime. Point `BRP_TENSORRT_DIR` (or
+`--runtime`) at a folder containing `nvinfer_10.dll` and `cudart64_13.dll`.
+
+**Engine requirement.** Engines are built once per GPU and shape:
+
+```
+trtexec --onnx=rife_v425lite.onnx --fp16 \
+  --shapes="img0:1x3x1088x1920,img1:1x3x1088x1920,timestep:1x1x1x1" \
+  --saveEngine=rife425_1080.engine
+```
+
+Headers are vendored from the TensorRT v10.16 tag (Apache-2.0) under
+`third_party/tensorrt/include`, with a minimal `cuda_runtime_api.h` shim.
+
+**Correctness.** The timestep is honoured: on a synthetic pair, `ts=0.1` returns
+almost the first frame, `ts=0.9` almost the second. A real-clip quality test is
+still needed.
+
+**Latency (RTX 4090, 1080p engine, 40 runs):** total p50 **19.4 ms**, p99 20.5,
+of which about 2.8 ms is the RGBA8 -> float CHW conversion. The rest is 6.4 ms of
+inference plus pageable H2D/D2H for 75 MB. Pinned host buffers and fp16 IO would
+cut the transfers roughly in half; even then it is about 11-12 ms, which fits
+60 fps and is marginal for 90, not 120.
+
+**Still not wired into the stream.** The app does not yet build or present RIFE
+frames; the probe proves the runtime path and gives the numbers. Integration
+means a render thread that owns presentation pacing (which would also remove the
+closed worker's 120-on-240 wobble), or feeding the existing presenter.

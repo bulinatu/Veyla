@@ -34,6 +34,21 @@ if (MSVC)
     target_compile_options(brp-bench PRIVATE /W4 /permissive- /utf-8)
 endif()
 
+# --- RIFE (TensorRT, loaded at run time; no CUDA/TensorRT SDK link) ----------
+add_library(brp_rife STATIC src/media/rife.cpp)
+target_include_directories(brp_rife PUBLIC src)
+target_include_directories(brp_rife PRIVATE
+    "${CMAKE_SOURCE_DIR}/third_party/tensorrt/include"
+    "${CMAKE_SOURCE_DIR}/third_party/tensorrt/cuda_shim")
+if (MSVC)
+    target_compile_options(brp_rife PRIVATE /W4 /permissive- /utf-8)
+endif()
+
+add_executable(rife_probe tools/rife_probe/main.cpp)
+target_link_libraries(rife_probe PRIVATE brp_rife)
+if (MSVC)
+    target_compile_options(rife_probe PRIVATE /W4 /permissive- /utf-8)
+endif()
 add_executable(vfx_probe tools/vfx_probe/main.cpp)
 target_link_libraries(vfx_probe PRIVATE brp_media)
 target_compile_options(vfx_probe PRIVATE /Zi)
