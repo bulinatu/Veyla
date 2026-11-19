@@ -323,10 +323,7 @@ float SettingsControls::Ai(float x, float y, float width) {
 
     std::vector<AiBackend> backends;
     std::vector<std::wstring> labels;
-    if (system_.nr_worker) {
-        backends.push_back(AiBackend::DlssFg);
-        labels.push_back(L"DLSS FG (2x)");
-    }
+    // brpnext currently executes RIFE; the DLSS-G worker presenter is Stage 6c.
     if (system_.rife_lite) {
         backends.push_back(AiBackend::Rife);
         labels.push_back(L"RIFE (TensorRT)");

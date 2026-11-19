@@ -3,6 +3,7 @@
 #include "diagnostics/metrics.h"
 #include "media/nv_dlss_sr.h"
 #include "media/pipeline.h"
+#include "media/rife.h"
 #include "platform/win32_window.h"
 #include "shell/settings_controls.h"
 #include "streaming/streaming_service.h"
@@ -17,7 +18,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cwchar>
+#include <fstream>
 #include <iterator>
 #include <string>
 #include <thread>
@@ -285,12 +288,34 @@ void NextApp::Frame() {
         streaming_->Poll();
         if (watch_on_connect_ && streaming_->Connected()) {
             watch_on_connect_ = false;
+            reconnect_attempts_ = 0;
             ToggleWatch(true);
         }
         if (watching_ && !streaming_->Connected()) {
             ToggleWatch(false);
+            StopRifeThread();
             Toast(L"Stream ended", true);
         }
+        const StreamSnapshot snapshot = streaming_->Snapshot();
+        if (snapshot.connected) {
+            reconnect_at_ = -1.0;
+            reconnect_attempts_ = 0;
+        } else if (!user_disconnect_ && connect_requested_ && snapshot.has_credentials &&
+                   !snapshot.connecting && settings_.console.auto_reconnect &&
+                   reconnect_attempts_ < 5) {
+            if (reconnect_at_ < 0.0) {
+                reconnect_at_ = now_ + settings_.console.reconnect_delay_ms / 1000.0;
+            } else if (now_ >= reconnect_at_) {
+                reconnect_at_ = -1.0;
+                ++reconnect_attempts_;
+                ConnectStream();
+            }
+        }
+    }
+    if (presenter_ && presenter_->device_lost()) {
+        watching_ = false;
+        streaming_->Disconnect();
+        Toast(L"GPU device lost; restart the app", true);
     }
     HandlePinInput();
     if (streaming_ && streaming_->Connected() && settings_.overlay.enabled) {
@@ -306,7 +331,14 @@ void NextApp::Frame() {
                           snapshot.decode_ms, snapshot.bitrate_kbps,
                           snapshot.loss_percent);
             lines.emplace_back(buffer);
-            lines.emplace_back(dlss_ready_ ? L"DLSS SR 1440p active" : L"native presentation");
+            if (rife_ready_ && !rife_failed_) {
+                wchar_t rife_line[96] = {};
+                std::swprintf(rife_line, 96, L"RIFE  |  %d gen/s  |  %d shown/s",
+                              rife_generated_rate_, display_rate_);
+                lines.emplace_back(rife_line);
+            } else {
+                lines.emplace_back(dlss_ready_ ? L"DLSS SR 1440p active" : L"native presentation");
+            }
             if (watching_) {
                 lines.emplace_back(L"ESC  Back to console");
             }
@@ -315,6 +347,15 @@ void NextApp::Frame() {
         }
     } else if (overlay_.visible()) {
         overlay_.Hide();
+    }
+    if (rife_generated_at_ < 0.0 || now_ - rife_generated_at_ >= 1.0) {
+        const int total = rife_generated_.load();
+        rife_generated_rate_ = total - rife_generated_last_;
+        rife_generated_last_ = total;
+        rife_generated_at_ = now_;
+        const int shown = display_shown_.load();
+        display_rate_ = shown - display_shown_last_;
+        display_shown_last_ = shown;
     }
     Render();
     const double delta = std::max(0.0, now_ - last_frame_);
@@ -686,9 +727,13 @@ void NextApp::RenderConsole(Widgets& widgets) {
                                       x + 18 + button_w * 2 + 10, y + 170),
                            L"Disconnect", false)) {
             streaming_->Disconnect();
+            StopRifeThread();
             streaming_->SetAudio(nullptr);
             audio_.Close();
             watch_on_connect_ = false;
+            user_disconnect_ = true;
+            connect_requested_ = false;
+            reconnect_attempts_ = 0;
             Toast(L"Disconnected");
         }
     } else {
@@ -696,19 +741,7 @@ void NextApp::RenderConsole(Widgets& widgets) {
                                       x + 18 + button_w * 2 + 10, y + 170),
                            L"Connect", true,
                            !snapshot.connecting && snapshot.has_credentials)) {
-            ConsoleSettings console = settings_.console;
-            if (console.address.empty()) {
-                console.address = snapshot.console_address;
-            }
-            OpenAudio();
-            streaming_->SetAudio(audio_.is_open() ? &audio_ : nullptr);
-            const Status status = streaming_->Connect(console);
-            if (status.ok()) {
-                watch_on_connect_ = true;
-                Toast(L"Connecting...");
-            } else {
-                Toast(Widen(status.message()), true);
-            }
+            ConnectStream();
         }
     }
     if (widgets.Button(2503, Rect(x + (button_w + 10) * 2 + 18, y + 132,
@@ -876,7 +909,7 @@ void NextApp::RenderStreaming(Widgets& widgets) {
                     L"below are already persistent.",
                     Rect(x + 18, 180, x + w - 18, 204), 11.0f, ToD2D(theme.text_faint));
 
-    SettingsControls controls(widgets, settings_, system_, false);
+    SettingsControls controls(widgets, settings_, system_, true);
     controls.Reset();
     const float end = controls.Streaming(x, 238, w);
     if (controls.Changed()) {
@@ -915,7 +948,7 @@ void NextApp::RenderAi(Widgets& widgets) {
     capability_card(2, L"RIFE TensorRT", system_.rife_lite, L"engine");
     capability_card(3, L"TensorRT runtime", system_.tensorrt_runtime, L"nvinfer_10");
 
-    SettingsControls controls(widgets, settings_, system_, false);
+    SettingsControls controls(widgets, settings_, system_, true);
     controls.Reset();
     const float end = controls.Ai(x, 220, w);
     if (controls.Changed()) {
@@ -958,7 +991,7 @@ void NextApp::RenderDisplay(Widgets& widgets) {
     renderer_->Text(L"Mode switching is Stage 5; this page reads the real current modes.",
                     Rect(x + 18, 236, x + w - 18, 258), 10.5f, ToD2D(theme.text_faint));
 
-    SettingsControls controls(widgets, settings_, system_, false);
+    SettingsControls controls(widgets, settings_, system_, true);
     controls.Reset();
     const float end = controls.Display(x, 292, w);
     if (controls.Changed()) {
@@ -1011,7 +1044,7 @@ void NextApp::RenderOverlay(Widgets& widgets) {
                     Rect(ox + 12, oy + 64, ox + box_w - 12, oy + 86), 10.0f,
                     ToD2D(theme.text_faint));
 
-    SettingsControls controls(widgets, settings_, system_, false);
+    SettingsControls controls(widgets, settings_, system_, true);
     controls.Reset();
     const float end = controls.Overlay(x, 328, w);
     if (controls.Changed()) {
@@ -1266,6 +1299,10 @@ void NextApp::RenderDiagnostics(Widgets& widgets) {
         const std::wstring folder = paths_.settings_file.parent_path().wstring();
         ::ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     }
+    if (widgets.Button(3303, Rect(x + 400, y, x + 590, y + 38), L"Session report",
+                       false)) {
+        WriteSessionReport();
+    }
 }
 
 void NextApp::RenderSettings(Widgets& widgets) {
@@ -1297,7 +1334,7 @@ void NextApp::RenderSettings(Widgets& widgets) {
         RenderAbout(widgets, px + 18, 146, pw - 36);
         return;
     }
-    SettingsControls controls(widgets, settings_, system_, false);
+    SettingsControls controls(widgets, settings_, system_, true);
     controls.Reset();
     float cy = 146.0f;
     switch (settings_category_) {
@@ -1499,6 +1536,52 @@ void NextApp::PresentVideo() {
     } else {
         video_phase_ = std::max(0.0, video_phase_);
     }
+
+    const bool rife_mode =
+        settings_.ai.frame_generation && settings_.ai.fg_backend == AiBackend::Rife &&
+        content < 45.0 && EnsureRife();
+    if (rife_mode) {
+        rife_interval_ = 1.0 / std::clamp(content, 24.0, 60.0);
+        bool new_frame = false;
+        if (due) {
+            media::DecodedFrame frame;
+            if (streaming_->TakeFrame(frame, settings_.streaming.frame_buffer, true)) {
+                video_frame_ = std::move(frame);
+                have_frame_ = true;
+                new_frame = true;
+            }
+        }
+        if (new_frame) {
+            ScheduleRifeFrame(video_frame_);
+        }
+        DisplayFrame shown;
+        bool have_shown = false;
+        {
+            std::lock_guard<std::mutex> lock(display_mutex_);
+            if (!display_queue_.empty() && display_queue_.front().due <= now_) {
+                shown = std::move(display_queue_.front());
+                display_queue_.pop_front();
+                have_shown = true;
+            }
+        }
+        if (have_shown) {
+            rife_last_shown_ = std::move(shown.frame);
+            rife_have_shown_ = true;
+            display_shown_.fetch_add(1);
+        }
+        if (rife_have_shown_ && !rife_last_shown_.rgba.empty()) {
+            presenter_->SetSourceFrame(rife_last_shown_.rgba.data(),
+                                       rife_last_shown_.width, rife_last_shown_.height,
+                                       rife_last_shown_.pq);
+            presenter_->SetSourceFinal(false);
+            presenter_->Render(now_);
+        } else {
+            const float background[4] = {0.015f, 0.017f, 0.022f, 1.0f};
+            presenter_->Clear(background);
+        }
+        return;
+    }
+
     if (due) {
         media::DecodedFrame frame;
         if (streaming_->TakeFrame(frame, settings_.streaming.frame_buffer, true)) {
@@ -1533,6 +1616,194 @@ void NextApp::PresentVideo() {
     }
 }
 
+bool NextApp::EnsureRife() {
+    if (rife_ready_) {
+        StartRifeThread();
+        return true;
+    }
+    if (rife_failed_ || !settings_.ai.frame_generation ||
+        settings_.ai.fg_backend != AiBackend::Rife) {
+        return false;
+    }
+    if (!system_.rife_lite) {
+        rife_failed_ = true;
+        Toast(L"RIFE engine not built; run Set up RIFE in the reference app", true);
+        return false;
+    }
+    std::wstring runtime;
+    if (const char* env = std::getenv("BRP_TENSORRT_DIR")) {
+        runtime = Widen(env);
+    }
+    const std::filesystem::path exe_dir(system_.exe_dir);
+    if (runtime.empty()) {
+        const std::filesystem::path local = exe_dir / "rife" / "runtime";
+        if (std::filesystem::exists(local / "nvinfer_10.dll")) {
+            runtime = local.wstring();
+        }
+    }
+    if (runtime.empty()) {
+        std::ifstream marker(exe_dir / "rife" / "runtime.txt");
+        std::string line;
+        if (marker && std::getline(marker, line) && !line.empty()) {
+            const std::filesystem::path candidate(line);
+            if (std::filesystem::exists(candidate / "nvinfer_10.dll")) {
+                runtime = candidate.wstring();
+            }
+        }
+    }
+    if (runtime.empty()) {
+        const std::filesystem::path fallback =
+            L"C:\\mpv-upscaler-video-player\\vs-plugins\\vsmlrt-cuda";
+        if (std::filesystem::exists(fallback / "nvinfer_10.dll")) {
+            runtime = fallback.wstring();
+        }
+    }
+    if (runtime.empty()) {
+        rife_failed_ = true;
+        Toast(L"RIFE needs TensorRT and an engine next to the app", true);
+        return false;
+    }
+    const bool heavy = settings_.ai.rife_model == 1 && system_.rife_heavy;
+    const std::filesystem::path engine =
+        exe_dir / "rife" / (heavy ? "rife426h_1080.engine" : "rife425_1080.engine");
+    if (!std::filesystem::exists(engine)) {
+        rife_failed_ = true;
+        Toast(L"RIFE engine missing; build it in the reference app first", true);
+        return false;
+    }
+    rife_ = std::make_unique<brp::media::Rife>();
+    std::string detail;
+    std::fprintf(stderr, "[next] RIFE runtime=%ls engine=%ls\n", runtime.c_str(),
+                 engine.c_str());
+    if (!rife_->Load(Narrow(runtime), engine.string(), 1920, 1080, detail)) {
+        rife_failed_ = true;
+        Toast(L"RIFE: " + Widen(detail), true);
+        return false;
+    }
+    rife_ready_ = true;
+    std::fprintf(stderr, "[next] RIFE ready: %s\n", detail.c_str());
+    StartRifeThread();
+    return true;
+}
+
+void NextApp::StartRifeThread() {
+    if (rife_run_.load()) {
+        return;
+    }
+    rife_run_ = true;
+    rife_thread_ = std::thread([this]() { RifeWorkerMain(); });
+}
+
+void NextApp::StopRifeThread() {
+    {
+        std::lock_guard<std::mutex> lock(rife_mutex_);
+        rife_run_ = false;
+        rife_jobs_.clear();
+    }
+    rife_cv_.notify_all();
+    if (rife_thread_.joinable()) {
+        rife_thread_.join();
+    }
+    {
+        std::lock_guard<std::mutex> lock(display_mutex_);
+        display_queue_.clear();
+    }
+    rife_prev_valid_ = false;
+    rife_prev_pushed_ = false;
+    rife_have_shown_ = false;
+}
+
+void NextApp::RifeWorkerMain() {
+    for (;;) {
+        RifeJob job;
+        {
+            std::unique_lock<std::mutex> lock(rife_mutex_);
+            rife_cv_.wait(lock, [this]() { return !rife_run_ || !rife_jobs_.empty(); });
+            if (!rife_run_) {
+                return;
+            }
+            job = std::move(rife_jobs_.front());
+            rife_jobs_.pop_front();
+        }
+        std::vector<uint8_t> mid;
+        std::string detail;
+        if (!rife_ || !rife_->Process(job.a.data(), job.b.data(), 0.5f, mid, detail)) {
+            std::fprintf(stderr, "[next] RIFE process failed: %s\n", detail.c_str());
+            rife_failed_ = true;
+            continue;
+        }
+        rife_generated_.fetch_add(1);
+        media::DecodedFrame frame;
+        frame.rgba = std::move(mid);
+        frame.width = rife_->width();
+        frame.height = rife_->height();
+        frame.pq = job.pq;
+        PushDisplayFrame(std::move(frame), job.mid_due);
+    }
+}
+
+void NextApp::PushDisplayFrame(media::DecodedFrame frame, double due) {
+    std::lock_guard<std::mutex> lock(display_mutex_);
+    DisplayFrame entry;
+    entry.frame = std::move(frame);
+    entry.due = due;
+    display_queue_.push_back(std::move(entry));
+    std::sort(display_queue_.begin(), display_queue_.end(),
+              [](const DisplayFrame& a, const DisplayFrame& b) { return a.due < b.due; });
+    while (display_queue_.size() > 8) {
+        display_queue_.pop_front();
+    }
+}
+
+void NextApp::ScheduleRifeFrame(const media::DecodedFrame& frame) {
+    if (frame.rgba.empty()) {
+        return;
+    }
+    const double interval = rife_interval_;
+    if (!rife_prev_valid_ || rife_prev_.size() != frame.rgba.size()) {
+        rife_prev_ = frame.rgba;
+        rife_prev_w_ = frame.width;
+        rife_prev_h_ = frame.height;
+        rife_prev_pq_ = frame.pq;
+        rife_prev_valid_ = true;
+        rife_prev_pushed_ = false;
+        return;
+    }
+    if (!rife_prev_pushed_) {
+        media::DecodedFrame previous;
+        previous.rgba = rife_prev_;
+        previous.width = rife_prev_w_;
+        previous.height = rife_prev_h_;
+        previous.pq = rife_prev_pq_;
+        PushDisplayFrame(std::move(previous), now_);
+        rife_prev_pushed_ = true;
+    }
+    RifeJob job;
+    job.a = rife_prev_;
+    job.b = frame.rgba;
+    job.pq = frame.pq;
+    job.mid_due = now_ + interval * 0.5;
+    {
+        std::lock_guard<std::mutex> lock(rife_mutex_);
+        if (rife_jobs_.size() < 4) {
+            rife_jobs_.push_back(std::move(job));
+        }
+    }
+    rife_cv_.notify_one();
+
+    media::DecodedFrame current;
+    current.rgba = frame.rgba;
+    current.width = frame.width;
+    current.height = frame.height;
+    current.pq = frame.pq;
+    PushDisplayFrame(std::move(current), now_ + interval);
+
+    rife_prev_ = frame.rgba;
+    rife_prev_w_ = frame.width;
+    rife_prev_h_ = frame.height;
+    rife_prev_pq_ = frame.pq;
+    rife_prev_pushed_ = true;
+}
 void NextApp::RenderWatchOverlay() {
     const ThemeTokens& theme = ThemeFor(settings_.general.theme);
     const StreamSnapshot snapshot = streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
@@ -1580,6 +1851,7 @@ void NextApp::ToggleWatch(bool watching) {
         watching_ = true;
         have_frame_ = false;
         video_phase_ = 0.0;
+        StopRifeThread();
         window_->SetCursorHidden(true);
         presenter_->SetUpscaleMode(2);
     } else {
@@ -1735,6 +2007,60 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
     return true;
 }
 
+void NextApp::ConnectStream() {
+    if (!streaming_) {
+        return;
+    }
+    ConsoleSettings console = settings_.console;
+    if (console.address.empty()) {
+        console.address = streaming_->Profile().host;
+    }
+    OpenAudio();
+    streaming_->SetAudio(audio_.is_open() ? &audio_ : nullptr);
+    const Status status = streaming_->Connect(console);
+    if (status.ok()) {
+        watch_on_connect_ = true;
+        user_disconnect_ = false;
+        connect_requested_ = true;
+        reconnect_at_ = -1.0;
+        Toast(L"Connecting...");
+    } else {
+        Toast(Widen(status.message()), true);
+    }
+}
+
+void NextApp::WriteSessionReport() {
+    AppPaths paths = AppPaths::Default();
+    const auto path = paths.settings_file.parent_path() / "session-report.json";
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file) {
+        Toast(L"Cannot write session report", true);
+        return;
+    }
+    const StreamSnapshot stream = streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
+    const DiagnosticsSnapshot diagnostics = host_->Diagnostics()->Snapshot();
+    file << "{\n";
+    file << "  \"app\": \"BetterRemotePlayNext\",\n";
+    file << "  \"version\": \"" << Narrow(kVersion).c_str() << "\",\n";
+    file << "  \"source\": \"" << stream.console_address << "\",\n";
+    file << "  \"state\": \"" << stream.state << "\",\n";
+    file << "  \"connected\": " << (stream.connected ? "true" : "false") << ",\n";
+    file << "  \"source_fps\": " << stream.source_fps << ",\n";
+    file << "  \"decode_ms\": " << stream.decode_ms << ",\n";
+    file << "  \"bitrate_kbps\": " << stream.bitrate_kbps << ",\n";
+    file << "  \"loss_percent\": " << stream.loss_percent << ",\n";
+    file << "  \"rife_ready\": " << (rife_ready_ ? "true" : "false") << ",\n";
+    file << "  \"rife_generated_per_s\": " << rife_generated_rate_ << ",\n";
+    file << "  \"displayed_per_s\": " << display_rate_ << ",\n";
+    file << "  \"dlss_sr\": " << (dlss_ready_ ? "true" : "false") << ",\n";
+    file << "  \"ui_p50_ms\": " << diagnostics.frame_p50_ms << ",\n";
+    file << "  \"ui_p95_ms\": " << diagnostics.frame_p95_ms << ",\n";
+    file << "  \"ui_p99_ms\": " << diagnostics.frame_p99_ms << ",\n";
+    file << "  \"generated_total\": " << rife_generated_.load() << ",\n";
+    file << "  \"ui_frames\": " << ui_frames_ << "\n";
+    file << "}\n";
+    Toast(L"Session report: " + path.wstring());
+}
 }  // namespace brp::next
 
 

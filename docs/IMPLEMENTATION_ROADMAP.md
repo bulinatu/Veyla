@@ -112,7 +112,7 @@ in the new app (Stage 5), AI execution (Stage 6).
 Not yet: borderless fullscreen/F11 in `brpnext` (windowed presentation is
 working), HDR toggle in the new presenter, and measured A/V sync under load.
 
-## Stage 6 - AI Video Engine (partial: DLSS SR working)
+## Stage 6 - AI Video Engine (DLSS SR + RIFE 30 -> 60 working)
 
 Working:
 
@@ -121,17 +121,19 @@ Working:
 - Capability checks for DLSS SR, the DLSS-G worker, RIFE lite/heavy and the
   TensorRT runtime; unavailable backends are labelled missing.
 - AI settings are persisted; SR can be changed live and reinitializes.
+- RIFE 30 -> 60 pair scheduler is working in `brpnext`: real frame at the
+  source cadence, one TensorRT midpoint per pair, paced display queue;
+  measured **29 generated/s and 58 shown/s** from a 28.8 fps source.
+  Overlay: `RIFE | 29 gen/s | 58 shown/s`.
 
 Deliberately not enabled yet:
 
-- RIFE 30 -> 60 and DLSS-G 60 -> 120 execution in `brpnext`. The RIFE engine
-  and worker exist, but the new frame scheduler is not wired. The Frame
-  Generation control is disabled in the new app and says Stage 6b; the UI does
-  not pretend it is active.
-- Simultaneous SR + FG is therefore not claimed in the new app yet.
+- DLSS-G 60 -> 120 in `brpnext`: the worker presenter is still Stage 6c and is
+  not selectable in the new AI page. DLSS SR and RIFE are mutually exclusive
+  in the new Watch path (RIFE runs at 1080p, then the presenter upscales).
+- Simultaneous SR + RIFE is not claimed.
 
-Next: port the RIFE pair scheduler and/or the DLSS-G worker presenter, then
-measure 30 -> 60 and 60 -> 120.
+Next: DLSS-G worker presenter for 60 -> 120, then a side-by-side SR+RIFE mode.
 
 ## Stage 7 - Overlay and diagnostics (working, basic)
 
@@ -156,23 +158,25 @@ GPU temperature/power series, and the automated benchmark report.
 
 Not yet: automatic profile selection by console/game, notification history
 center, and full restart-required classification.
-## Stage 9 - Integration and benchmark matrix
+## Stage 9 - Integration and benchmark matrix (partial)
 
-- Automated 1080p30/60 -> 1440p/2160p runs, p50/p95/p99, drops, VRAM.
-- Fix regressions and document honest limits (4K source detail, 2x FG).
-- Compare old and new executables on the same content.
+- Diagnostics page can write a real `session-report.json` (source fps, decode,
+  bitrate, loss, RIFE gen/s, shown/s, DLSS state, UI p50/p95/p99).
+- Manual reference measurements: 1080p30 + RIFE -> 58 shown/s; 1080p30 +
+  DLSS SR -> 1440p; 1080p60 + DLSS-G -> 120 fps (reference app, verified).
+- Not yet: automated four-case matrix (30/60 -> 1440p/2160p) and a 4K display
+  validation; the current desk is 1440p.
 
-Acceptance: all four cases measured; no uncontrolled latency; results stored
-in docs.
+## Stage 10 - Stability (partial)
 
-## Stage 10 - Stability
-
-- Multi-hour soak, network interruption, device loss, model failure, VRAM
-  pressure, resolution change, shutdown while streaming.
-- RTX 5080 second-machine pass.
-
-Acceptance: recovery without restart where possible; no leaked GPU resources;
-old app unaffected.
+- Automatic reconnect after an unexpected end: up to 5 attempts, configurable
+  delay, only after a user-initiated session; explicit Disconnect disables it.
+- GPU device-loss detection stops the Watch view and tears the session down.
+- Graceful shutdown sends the session teardown, closes audio, joins the pad
+  and RIFE workers.
+- RIFE load failure falls back to the raw/SR path instead of crashing.
+- Not yet: multi-hour soak, forced network interruption, VRAM pressure, and the
+  RTX 5080 second-machine pass.
 
 ## Stage 11 - Release
 

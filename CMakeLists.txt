@@ -359,7 +359,7 @@ add_executable(brpnext
     src/next/platform/system_info.cpp
     src/next/overlay/overlay_window.cpp
 )
-target_link_libraries(brpnext PRIVATE brp_next_core brp_next_streaming brp_ui brp_media comdlg32 shell32 winmm)
+target_link_libraries(brpnext PRIVATE brp_next_core brp_next_streaming brp_ui brp_media brp_rife comdlg32 shell32 winmm)
 set_target_properties(brpnext PROPERTIES WIN32_EXECUTABLE TRUE)
 if (MSVC)
     target_compile_options(brpnext PRIVATE /W4 /permissive- /utf-8)

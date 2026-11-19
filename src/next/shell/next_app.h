@@ -12,7 +12,10 @@
 #include "ui/widgets.h"
 
 #include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -25,6 +28,7 @@ class Renderer;
 }
 namespace media {
 class NvDlssSr;
+class Rife;
 }
 }  // namespace brp
 
@@ -64,6 +68,14 @@ private:
     void ToggleWatch(bool watching);
     bool OpenAudio();
     bool EnsureDlssSr(int input_width, int input_height);
+    bool EnsureRife();
+    void StartRifeThread();
+    void StopRifeThread();
+    void RifeWorkerMain();
+    void ScheduleRifeFrame(const media::DecodedFrame& frame);
+    void PushDisplayFrame(media::DecodedFrame frame, double due);
+    void ConnectStream();
+    void WriteSessionReport();
 
     float ContentX() const;
     float ContentWidth() const;
@@ -124,6 +136,48 @@ private:
     int dlss_in_h_ = 0;
     OverlayWindow overlay_;
     double last_overlay_update_ = -1.0;
+
+    struct DisplayFrame {
+        media::DecodedFrame frame;
+        double due = 0.0;
+        bool generated = false;
+    };
+    struct RifeJob {
+        std::vector<uint8_t> a;
+        std::vector<uint8_t> b;
+        double mid_due = 0.0;
+        bool pq = false;
+    };
+    std::unique_ptr<brp::media::Rife> rife_;
+    std::thread rife_thread_;
+    std::mutex rife_mutex_;
+    std::condition_variable rife_cv_;
+    std::deque<RifeJob> rife_jobs_;
+    std::deque<DisplayFrame> display_queue_;
+    std::mutex display_mutex_;
+    std::vector<uint8_t> rife_prev_;
+    int rife_prev_w_ = 0;
+    int rife_prev_h_ = 0;
+    bool rife_prev_pq_ = false;
+    bool rife_prev_valid_ = false;
+    bool rife_prev_pushed_ = false;
+    bool rife_ready_ = false;
+    std::atomic<bool> rife_failed_{false};
+    std::atomic<bool> rife_run_{false};
+    double rife_interval_ = 1.0 / 30.0;
+    media::DecodedFrame rife_last_shown_;
+    bool rife_have_shown_ = false;
+    std::atomic<int> rife_generated_{0};
+    int rife_generated_last_ = 0;
+    int rife_generated_rate_ = 0;
+    double rife_generated_at_ = -1.0;
+    std::atomic<int> display_shown_{0};
+    int display_shown_last_ = 0;
+    int display_rate_ = 0;
+    bool user_disconnect_ = false;
+    bool connect_requested_ = false;
+    double reconnect_at_ = -1.0;
+    int reconnect_attempts_ = 0;
 };
 
 }  // namespace brp::next

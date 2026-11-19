@@ -2,11 +2,11 @@
 
 > **BetterRemotePlay Next (rebuild in progress).** The working product is still
 > `brp.exe` 0.4.9. The new application is `brpnext.exe`: real streaming,
-> full-window video, audio, controller input, DLSS Super Resolution, typed
-> settings, profiles, diagnostics and an independent overlay. RIFE/DLSS-G
-> frame generation execution is Stage 6b and is disabled in the new UI rather
-> than faked. Foundation tests: `brp_next_tests` (79 assertions). Start with
-> `docs/ARCHITECTURE.md`, `docs/IMPLEMENTATION_ROADMAP.md` and
+> full-window video, audio, controller input, DLSS Super Resolution, RIFE
+> 30 -> 60 (measured 29 generated/s, 58 shown/s), typed settings, profiles,
+> diagnostics and an independent overlay. DLSS-G 60 -> 120 remains in the
+> reference app (Stage 6c). Foundation tests: `brp_next_tests` (79 assertions).
+> Start with `docs/ARCHITECTURE.md`, `docs/IMPLEMENTATION_ROADMAP.md` and
 > `docs/FEATURE_MATRIX.md`.
 
 A better PlayStation 5 → PC Remote Play client.

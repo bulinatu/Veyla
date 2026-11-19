@@ -24,13 +24,13 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 | DLSS NR | Working (NGX) | Same | R behind `ITemporalFilter` | 6 | optional |
 | Custom TensorRT SR | Not implemented | Optional/experimental | N | 6 | only if measured worthwhile |
 | RTX VSR | Removed | **Excluded** | - | - | explicit requirement |
-| RIFE 30->60 | Working (4.25 lite / 4.26 heavy) | Same | R behind `IFrameGenerator` | 6 | 17.7 / 23-25 ms |
-| DLSS-G 60->120 | Working after 0.4.9 | Same | R behind `IFrameGenerator` | 6 | 2x ceiling, verified |
+| RIFE 30->60 | Working (4.25 lite / 4.26 heavy) | **Working in brpnext** | R behind `IFrameGenerator` | 6 | 29 gen/s, 58 shown/s verified |
+| DLSS-G 60->120 | Working after 0.4.9 | Reference app only | R behind `IFrameGenerator` | 6c | 2x ceiling; worker presenter pending in brpnext |
 | DLSS-G 30->120 | Impossible on this runtime | Not offered | - | - | runtime refuses >2x |
 | NVIDIA VFG legacy | Optional, working | Keep or drop | R | 6 | only if it beats DLSS-G |
 | NVOF/NvOFFRUC backend | Not implemented | Evaluate | N | 6 | quality win required |
 | Hybrid OF + refinement | Not implemented | Evaluate | N | 6 | no fake backend |
-| SR + FG simultaneous | Working (DLAA + 120 verified) | Same, better scheduling | R/N | 6 | 0 drops at 60->120 |
+| SR + FG simultaneous | Working (DLAA + 120 verified) | Reference app only | R/N | 6c | brpnext runs SR or RIFE, not both yet |
 | Colour grading | Working | Same | R behind `IColorPipeline` | 5 | 10 controls |
 | Sharpening | Working | Same | R | 5 | |
 | Main UI | PS5 purple, immediate mode | New NVIDIA-style design system | N | 3 | dark default + light |
@@ -40,7 +40,7 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 | Streaming page | Settings tab | Dedicated page | N | 5 | groups, live state |
 | AI Video Engine page | Upscaling tab | Dedicated page (SR/FG/GPU) | N | 6 | capability-driven |
 | Display page | Settings tab | Dedicated page | N | 5 | real modes only |
-| Overlay | In-app sheet + worker window | Independent overlay engine | N | 7 | widgets, layouts |
+| Overlay | In-app sheet + worker window | **Independent overlay working** | N | 7 | stats, opacity, 4 positions, interval |
 | Settings | Scattered tabs | Central typed categories | N | 3/8 | validation + migrations |
 | Profiles | Presets only | Named, import/export, default | N | 8 | compatibility check |
 | Diagnostics page | Logs + HUD | Live metrics + benchmarks | N | 7/9 | p50/p95/p99 |
@@ -49,8 +49,8 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 | Packaging | Standalone zip | Same layout | R | 11 | shared runtimes |
 | Unit tests | None | `brp_next_tests` | N | 2 | config/nav/metrics |
 | Hardware probes | 20+ manual | Keep | R | 2 | GPU truth |
-| Benchmark matrix | Manual | Automated 4 cases | N | 9 | 1440p/2160p |
-| Long soak/device loss | Partial | Full | P | 10 | 5080 too |
+| Benchmark matrix | Manual | Session report working; 4-case matrix pending | N | 9 | 1440p/2160p |
+| Long soak/device loss | Partial | Auto reconnect + device-loss stop; soak pending | P | 10 | 5080 too |
 | Telemetry/cloud | None | None | - | - | local only |
 
 ## Status at the start of the rebuild
@@ -67,8 +67,11 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
   connect/disconnect and live stats.
 - Stage 5 media presentation is working: full-window video, audio and
   controller input on the real session.
-- Stage 6 is partial: DLSS SR 1080p -> 1440p is working and verified; RIFE
-  and DLSS-G execution are disabled in the new UI until Stage 6b.
+- Stage 6 is partly working: DLSS SR 1080p -> 1440p and RIFE 30 -> 60
+  (29 gen/s, 58 shown/s) are verified in `brpnext`; DLSS-G 60 -> 120 remains
+  in the reference app (Stage 6c).
 - Stage 7 independent overlay and diagnostics are working (basic widget set).
 - Stage 8 settings/profiles/reset/import/export/compatibility warnings work.
+- Stage 9 has a real session report; the automated four-case matrix is pending.
+- Stage 10 has auto reconnect and device-loss handling; soak tests are pending.
 - `brp.exe` 0.4.9 still builds and runs.
