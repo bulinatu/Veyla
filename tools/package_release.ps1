@@ -41,6 +41,12 @@ New-Item -ItemType Directory -Path (Join-Path $dest "fonts") -Force | Out-Null
 
 # --- core executable and FFmpeg runtime ------------------------------------
 Copy-Required (Join-Path $release "brp.exe") $dest
+
+# Updater: lets a small patch zip replace only the files that changed.
+$updater = Join-Path $release "brp_update.exe"
+if (Test-Path -LiteralPath $updater) {
+    Copy-Item -LiteralPath $updater -Destination (Join-Path $dest "update.exe") -Force
+}
 foreach ($dll in @("avcodec-63.dll", "avformat-63.dll", "avutil-61.dll",
                    "swresample-7.dll", "swscale-10.dll")) {
     Copy-Required (Join-Path $release $dll) $dest
@@ -147,6 +153,14 @@ First run
 4. On the console: Settings > System > Remote Play > Link Device. Type the
    8-digit code into Pairing PIN, then click Pair.
 5. Go back to Home and click Connect.
+
+Updating
+--------
+- New versions also ship as a small patch (for example
+  BetterRemotePlay-0.4-update.zip). Close the app, extract the patch into this
+  folder and run update.exe. It copies only the changed files, removes obsolete
+  ones, writes version.txt and starts the app again.
+- Use the full standalone zip when you want a clean install.
 
 Your profile is stored in %APPDATA%\BetterRemotePlay\session.json, NOT in this
 folder. You can copy the folder to another PC and it starts with a clean profile.

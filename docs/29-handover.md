@@ -163,3 +163,14 @@ rebuild its engine.
 - Measured over Bluetooth (DualSense fw 0x0630): 17 haptics frames/s, peak
   L=1023 R=924, `[hid] rumble` 2..12; vibration felt in game.
 - Still absent: full DualSense haptics through its audio endpoint (USB-only).
+
+## Updates (0.4)
+
+- `update.exe` (`tools/brp_update`) applies a patch zip: `payload\`, `delete.txt`,
+  `version.txt`. It refuses to run while `brp.exe` is open, copies changed files,
+  removes obsolete ones, writes the version and relaunches.
+- `tools\make_update.ps1 -BaselineZip <old zip> -NewFolder dist\BetterRemotePlay
+  -Version 0.4` builds the patch by SHA-256 comparison.
+- Measured 0.3 -> 0.4: 0.6 MB, 2 changed files; the patched folder matched the
+  full package byte for byte.
+- Documented in `docs/30-updates.md`.
