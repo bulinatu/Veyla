@@ -273,6 +273,10 @@ enum WidgetId {
     W_HudStream = 83,
     W_HudNet = 84,
     W_HudReset = 85,
+    // RIFE one-click setup (Home pill and its modal).
+    W_SetupRife = 96,
+    W_SetupStart,
+    W_SetupClose,
     W_PsnLogin = 90,
     W_PsnOpen,
     W_PsnPaste,
@@ -988,6 +992,17 @@ void App::DispatchClick() {
             }
         }
 
+        if (setup_modal_) {
+            const bool modal_hit =
+                (it->hit == Hit::Button &&
+                 (it->index == W_SetupStart || it->index == W_SetupClose)) ||
+                it->hit == Hit::Minimize || it->hit == Hit::Maximize ||
+                it->hit == Hit::Close;
+            if (!modal_hit) {
+                return;
+            }
+        }
+
         if (open_dropdown_ >= 0 && it->hit != Hit::DropdownItem) {
             if (it->hit == Hit::Dropdown) {
                 open_dropdown_ = (open_dropdown_ == it->index) ? -1 : it->index;
@@ -1044,6 +1059,16 @@ void App::DispatchClick() {
                     audio_.PlayTestTone(0.6);
                 } else if (it->index == W_Rumble) {
                     TriggerRumble();
+                } else if (it->index == W_SetupRife) {
+                    setup_modal_ = true;
+                    if (rife_setup_.state() != RifeSetup::State::Running &&
+                        rife_setup_.state() != RifeSetup::State::Done) {
+                        rife_setup_.Start(ExeDirPath());
+                    }
+                } else if (it->index == W_SetupStart) {
+                    rife_setup_.Start(ExeDirPath());
+                } else if (it->index == W_SetupClose) {
+                    setup_modal_ = false;
                 } else if (it->index == W_Probe) {
                     ConnectConsole();
                 } else if (it->index == W_PairHome) {
@@ -1159,6 +1184,12 @@ void App::HandleKey(int vk) {
     if (booting_) {
         if (vk == VK_ESCAPE) {
             quit_ = true;
+        }
+        return;
+    }
+    if (setup_modal_) {
+        if (vk == VK_ESCAPE) {
+            setup_modal_ = false;
         }
         return;
     }
@@ -2933,6 +2964,15 @@ bool App::EnsureRife() {
         const std::filesystem::path local = exe_dir / "rife" / "runtime";
         if (std::filesystem::exists(local / "nvinfer_10.dll")) {
             runtime = local.string();
+        }
+    }
+    if (runtime.empty()) {
+        // Written by the one-click setup: the TensorRT install it found.
+        std::ifstream marker(exe_dir / "rife" / "runtime.txt");
+        std::string line;
+        if (marker && std::getline(marker, line) && !line.empty() &&
+            std::filesystem::exists(std::filesystem::path(line) / "nvinfer_10.dll")) {
+            runtime = line;
         }
     }
     if (runtime.empty()) {
@@ -5479,6 +5519,57 @@ void App::RenderIntro(double t) {
     ui_.EndFrame();
 }
 
+std::filesystem::path App::ExeDirPath() const {
+    wchar_t path[MAX_PATH] = {};
+    ::GetModuleFileNameW(nullptr, path, MAX_PATH);
+    return std::filesystem::path(path).parent_path();
+}
+
+void App::RenderSetupModal() {
+    if (!setup_modal_) {
+        return;
+    }
+    const float w = ui_w_;
+    const float h = ui_h_;
+    ui_.FillRect({0.0f, 0.0f, w, h}, th::Rgba(0x000000, 0.58f));
+    const float panel_w = 720.0f;
+    const float panel_h = 300.0f;
+    const D2D1_RECT_F panel{(w - panel_w) * 0.5f, (h - panel_h) * 0.5f,
+                            (w + panel_w) * 0.5f, (h + panel_h) * 0.5f};
+    ui_.FillRounded(panel, 18.0f, th::Rgba(th::kPanel, 0.98f));
+    ui_.StrokeRounded(panel, 18.0f, th::Rgba(th::kAccent, 0.25f), 1.0f);
+    ui_.Text(L"Frame generation setup",
+             {panel.left + 28.0f, panel.top + 22.0f, panel.right - 28.0f, panel.top + 56.0f},
+             20.0f, th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
+
+    const RifeSetup::State state = rife_setup_.state();
+    const std::wstring status = rife_setup_.status();
+    ui_.TextWrapped(status.c_str(),
+                    {panel.left + 28.0f, panel.top + 68.0f, panel.right - 28.0f,
+                     panel.top + 176.0f},
+                    13.0f, th::Rgba(th::kInkDim));
+
+    const float progress = rife_setup_.progress();
+    if (progress >= 0.0f && state == RifeSetup::State::Running) {
+        const float bar_l = panel.left + 28.0f;
+        const float bar_r = panel.right - 28.0f;
+        const float bar_y = panel.top + 190.0f;
+        ui_.FillRounded({bar_l, bar_y, bar_r, bar_y + 5.0f}, 2.5f, th::Rgba(0xFFFFFF, 0.08f));
+        ui_.FillRounded({bar_l, bar_y, bar_l + (bar_r - bar_l) * std::clamp(progress, 0.0f, 1.0f),
+                         bar_y + 5.0f},
+                        2.5f, th::Rgba(th::kAccent, 0.9f));
+    }
+
+    const float button_y = panel.bottom - 64.0f;
+    if (state != RifeSetup::State::Running) {
+        DrawButton(L"Start", {panel.left + 28.0f, button_y, panel.left + 188.0f, button_y + 44.0f},
+                   W_SetupStart, true);
+    }
+    DrawButton(L"Close", {panel.right - 168.0f, button_y, panel.right - 28.0f, button_y + 44.0f},
+               W_SetupClose, false);
+
+}
+
 void App::RenderHome(double t) {
     (void)t;
     const float w = ui_w_;
@@ -5491,6 +5582,20 @@ void App::RenderHome(double t) {
                    th::Rgba(0x4A2B8C, 0.0f));
 
     RenderTopBar();
+
+    // RIFE one-click setup: a pill next to the gear. It starts immediately and
+    // shows progress in a modal.
+    {
+        const float button_y = borderless_ ? 28.0f : kTitleBarH + 12.0f;
+        const D2D1_RECT_F gear{w - kCornerMargin - kCornerButton, button_y,
+                               w - kCornerMargin, button_y + kCornerButton};
+        const bool ready = rife_setup_.ready(ExeDirPath());
+        const wchar_t* label = rife_setup_.state() == RifeSetup::State::Running
+                                   ? L"Setting up RIFE..."
+                                   : (ready ? L"RIFE ready" : L"Set up RIFE");
+        DrawButton(label, {gear.left - 190.0f, gear.top, gear.left - 12.0f, gear.bottom},
+                   W_SetupRife, !ready);
+    }
 
     const float card_w = std::min(920.0f, w - 96.0f);
     const float card_h = 340.0f;
@@ -5640,6 +5745,8 @@ void App::RenderHome(double t) {
     info_card(x0 + 2.0f * (cw + gap), L"GAME LIBRARY", L"Not in this build",
               L"Installed titles are not exposed to remote clients. Launch games from the "
               L"console screen.");
+
+    RenderSetupModal();
 }
 
 void App::RenderSettings(double t) {

@@ -16,6 +16,9 @@
 #include <thread>
 #include <vector>
 
+#include <filesystem>
+
+#include "app/rife_setup.h"
 #include "audio/audio_engine.h"
 #include "media/nv_vfx.h"
 #include "media/nv_dlss_sr.h"
@@ -219,6 +222,8 @@ private:
     void RifeThreadMain();
     void RifePush(media::DecodedFrame& frame, bool unique = false);
     void RifePresentDue();
+    void RenderSetupModal();
+    std::filesystem::path ExeDirPath() const;
 
     bool TakeNrResult(int& width, int& height, bool& pq);
     bool NrFailed(std::string& error);
@@ -419,6 +424,8 @@ private:
     int rife_dupes_ = 0;
     int rife_sim_skip_ = 0;
     std::wstring rife_note_;
+    RifeSetup rife_setup_;
+    bool setup_modal_ = false;
 
     // neural rendering (DLSS Super Resolution, D3D12)
     media::NvDlssSr dlss_sr_;

@@ -138,3 +138,12 @@ ticks over 1.5 x budget per 480 frames.
 3. Side-by-side quality test: Lanczos vs bicubic chroma, 75 vs 100 Mbps.
 4. Decide on the game library: a separate client identity and terms, or no library.
 5. Split `app.cpp` and share the Settings and sheet controls.
+
+## RIFE setup
+
+Home has a **Set up RIFE** pill (RIFE ready once done). It finds TensorRT 10.16,
+records its path in `rife\runtime.txt`, downloads the 22 MB model and builds the
+engine for the local GPU with trtexec. TensorRT itself still needs a browser
+download from NVIDIA; the tool explains that instead of pretending otherwise.
+Packages strip `runtime.txt` and include the model so another machine can
+rebuild its engine.

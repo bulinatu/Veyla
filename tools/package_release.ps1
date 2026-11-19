@@ -109,6 +109,8 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 $rife = Join-Path $release "rife"
 if (Test-Path $rife) {
     Copy-Item -LiteralPath $rife -Destination (Join-Path $dest "rife") -Recurse -Force
+    # runtime.txt points at a TensorRT install on this PC; it must not travel.
+    Remove-Item -LiteralPath (Join-Path $dest "rife\runtime.txt") -Force -ErrorAction SilentlyContinue
 }
 
 # --- keep runtime logs from the build machine out of the package -------------

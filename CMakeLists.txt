@@ -115,6 +115,7 @@ target_link_libraries(brp_ui PUBLIC brp_media d2d1 dwrite)
 add_executable(brp
     src/main_app.cpp
     src/app/app.cpp
+    src/app/rife_setup.cpp
     src/session/profile.cpp
     src/platform/gamepad.cpp
     src/audio/audio_engine.cpp
