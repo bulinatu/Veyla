@@ -74,3 +74,16 @@ for sm120 - the setup worked). Per-second lines showed:
 
 0.4.4 adds `skip=gap/motion/pass` per second so the next report says why frames
 were not generated, and `fs` for the borderless state.
+
+## 0.4.5 - toggle and the last two fixes
+
+- The log is **off by default**. Settings > Debug > "Testing log (per second)"
+  turns it on; turning it off closes the file. The About button still opens the
+  folder.
+- Cadence is now per second. It used to reset only under `BRP_FG_PROBE`, so the
+  average crept up over a session and one stall stayed in `max` forever (the
+  3308 ms entry in the 0.4.4 report).
+- `ref=` adds the refresh counter delta and `aud=` is now underruns in that
+  second, not the session total.
+- Presentation hands over **one due frame per tick** instead of the newest of
+  several. A stall that makes two frames due no longer drops one.

@@ -461,6 +461,8 @@ private:
     std::ofstream testing_;
     double testing_at_ = -1.0;
     unsigned long long testing_misses_ = 0;
+    unsigned int testing_refresh_ = 0;
+    int testing_aud_ = 0;
 
 
     // neural rendering (DLSSNR through the NGX worker)

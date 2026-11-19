@@ -282,6 +282,7 @@ enum WidgetId {
     W_SetupClose,
     W_HapticIntensity = 99,
     W_OpenLogs = 106,
+    W_TestingLog = 107,
     W_PsnLogin = 90,
     W_PsnOpen,
     W_PsnPaste,
@@ -947,7 +948,7 @@ void App::RenderBoot(double t) {
              th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    ui_.Text(L"v0.4.4", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
+    ui_.Text(L"v0.4.5", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
              th::Rgba(th::kMuted, 0.55f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
 }
@@ -1520,6 +1521,18 @@ void App::ApplyDropdown(int id, int index) {
                                : "RIFE: one generated frame between each pair.";
             break;
         }
+        case W_TestingLog: {
+            profile_.testing_log = index == 1 ? 1 : 0;
+            if (profile_.testing_log != 0) {
+                if (!testing_.is_open()) {
+                    OpenTestingLog();
+                }
+            } else if (testing_.is_open()) {
+                testing_.close();
+            }
+            SaveProfile();
+            break;
+        }
         case W_OpenLogs: {
             const std::wstring dir = Widen(EnvString("APPDATA") + "\\\\BetterRemotePlay");
             ::ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
@@ -2062,16 +2075,23 @@ void App::LogTestingLine() {
     const unsigned long long miss_delta =
         misses > testing_misses_ ? misses - testing_misses_ : 0;
     testing_misses_ = misses;
+    const unsigned int refresh = presenter_.present_refresh_count();
+    const unsigned int refresh_delta =
+        refresh > testing_refresh_ ? refresh - testing_refresh_ : 0;
+    testing_refresh_ = refresh;
+    const int underruns = audio_.underruns();
+    const int aud_delta = underruns > testing_aud_ ? underruns - testing_aud_ : 0;
+    testing_aud_ = underruns;
     // Idle presentation legitimately shows fewer frames than refreshes, so a
     // miss only means something while streaming.
     const bool bad = stat_late_ > 0 || rife_cadence_max_ms_ > 30.0 ||
                      (stream_active_ && miss_delta > 3) || stream_stats_.lost > 0 ||
-                     audio_.underruns() > 0;
+                     aud_delta > 0;
     char line[640];
     std::snprintf(line, sizeof(line),
                   "t=%.1f %s fps=%.1f src=%.1f content=%.1f rife=%.1f/%.2f cad=%.2f/%.2f "
                   "gen=%d q=%zu fg=%.1f late=%d stalls=%d miss=%llu dec=%.2f/%.2f "
-                  "drops=%d lost=%d buf=%d aud=%d fs=%d skip=%d/%d/%d\n",
+                  "drops=%d lost=%d buf=%d aud=%d fs=%d ref=%u skip=%d/%d/%d\n",
                   clock_, bad ? "!!" : "  ", stream_active_ ? stream_stats_.elapsed > 0.0
                                                                    ? static_cast<double>(stream_stats_.frames) / stream_stats_.elapsed
                                                                    : 0.0
@@ -2081,7 +2101,7 @@ void App::LogTestingLine() {
                   rife_out_.size(), fg_worker_fps_, stat_late_, stat_stalls_, miss_delta,
                   stream_stats_.decode_ms_avg, stream_stats_.decode_ms_max,
                   stream_stats_.buffer_drops + streaming_.video_queue_drops(),
-                  stream_stats_.lost, stream_stats_.buffer, audio_.underruns(), borderless_ ? 1 : 0,
+                  stream_stats_.lost, stream_stats_.buffer, aud_delta, borderless_ ? 1 : 0, refresh_delta,
                   rife_skip_gap_, rife_skip_motion_, rife_pass_);
     testing_ << line;
     testing_.flush();
@@ -3398,11 +3418,19 @@ void App::RifePresentDue() {
     bool pq = false;
     {
         std::lock_guard<std::mutex> lock(rife_mutex_);
-        while (!rife_out_.empty() && rife_out_.front().due <= clock_) {
+        // Hand over one due frame per tick instead of the newest of several.
+        // When a stall makes two due at once, showing only the latest skips a
+        // frame; the next tick is 4 ms away and keeps the order.
+        if (!rife_out_.empty() && rife_out_.front().due <= clock_) {
             pick = std::move(rife_out_.front().rgba);
             w = rife_out_.front().width;
             h = rife_out_.front().height;
             pq = rife_out_.front().pq;
+            rife_out_.pop_front();
+        }
+        // Never let the queue drift: more than three waiting means we are
+        // behind, so drop the oldest.
+        while (rife_out_.size() > 3) {
             rife_out_.pop_front();
         }
     }
@@ -3430,18 +3458,22 @@ void App::RifePresentDue() {
                                : 0.0;
         rife_cadence_ms_ = avg;
         rife_cadence_max_ms_ = rife_interval_max_ * 1000.0;
-        if (std::getenv("BRP_FG_PROBE")) {
+        const bool probe_cadence = std::getenv("BRP_FG_PROBE") != nullptr;
+        if (probe_cadence) {
             std::fprintf(stderr,
                          "[rife] %.0f fps shown, %d generated, %.1f ms/frame, "
                          "cadence avg %.2f ms max %.2f ms, content %.1f fps, dupes %d\n",
                          rife_out_fps_, rife_generated_, rife_ms_, avg,
                          rife_interval_max_ * 1000.0, fg_content_hz_, rife_dupes_);
             rife_generated_ = 0;
-            rife_interval_sum_ = 0.0;
-            rife_interval_max_ = 0.0;
-            rife_interval_n_ = 0;
             rife_dupes_ = 0;
         }
+        // Per-second cadence: these used to reset only under the probe env var,
+        // so the reported average crept up for the whole session and a single
+        // stall stayed in "max" forever.
+        rife_interval_sum_ = 0.0;
+        rife_interval_max_ = 0.0;
+        rife_interval_n_ = 0;
     }
 }
 
@@ -6670,13 +6702,16 @@ void App::RenderSettings(double t) {
                          (profile_.hud_mask & 0x10) ? 1 : 0, y, W_HudNet);
             y += row;
 
+            DrawDropdown(L"Testing log (per second)", {L"Off", L"On"},
+                         profile_.testing_log != 0 ? 1 : 0, y, W_TestingLog);
+            y += row;
             DrawButton(L"Reset frame statistics", {kContentX, y + 6.0f, kContentX + 280.0f,
                                                    y + 50.0f},
                        W_HudReset, false);
             break;
         }
         case Tab::About: {
-            ui_.Text(L"BetterRemotePlay 0.4.4", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
+            ui_.Text(L"BetterRemotePlay 0.4.5", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
                      th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 48.0f;
             ui_.Text(L"A PS5 to PC Remote Play client with a real post-process pipeline: "

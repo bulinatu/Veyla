@@ -207,3 +207,13 @@ rebuild its engine.
 - A 5080 report showed RIFE active with a 39.5 MB sm120 engine, 19-25 ms
   inference, cadence peaks 66-100 ms and growing audio underruns; delivery and
   audio are the open items, not the neural chain.
+
+## 0.4.5 - final fixes from the 5080 report
+
+- Testing log is optional (Settings > Debug, default off).
+- Cadence stats are per second (they were cumulative without the probe env var).
+- `ref=` refresh delta and `aud=` per-second underruns in the log.
+- RIFE presentation takes one due frame per tick; a stall no longer skips one.
+- From the report: motion guard disabled by default (0.4.4), RIFE 19-25 ms on the
+  5080 with a 39.5 MB sm120 engine, `gen` back to 24-30/s; the remaining visual
+  hitches line up with windowed DWM and audio underruns, not the neural chain.
