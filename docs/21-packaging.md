@@ -50,13 +50,13 @@ account.
   NGX components: one is the NeuralScreen worker, the other the DLSS SR feature
   DLL.
 
-## Build 0.3, 19 Nov 2026 (14:26)
+## Build 0.3, 19 Nov 2026 (14:28)
 
 - ZIP: `dist\BetterRemotePlay-0.3-standalone.zip`, 602.0 MB,
-  SHA256 `BE079C66FD7A9091E44599A5AFB7E72C0A30E5860672FE44B3846DD918BC7D48`.
+  SHA256 `5C796E6F0DFB98AB05C2563DF8FE3268252402FB009D42E219C038653FBA06E0`.
 - Unpacked: 887.7 MB, 55 files: engine, model and cudart64_13.dll in rife\. Includes the RIFE model so another PC can build its own engine.
 - `dist\BetterRemotePlay\brp.exe` SHA256
-  `F4F8086DAB07BDBC85D98EFD61ECCC6DB38E86E0B31F45250F035371EC7D7308`, identical
+  `1FB8750EC9833D85D8568591E51753F2AB5D7DD829365D6EC76CB2735927AA44`, identical
   to `build\Release\brp.exe` at packaging time.
 - Includes `rife\rife425_1080.engine` (12.5 MB) when present in the release
   folder. Written for one GPU architecture; another GPU needs its own engine.
