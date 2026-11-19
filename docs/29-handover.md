@@ -217,3 +217,10 @@ rebuild its engine.
 - From the report: motion guard disabled by default (0.4.4), RIFE 19-25 ms on the
   5080 with a 39.5 MB sm120 engine, `gen` back to 24-30/s; the remaining visual
   hitches line up with windowed DWM and audio underruns, not the neural chain.
+
+## 0.4.6 - head artifact controls
+
+- RIFE blend (default 20 %): generated frames mixed with the previous real
+  frame, +3-5 ms. Reduces the "vanishing head" on fast turns.
+- Motion safety (default On, threshold 22) only at very large frame changes.
+- Both in Settings > Upscaling when the RIFE engine is selected.

@@ -529,3 +529,20 @@ disappears when rotating":
 
 These do not change the 4090 cadence (16.6-16.9 ms); they trade occasional
 smoothness for correctness exactly on the frames that would look wrong.
+
+### 0.4.6 - vanishing head: blend and motion safety
+
+Disabling interpolation entirely (0.4.2) fixed the head but showed up as dropped
+frames. The guard is now a tunable pair of controls in Settings > Upscaling,
+visible only with the RIFE engine:
+
+- **RIFE blend** (Off/10/20/30/40 %, default 20): each generated frame is mixed
+  with the previous real frame. RIFE invents background over a fast-moving
+  subject; keeping a slice of the real frame turns a hole into a soft ghost.
+  Costs about 3-5 ms per generated frame (measured 22-27 ms total at 1080p).
+- **Motion safety** (default On): with a mean frame difference above 22 (a very
+  fast turn), the frame is shown without a midpoint. 12 was far too low and
+  stopped generation during normal camera motion.
+
+Values are saved in the profile. If the head still flickers, raise the blend;
+if drops return, lower it or turn motion safety off.

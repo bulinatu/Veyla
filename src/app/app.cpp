@@ -283,6 +283,8 @@ enum WidgetId {
     W_HapticIntensity = 99,
     W_OpenLogs = 106,
     W_TestingLog = 107,
+    W_RifeBlend = 108,
+    W_RifeSafe = 109,
     W_PsnLogin = 90,
     W_PsnOpen,
     W_PsnPaste,
@@ -948,7 +950,7 @@ void App::RenderBoot(double t) {
              th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    ui_.Text(L"v0.4.5", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
+    ui_.Text(L"v0.4.6", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
              th::Rgba(th::kMuted, 0.55f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
 }
@@ -1521,6 +1523,20 @@ void App::ApplyDropdown(int id, int index) {
                                : "RIFE: one generated frame between each pair.";
             break;
         }
+        case W_RifeBlend: {
+            static const int kBlend[] = {0, 10, 20, 30, 40};
+            profile_.rife_blend = kBlend[std::clamp(index, 0, 4)];
+            SaveProfile();
+            stream_note_ = "RIFE blend updated.";
+            break;
+        }
+        case W_RifeSafe:
+            profile_.rife_safe_motion = index == 0 ? 1 : 0;
+            SaveProfile();
+            stream_note_ = profile_.rife_safe_motion
+                               ? "RIFE motion safety on."
+                               : "RIFE motion safety off.";
+            break;
         case W_TestingLog: {
             profile_.testing_log = index == 1 ? 1 : 0;
             if (profile_.testing_log != 0) {
@@ -3249,6 +3265,20 @@ void App::RifeThreadMain() {
             std::fprintf(stderr, "[rife] %s\n", detail.c_str());
             continue;
         }
+        if (job.blend > 0 && job.a.size() == mid.size()) {
+            // Mix part of the previous real frame back in. RIFE invents
+            // background over a fast-moving subject (the vanishing head);
+            // keeping a slice of the real frame turns that into a soft ghost
+            // instead of a hole.
+            const int b = std::clamp(job.blend, 0, 50);
+            const int keep = 100 - b;
+            const uint8_t* real = job.a.data();
+            for (size_t i = 0; i < mid.size(); ++i) {
+                mid[i] = static_cast<uint8_t>((static_cast<int>(mid[i]) * keep +
+                                               static_cast<int>(real[i]) * b) /
+                                              100);
+            }
+        }
         RifeOut out;
         out.rgba = std::move(mid);
         out.width = rife_->width();
@@ -3334,8 +3364,7 @@ void App::RifePush(media::DecodedFrame& frame, bool unique) {
     // Opt-in: on a real report this skipped generation during ordinary camera
     // motion and read as dropped frames. The gap guard covers the harmful case;
     // set BRP_RIFE_SAFE_MOTION=1 to also skip very large frame changes.
-    static const bool safe_motion = std::getenv("BRP_RIFE_SAFE_MOTION") != nullptr;
-    const bool fast_motion = safe_motion && last_frame_diff_ > 18.0;
+    const bool fast_motion = profile_.rife_safe_motion != 0 && last_frame_diff_ > 22.0;
     if (gap) {
         ++rife_skip_gap_;
     } else if (fast_motion) {
@@ -3374,6 +3403,7 @@ void App::RifePush(media::DecodedFrame& frame, bool unique) {
     pair.height = frame.height;
     pair.t0 = rife_prev_t_;
     pair.t1 = t1;
+    pair.blend = std::clamp(profile_.rife_blend, 0, 50);
 
     // The frame we were holding is shown now: this is the one source interval
     // of delay that lets RIFE see both ends of the pair.
@@ -6321,6 +6351,21 @@ void App::RenderSettings(double t) {
                          profile_.rife_output == 0 ? 1 : 0, y, W_RifeOutput,
                          profile_.dlss_fg >= 2 && profile_.fg_engine == 1);
             y += kRowH;
+            DrawDropdown(L"RIFE blend",
+                         {L"Off", L"10%", L"20%", L"30%", L"40%"},
+                         profile_.rife_blend == 0
+                             ? 0
+                             : (profile_.rife_blend <= 10
+                                    ? 1
+                                    : (profile_.rife_blend <= 20
+                                           ? 2
+                                           : (profile_.rife_blend <= 30 ? 3 : 4))),
+                         y, W_RifeBlend, profile_.dlss_fg >= 2 && profile_.fg_engine == 1);
+            y += kRowH;
+            DrawDropdown(L"Motion safety (RIFE)", {L"On", L"Off"},
+                         profile_.rife_safe_motion ? 0 : 1, y, W_RifeSafe,
+                         profile_.dlss_fg >= 2 && profile_.fg_engine == 1);
+            y += kRowH;
             DrawDropdown(L"Neural rendering (DLSS 5)", {L"Off", L"On"},
                          profile_.neural_nr > 0 ? 1 : 0, y, W_NeuralNr, NrAvailable());
             y += kRowH;
@@ -6711,7 +6756,7 @@ void App::RenderSettings(double t) {
             break;
         }
         case Tab::About: {
-            ui_.Text(L"BetterRemotePlay 0.4.5", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
+            ui_.Text(L"BetterRemotePlay 0.4.6", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
                      th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 48.0f;
             ui_.Text(L"A PS5 to PC Remote Play client with a real post-process pipeline: "
@@ -7117,6 +7162,21 @@ void App::RenderStreamSettings(double t) {
             DrawDropdown(L"RIFE output",
                          {L"60 fps (one frame between each pair)", L"Pass-through"},
                          profile_.rife_output == 0 ? 1 : 0, y, W_RifeOutput,
+                         profile_.dlss_fg >= 2 && profile_.fg_engine == 1);
+            y += row;
+            DrawDropdown(L"RIFE blend",
+                         {L"Off", L"10%", L"20%", L"30%", L"40%"},
+                         profile_.rife_blend == 0
+                             ? 0
+                             : (profile_.rife_blend <= 10
+                                    ? 1
+                                    : (profile_.rife_blend <= 20
+                                           ? 2
+                                           : (profile_.rife_blend <= 30 ? 3 : 4))),
+                         y, W_RifeBlend, profile_.dlss_fg >= 2 && profile_.fg_engine == 1);
+            y += row;
+            DrawDropdown(L"Motion safety (RIFE)", {L"On", L"Off"},
+                         profile_.rife_safe_motion ? 0 : 1, y, W_RifeSafe,
                          profile_.dlss_fg >= 2 && profile_.fg_engine == 1);
             y += row;
             DrawDropdown(L"Neural rendering (DLSS 5)", {L"Off", L"On"},

@@ -401,6 +401,7 @@ private:
         double t0 = 0.0;
         double t1 = 0.0;
         double base_due = 0.0;  // when the held frame is shown
+        int blend = 0;          // percent of the previous real frame mixed in
     };
     struct RifeOut {
         std::vector<uint8_t> rgba;
