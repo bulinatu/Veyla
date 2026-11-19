@@ -437,6 +437,9 @@ private:
     double rife_gap_ema_ = 0.0;
     double rife_cadence_ms_ = 0.0;
     double rife_cadence_max_ms_ = 0.0;
+    int rife_skip_gap_ = 0;
+    int rife_skip_motion_ = 0;
+    int rife_pass_ = 0;
     double last_frame_diff_ = 0.0;
     RifeSetup rife_setup_;
     bool setup_modal_ = false;

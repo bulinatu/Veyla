@@ -54,3 +54,23 @@ diagnostics folder` opens the folder.
 - `fg` non-zero instead of `rife`: NVIDIA frame generation was active, not RIFE
   (usually a foreign engine that could not load).
 - `dec` high with `drops`: decode/jitter, not frame generation.
+
+## First real report (RTX 5080, 0.4.3)
+
+Header: 5080, 240 Hz, `engine=RIFE`, `fps=30`, `buf=2`, engine 39.5 MB (rebuilt
+for sm120 - the setup worked). Per-second lines showed:
+
+- `rife=19-25 ms`, so inference itself was fine.
+- `gen` fell to 3-14 per second instead of 30, with `rife` shown dropping to
+  28-45. Cause: the fast-motion guard (0.4.2) used a threshold of 12 and skipped
+  generation during ordinary camera motion. It now defaults to **off**
+  (`BRP_RIFE_SAFE_MOTION=1` enables it, threshold 18); the pair-gap guard stays.
+- `cad` drifted from 16.7 to 18.6-19.6 ms with 66-100 ms peaks: presentation
+  stalls, not inference.
+- `aud` underruns grew 6 -> 39, and the `src` metric moved between 18 and 29
+  while `content` stayed near 30. `src` comes from a different window than
+  `fps`, so it is not a reliable delivery measure; the audio underruns are real
+  and point at the audio path or the network, not at frame generation.
+
+0.4.4 adds `skip=gap/motion/pass` per second so the next report says why frames
+were not generated, and `fs` for the borderless state.

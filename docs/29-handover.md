@@ -197,3 +197,13 @@ rebuild its engine.
   `!!` marker on anomalies. Rotates at 4 MB.
 - Settings > About > Open diagnostics folder.
 - Field reference in `docs/31-diagnostics.md`.
+
+## 0.4.4 - guard correction from a real 5080 log
+
+- The fast-motion guard (threshold 12) skipped generation during normal camera
+  motion; `gen` fell to 3-14/s and output read as drops. Now opt-in
+  (`BRP_RIFE_SAFE_MOTION=1`, threshold 18); the gap guard remains.
+- `testing.log` adds `skip=gap/motion/pass` counters and `fs`.
+- A 5080 report showed RIFE active with a 39.5 MB sm120 engine, 19-25 ms
+  inference, cadence peaks 66-100 ms and growing audio underruns; delivery and
+  audio are the open items, not the neural chain.

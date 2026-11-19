@@ -947,7 +947,7 @@ void App::RenderBoot(double t) {
              th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    ui_.Text(L"v0.4.3", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
+    ui_.Text(L"v0.4.4", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
              th::Rgba(th::kMuted, 0.55f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
 }
@@ -2071,7 +2071,7 @@ void App::LogTestingLine() {
     std::snprintf(line, sizeof(line),
                   "t=%.1f %s fps=%.1f src=%.1f content=%.1f rife=%.1f/%.2f cad=%.2f/%.2f "
                   "gen=%d q=%zu fg=%.1f late=%d stalls=%d miss=%llu dec=%.2f/%.2f "
-                  "drops=%d lost=%d buf=%d aud=%d\n",
+                  "drops=%d lost=%d buf=%d aud=%d fs=%d skip=%d/%d/%d\n",
                   clock_, bad ? "!!" : "  ", stream_active_ ? stream_stats_.elapsed > 0.0
                                                                    ? static_cast<double>(stream_stats_.frames) / stream_stats_.elapsed
                                                                    : 0.0
@@ -2081,7 +2081,8 @@ void App::LogTestingLine() {
                   rife_out_.size(), fg_worker_fps_, stat_late_, stat_stalls_, miss_delta,
                   stream_stats_.decode_ms_avg, stream_stats_.decode_ms_max,
                   stream_stats_.buffer_drops + streaming_.video_queue_drops(),
-                  stream_stats_.lost, stream_stats_.buffer, audio_.underruns());
+                  stream_stats_.lost, stream_stats_.buffer, audio_.underruns(), borderless_ ? 1 : 0,
+                  rife_skip_gap_, rife_skip_motion_, rife_pass_);
     testing_ << line;
     testing_.flush();
 }
@@ -3310,10 +3311,18 @@ void App::RifePush(media::DecodedFrame& frame, bool unique) {
     // Pass-through, gaps, or 60 fps content where a generated mid-frame adds
     // nothing (and would not fit the 8 ms budget). Show the frame as it arrives.
     static const bool force_gen = std::getenv("BRP_RIFE_FORCE_GEN") != nullptr;
-    // Fast turns are where interpolation invents a wrong pose (the vanishing
-    // head). Default on; BRP_RIFE_SAFE_MOTION=0 disables it.
-    static const bool safe_motion = std::getenv("BRP_RIFE_SAFE_MOTION") == nullptr;
-    const bool fast_motion = safe_motion && last_frame_diff_ > 12.0;
+    // Opt-in: on a real report this skipped generation during ordinary camera
+    // motion and read as dropped frames. The gap guard covers the harmful case;
+    // set BRP_RIFE_SAFE_MOTION=1 to also skip very large frame changes.
+    static const bool safe_motion = std::getenv("BRP_RIFE_SAFE_MOTION") != nullptr;
+    const bool fast_motion = safe_motion && last_frame_diff_ > 18.0;
+    if (gap) {
+        ++rife_skip_gap_;
+    } else if (fast_motion) {
+        ++rife_skip_motion_;
+    } else if (profile_.rife_output == 0 || (interval > 0.0 && interval < 0.025)) {
+        ++rife_pass_;
+    }
     if (!force_gen &&
         (profile_.rife_output == 0 || (interval > 0.0 && interval < 0.025) || gap ||
          fast_motion)) {
@@ -4167,6 +4176,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         LogTestingLine();
         rife_generated_ = 0;
         rife_dupes_ = 0.0;
+        rife_skip_gap_ = 0;
+        rife_skip_motion_ = 0;
+        rife_pass_ = 0;
     }
 
     // Mouse activity drives the stream chrome and the OS cursor.
@@ -6664,7 +6676,7 @@ void App::RenderSettings(double t) {
             break;
         }
         case Tab::About: {
-            ui_.Text(L"BetterRemotePlay 0.4.3", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
+            ui_.Text(L"BetterRemotePlay 0.4.4", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
                      th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 48.0f;
             ui_.Text(L"A PS5 to PC Remote Play client with a real post-process pipeline: "
