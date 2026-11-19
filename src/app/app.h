@@ -204,6 +204,12 @@ private:
     void NrThreadMain();
     void SubmitNrFrame(media::DecodedFrame& frame);
     void SubmitNrFrameData(std::vector<uint8_t>&& rgba, int width, int height, bool pq);
+    int FgTargetHz() const;
+    int FgChosenMultiplier(double content_hz, int target) const;
+    bool FrameIsDuplicate(const media::DecodedFrame& frame);
+    bool ShouldDropDuplicate(const media::DecodedFrame& frame);
+    void UpdateInterpolationMode();
+
     bool TakeNrResult(int& width, int& height, bool& pq);
     bool NrFailed(std::string& error);
 
@@ -342,6 +348,20 @@ private:
     std::wstring fg_note_;
     std::deque<media::NvVfx::Frame> fg_queue_;
     media::NvVfx::Frame fg_last_;
+
+    // Adaptive interpolation. A 30 fps game arrives as a 60 fps stream with
+    // every other frame duplicated; an identical pair has nothing to
+    // interpolate, so duplicates are skipped and the worker multiplier is
+    // chosen from the measured content rate and the requested output rate.
+    uint64_t frame_sig_ = 0;
+    bool frame_sig_valid_ = false;
+    int fg_mult_live_ = -1;      // multiplier currently sent to the worker
+    double fg_content_hz_ = 0.0; // measured unique-frame rate
+    double fg_dupes_ = 0.0;      // duplicates skipped in the current window
+    double fg_window_at_ = -1.0;
+    int fg_window_uniques_ = 0;
+    int fg_pending_mult_ = -1;
+    int fg_pending_streak_ = 0;
 
     // neural rendering (DLSS Super Resolution, D3D12)
     media::NvDlssSr dlss_sr_;

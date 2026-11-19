@@ -207,3 +207,36 @@ its releases. It is loaded as an optional, user-supplied vendor runtime. Magpie'
 GPLv3 implementation was used as a reference for the API shape (runtime loading,
 CUDA/D3D11 transfer, effect parameters); the code here is written against NVIDIA's
 public VFX programming guide.
+
+## Adaptive interpolation and output targets (19 Nov 2026)
+
+- **Output frame rate** is now a setting: Match display, 60, 90 or 120 fps. The
+  multiplier is no longer fixed. In the worker protocol the multiplier travels
+  in the per-frame flags, so it can change live; that was verified on a real
+  session (the worker accepted pass-through and 4x in the same run).
+- **Duplicate skipping.** A 30 fps game arrives as a 60 fps stream with every
+  other frame duplicated. An identical pair has nothing to interpolate, so a
+  64x64 sample hash detects duplicates and they are not fed to the worker. A
+  still image still feeds once every 80 ms so the worker is never starved.
+- **Multiplier choice** from the measured unique-frame rate and the target:
+  60 fps content to 90 or 120 fps is pass-through (no gaps to fill); 30 fps
+  content to 90 fps is 3x; 30 fps content to 120 fps is 4x.
+- **Shortfall guard:** if the worker reports less than 88 % of the expected
+  rate, the multiplier steps down on the next decision window. Measured at
+  1440p: 4x from 30 fps content sustained about 92 fps, so 3x (90) is the
+  honest choice there.
+- **Rates and the display.** 60 and 120 divide a 240 Hz screen; 90 does not.
+  The settings page says so instead of pretending 90 is even on every display.
+- HUD: `FG <worker fps> fps  content <unique fps> fps  <pass-through|Nx>`.
+- Settings: frame generation is Off/On; the old 2x-6x list is gone.
+
+### RIFE, measured
+
+RIFE 4.25 lite (ONNX, TensorRT 10, RTX 4090, fp16, `trtexec`):
+1080p (1088x1920) GPU compute **6.4 ms mean, p99 8.6 ms**; host round trip
+12.3 ms with pageable buffers. That fits 30 -> 90 fps at 1080p, not 30 -> 120.
+The 1440p engine is built for the same comparison. RIFE is not wired into the
+app: the package has no TensorRT/CUDA runtime or inference code, and adding it
+means about 2 GB of NVIDIA runtime plus per-GPU engine builds. The NVIDIA path
+(DLSS Frame Generation through the worker) stays the default because it costs
+about 1 ms per frame.

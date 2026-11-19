@@ -252,6 +252,7 @@ enum WidgetId {
     W_DlssMode = 64,
     W_Reflex = 65,
     W_DlssFg = 79,
+    W_FgTarget = 78,
     W_NrOrder = 66,
     W_NeuralNr = 67,
     W_NrPasses = 68,
@@ -1458,7 +1459,7 @@ void App::ApplyDropdown(int id, int index) {
             break;
         }
         case W_DlssFg: {
-            profile_.dlss_fg = index <= 0 ? 0 : std::clamp(index + 1, 2, 6);
+            profile_.dlss_fg = index <= 0 ? 0 : 2;
             if (profile_.dlss_fg >= 2) {
                 frame_gen_ = 0;
                 profile_.frame_gen = 0;
@@ -1467,8 +1468,17 @@ void App::ApplyDropdown(int id, int index) {
             }
             ApplyDlssFrameGen();
             stream_note_ = profile_.dlss_fg >= 2
-                               ? "DLSS Frame Generation 2x enabled (worker presenter)."
+                               ? "Frame generation on; the multiplier follows the content and the target."
                                : "DLSS Frame Generation off.";
+            break;
+        }
+        case W_FgTarget: {
+            static const int kTargets[] = {0, 60, 90, 120};
+            profile_.fg_target = kTargets[std::clamp(index, 0, 3)];
+            SaveProfile();
+            stream_note_ = profile_.fg_target == 0
+                               ? "Output follows the display."
+                               : "Output target " + std::to_string(profile_.fg_target) + " fps.";
             break;
         }
         case W_NrOrder: {
@@ -2529,6 +2539,7 @@ void App::ApplyDlssFrameGen() {
             return;
         }
         nr_.SetFrameGeneration(profile_.dlss_fg);
+        fg_mult_live_ = profile_.dlss_fg;
         nr_.SetNeuralBypass(profile_.neural_nr == 0);
         if (!nr_.present_mode() && !nr_.EnablePresent(fw, fh, detail)) {
             stream_note_ = "DLSS Frame Generation: " + detail;
@@ -2609,6 +2620,7 @@ bool App::EnsureNr() {
     if (profile_.dlss_fg >= 2) {
         std::string fg_detail;
         nr_.SetFrameGeneration(profile_.dlss_fg);
+        fg_mult_live_ = profile_.dlss_fg;
         nr_.SetNeuralBypass(profile_.neural_nr == 0);
         if (!nr_.EnablePresent(width, height, fg_detail)) {
             nr_note_ = L"FG presenter: " + Widen(fg_detail);
@@ -2713,6 +2725,9 @@ void App::SubmitNrFrameData(std::vector<uint8_t>&& rgba, int width, int height, 
         }
     }
     last_feed_at_ = clock_;
+    if (profile_.dlss_fg >= 2 && nr_.ready() && nr_.present_mode()) {
+        ++fg_window_uniques_;
+    }
     NrFrame job;
     job.rgba = std::move(rgba);
     job.width = width;
@@ -2730,6 +2745,133 @@ void App::SubmitNrFrameData(std::vector<uint8_t>&& rgba, int width, int height, 
     nr_cv_.notify_one();
 }
 
+int App::FgTargetHz() const {
+    const int hz = std::max(24, present_hz());
+    int target = profile_.fg_target;
+    if (target <= 0) {
+        target = hz >= 120 ? 120 : (hz >= 90 ? 90 : 60);
+    }
+    return std::min(target, hz);
+}
+
+int App::FgChosenMultiplier(double content_hz, int target) const {
+    if (content_hz <= 1.0 || target <= 0) {
+        return 0;
+    }
+    // No gaps to fill: the content already reaches the requested rate.
+    if (content_hz >= target * 0.95) {
+        return 0;
+    }
+    int best = 0;
+    for (int m = 2; m <= 6; ++m) {
+        if (content_hz * m <= target * 1.08 + 0.5) {
+            best = m;
+        }
+    }
+    return best;
+}
+
+bool App::FrameIsDuplicate(const media::DecodedFrame& frame) {
+    if (frame.rgba.empty() || frame.width <= 0 || frame.height <= 0) {
+        return false;
+    }
+    // A duplicate from a 30 fps game is coded as skipped blocks, so the decoded
+    // pixels are identical. A 64x64 sample is enough to tell, and costs a few
+    // microseconds instead of hashing 8 MB.
+    uint64_t hash = 1469598103934665603ull;
+    const int cols = 64;
+    const int rows = 64;
+    const size_t stride = static_cast<size_t>(frame.width) * 4;
+    for (int gy = 0; gy < rows; ++gy) {
+        const size_t y = (static_cast<size_t>(gy) * frame.height) / rows;
+        const uint8_t* row = frame.rgba.data() + y * stride;
+        for (int gx = 0; gx < cols; ++gx) {
+            const size_t x = (static_cast<size_t>(gx) * frame.width) / cols;
+            uint32_t px = 0;
+            std::memcpy(&px, row + x * 4, sizeof(px));
+            hash = (hash ^ px) * 1099511628211ull;
+        }
+    }
+    const bool duplicate = frame_sig_valid_ && hash == frame_sig_;
+    frame_sig_ = hash;
+    frame_sig_valid_ = true;
+    return duplicate;
+}
+
+bool App::ShouldDropDuplicate(const media::DecodedFrame& frame) {
+    UpdateInterpolationMode();
+    if (profile_.dlss_fg < 2 || !nr_ready_ || !nr_.present_mode()) {
+        return false;
+    }
+    const bool duplicate = FrameIsDuplicate(frame);
+    if (!duplicate || fg_mult_live_ < 2) {
+        return false;
+    }
+    ++fg_dupes_;
+    // A still image must not starve the worker: feed at least every 80 ms.
+    return last_feed_at_ >= 0.0 && clock_ - last_feed_at_ < 0.08;
+}
+
+void App::UpdateInterpolationMode() {
+    if (profile_.dlss_fg < 2 || !nr_ready_ || !nr_.present_mode()) {
+        return;
+    }
+    if (fg_window_at_ < 0.0) {
+        fg_window_at_ = clock_;
+        fg_window_uniques_ = 0;
+        return;
+    }
+    const double elapsed = clock_ - fg_window_at_;
+    if (elapsed < 0.75) {
+        return;
+    }
+    const double hz = static_cast<double>(fg_window_uniques_) / elapsed;
+    fg_content_hz_ = fg_content_hz_ > 0.0 ? fg_content_hz_ * 0.45 + hz * 0.55 : hz;
+    fg_window_uniques_ = 0;
+    fg_window_at_ = clock_;
+
+    const int target = FgTargetHz();
+    int candidate = FgChosenMultiplier(fg_content_hz_, target);
+    // If the worker cannot hold the requested rate, step the multiplier down.
+    // At 1440p, 4x from 30 fps content sustains about 92 fps, so 3x (90) is the
+    // honest choice; the next window confirms the new rate before going lower.
+    if (candidate > 2 && fg_worker_fps_ > 0.0 &&
+        fg_worker_fps_ < fg_content_hz_ * candidate * 0.88) {
+        --candidate;
+    }
+    static const bool probe = std::getenv("BRP_FG_MULT_PROBE") != nullptr;
+    static double probe_at = 0.0;
+    if (probe) {
+        // Test hook: force a live change every 4 s to prove the worker accepts
+        // a new multiplier mid-session.
+        if (clock_ - probe_at < 4.0) {
+            return;
+        }
+        probe_at = clock_;
+        candidate = fg_mult_live_ >= 2 ? 0 : 4;
+    }
+    if (candidate == fg_mult_live_) {
+        fg_pending_streak_ = 0;
+        return;
+    }
+    // Two windows in a row, so a menu that briefly runs at 60 fps does not
+    // flip the multiplier back and forth.
+    if (candidate == fg_pending_mult_) {
+        ++fg_pending_streak_;
+    } else {
+        fg_pending_mult_ = candidate;
+        fg_pending_streak_ = 1;
+    }
+    if (fg_pending_streak_ < 2) {
+        return;
+    }
+    fg_pending_streak_ = 0;
+    fg_mult_live_ = candidate;
+    nr_.SetFrameGeneration(candidate);
+    std::fprintf(stderr, "[fg] content %.1f fps -> %s for %d fps output\n",
+                 fg_content_hz_, candidate < 2 ? "pass-through" : "interpolation",
+                 FgTargetHz());
+}
 bool App::TakeNrResult(int& width, int& height, bool& pq) {
     std::lock_guard<std::mutex> lock(nr_mutex_);
     if (!nr_latest_) {
@@ -3721,8 +3863,9 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                 // in its own window. When SR is also enabled it receives the
                 // SR output (render-resolution -> FG, as in a game); otherwise
                 // it receives the raw stream.
+                const bool drop_duplicate = ShouldDropDuplicate(stream_frame_);
                 bool fed = false;
-                if (profile_.neural_sr > 0 && dlss_ready_) {
+                if (!drop_duplicate && profile_.neural_sr > 0 && dlss_ready_) {
                     media::NvDlssSr::Frame sr_frame;
                     if (RunDlssSr(stream_frame_, sr_frame)) {
                         const int sr_w = dlss_sr_.out_width();
@@ -3751,7 +3894,7 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                         stream_note_ = "DLSS SR failed; frame generation uses the raw stream.";
                     }
                 }
-                if (!fed) {
+                if (!drop_duplicate && !fed) {
                     // Raw stream into the worker. Grade it there and then when a
                     // control is active; otherwise keep the zero-copy feed.
                     if (presenter_.enhance().active) {
@@ -5364,10 +5507,15 @@ void App::RenderSettings(double t) {
                 DrawDropdown(L"NVIDIA VFG (legacy)", options, selected, y, W_FrameGen, available);
             }
             y += kRowH;
-            DrawDropdown(L"DLSS Frame Generation",
-                         {L"Off", L"2x", L"3x", L"4x", L"5x", L"6x"},
-                         profile_.dlss_fg >= 2 ? std::clamp(profile_.dlss_fg - 1, 1, 5) : 0, y,
-                         W_DlssFg);
+            DrawDropdown(L"DLSS Frame Generation", {L"Off", L"On"},
+                         profile_.dlss_fg >= 2 ? 1 : 0, y, W_DlssFg);
+            y += kRowH;
+            DrawDropdown(L"Output frame rate",
+                         {L"Match display", L"60 fps", L"90 fps", L"120 fps"},
+                         profile_.fg_target == 60
+                             ? 1
+                             : (profile_.fg_target == 90 ? 2 : (profile_.fg_target == 120 ? 3 : 0)),
+                         y, W_FgTarget, profile_.dlss_fg >= 2);
             y += kRowH;
 
             if (frame_gen_ >= 2 && fg_ready_) {
@@ -5377,32 +5525,27 @@ void App::RenderSettings(double t) {
                 ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
                          th::Rgba(th::kMuted));
             } else if (profile_.dlss_fg >= 2) {
-                const double target =
-                    std::min<double>(present_hz(), 60.0 * profile_.dlss_fg);
+                const int target = FgTargetHz();
                 wchar_t text[256];
                 if (!stream_active_) {
-                    swprintf_s(text, L"DLSS FG %dx selected  -  starts with the next session",
-                               profile_.dlss_fg);
-                } else if (fg_worker_fps_ > 0.0) {
-                    swprintf_s(text, L"DLSS FG worker: %.0f fps displayed  -  requested %dx "
-                                     L"(%.0f fps)",
-                               fg_worker_fps_, profile_.dlss_fg, target);
+                    swprintf_s(text,
+                               L"Frame generation on  -  output %d fps  -  starts with the next session",
+                               target);
                 } else {
-                    swprintf_s(text, L"DLSS FG %dx requested  -  waiting for the first "
-                                     L"generated frames",
-                               profile_.dlss_fg);
+                    swprintf_s(text, L"content %.1f fps   %s   output %.0f fps   worker %.1f ms",
+                               fg_content_hz_,
+                               fg_mult_live_ < 2 ? L"pass-through" : L"interpolating",
+                               fg_worker_fps_, nr_.last_ms());
                 }
-                const bool limited =
-                    fg_worker_fps_ > 0.0 && fg_worker_fps_ < target * 0.95;
+                const bool limited = fg_worker_fps_ > 0.0 && fg_worker_fps_ < target * 0.95;
                 ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
                          th::Rgba(limited ? 0xFFC145 : th::kMuted, 0.95f));
-                if (profile_.dlss_fg > 2) {
-                    ui_.Text(L"This GPU sustains about 120 fps of output: 2x is the clean "
-                             L"240 Hz setting, 3x-6x land between refreshes.",
+                if (target > 0 && present_hz() % target != 0) {
+                    ui_.Text(L"This rate does not divide the display refresh, so some frames hold "
+                             L"an extra refresh. On a 240 Hz screen, 60 and 120 divide evenly.",
                              {kContentX, y + 28.0f, w - 64.0f, y + 54.0f}, 11.5f,
                              th::Rgba(th::kMuted));
-                }
-            } else if (!FrameGenAvailable()) {
+                }            } else if (!FrameGenAvailable()) {
                 ui_.Text(L"NVIDIA VFX runtime not found: third_party\\nvidia-vfx\\runtime",
                          {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
                          th::Rgba(th::kMuted));
@@ -5917,12 +6060,12 @@ void App::RenderStream(double t) {
                     swprintf_s(part, L"VFG %dx   ", frame_gen_);
                     chain += part;
                 } else if (profile_.dlss_fg >= 2) {
-                    wchar_t part[96];
-                    if (fg_worker_fps_ > 0.0) {
-                        swprintf_s(part, L"FG %.0f fps   ", fg_worker_fps_);
-                    } else {
-                        swprintf_s(part, L"FG %dx   ", profile_.dlss_fg);
-                    }
+                    wchar_t part[160];
+                    swprintf_s(part, L"FG %.0f fps   content %.1f fps   %s   ", fg_worker_fps_,
+                               fg_content_hz_,
+                               fg_mult_live_ < 2
+                                   ? L"pass-through"
+                                   : (std::to_wstring(fg_mult_live_) + L"x").c_str());
                     chain += part;
                 }
                 if (profile_.dlss_fg >= 2 && enh_applied_.active) {
@@ -6113,11 +6256,15 @@ void App::RenderStreamSettings(double t) {
                              W_FrameGen, available);
             }
             y += row;
-            DrawDropdown(L"DLSS Frame Generation", {L"Off", L"2x", L"3x", L"4x", L"5x", L"6x"},
-                         profile_.dlss_fg >= 2
-                             ? std::clamp(profile_.dlss_fg - 1, 1, 5)
-                             : 0,
-                         y, W_DlssFg);
+            DrawDropdown(L"DLSS Frame Generation", {L"Off", L"On"},
+                         profile_.dlss_fg >= 2 ? 1 : 0, y, W_DlssFg);
+            y += row;
+            DrawDropdown(L"Output frame rate",
+                         {L"Match display", L"60 fps", L"90 fps", L"120 fps"},
+                         profile_.fg_target == 60
+                             ? 1
+                             : (profile_.fg_target == 90 ? 2 : (profile_.fg_target == 120 ? 3 : 0)),
+                         y, W_FgTarget, profile_.dlss_fg >= 2);
             y += row;
             break;
         }
