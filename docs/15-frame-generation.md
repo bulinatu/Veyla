@@ -303,11 +303,24 @@ Headers are vendored from the TensorRT v10.16 tag (Apache-2.0) under
 almost the first frame, `ts=0.9` almost the second. A real-clip quality test is
 still needed.
 
-**Latency (RTX 4090, 1080p engine, 40 runs):** total p50 **19.4 ms**, p99 20.5,
-of which about 2.8 ms is the RGBA8 -> float CHW conversion. The rest is 6.4 ms of
-inference plus pageable H2D/D2H for 75 MB. Pinned host buffers and fp16 IO would
-cut the transfers roughly in half; even then it is about 11-12 ms, which fits
-60 fps and is marginal for 90, not 120.
+**Latency with page-locked host buffers (RTX 4090):**
+
+| Engine | Total p50 | p95 | p99 | Conversion |
+| --- | --- | --- | --- | --- |
+| 1080p (1920x1088) | **19.0 ms** | 20.4 | 20.5 | 3.0 ms |
+| 1440p (2560x1472) | **34.3 ms** | 34.9 | 35.9 | 5.6 ms |
+
+Pinning the buffers did not help much (19.4 -> 19.0 ms), so the cost is not the
+PCIe staging copy: it is TensorRT inference plus the per-call transfer and
+synchronisation of 180 MB at 1440p. fp16 IO tensors would halve that.
+
+**What a 50 ms budget allows.** The user accepts up to 50 ms of added delay for
+quality, so the *latency* is fine. The limit is throughput: a 30 fps source needs
+one generated frame every 33.3 ms for 60 fps output, which 1080p meets (19 ms)
+and 1440p just misses (34 ms); two generated frames per source (30 -> 90) need
+16.6 ms each and are out of reach at either size. So RIFE's honest mode is
+**1080p, 30 -> 60**, with 1440p 30 -> 60 as a stretch. NVIDIA DLSS FG stays the
+engine for 120 fps.
 
 **Still not wired into the stream.** The app does not yet build or present RIFE
 frames; the probe proves the runtime path and gives the numbers. Integration

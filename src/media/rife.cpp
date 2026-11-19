@@ -39,6 +39,8 @@ struct CudaApi {
     using StreamCreate = int (*)(cudaStream_t*);
     using StreamSync = int (*)(cudaStream_t);
     using StreamDestroy = int (*)(cudaStream_t);
+    using HostAlloc = int (*)(void**, size_t, unsigned);
+    using HostFree = int (*)(void*);
 
     Malloc malloc = nullptr;
     Free free = nullptr;
@@ -46,6 +48,8 @@ struct CudaApi {
     StreamCreate stream_create = nullptr;
     StreamSync stream_sync = nullptr;
     StreamDestroy stream_destroy = nullptr;
+    HostAlloc host_alloc = nullptr;
+    HostFree host_free = nullptr;
 
     static constexpr int kHostToDevice = 1;
     static constexpr int kDeviceToHost = 2;
@@ -59,8 +63,10 @@ struct CudaApi {
         stream_sync =
             reinterpret_cast<StreamSync>(::GetProcAddress(m, "cudaStreamSynchronize"));
         stream_destroy = reinterpret_cast<StreamDestroy>(::GetProcAddress(m, "cudaStreamDestroy"));
+        host_alloc = reinterpret_cast<HostAlloc>(::GetProcAddress(m, "cudaHostAlloc"));
+        host_free = reinterpret_cast<HostFree>(::GetProcAddress(m, "cudaFreeHost"));
         if (!malloc || !free || !memcpy_async || !stream_create || !stream_sync ||
-            !stream_destroy) {
+            !stream_destroy || !host_alloc || !host_free) {
             detail = "cudart is missing one of the symbols RIFE needs";
             return false;
         }
@@ -104,6 +110,14 @@ Rife::~Rife() {
         for (void** p : {&d_in0_, &d_in1_, &d_timestep_, &d_out_}) {
             if (*p) {
                 g_cuda.free(*p);
+                *p = nullptr;
+            }
+        }
+    }
+    if (g_cuda.host_free) {
+        for (float** p : {&host_in0_, &host_in1_, &host_out_}) {
+            if (*p) {
+                g_cuda.host_free(*p);
                 *p = nullptr;
             }
         }
@@ -225,9 +239,14 @@ bool Rife::Load(const std::string& runtime_dir, const std::string& engine_path,
     }
     stream_ = stream;
 
-    host_in0_.resize(static_cast<size_t>(engine_width_) * engine_height_ * plane_count);
-    host_in1_.resize(host_in0_.size());
-    host_out_.resize(host_in0_.size());
+    const size_t host_bytes =
+        static_cast<size_t>(engine_width_) * engine_height_ * plane_count * sizeof(float);
+    if (g_cuda.host_alloc(reinterpret_cast<void**>(&host_in0_), host_bytes, 0) != 0 ||
+        g_cuda.host_alloc(reinterpret_cast<void**>(&host_in1_), host_bytes, 0) != 0 ||
+        g_cuda.host_alloc(reinterpret_cast<void**>(&host_out_), host_bytes, 0) != 0) {
+        detail = "cudaHostAlloc failed";
+        return false;
+    }
 
     context->setTensorAddress("img0", d_in0_);
     context->setTensorAddress("img1", d_in1_);
@@ -282,8 +301,8 @@ bool Rife::Process(const uint8_t* rgba_a, const uint8_t* rgba_b, float timestep,
     auto* context = static_cast<nvinfer1::IExecutionContext*>(context_);
     cudaStream_t stream = static_cast<cudaStream_t>(stream_);
     const size_t bytes = plane_bytes_ * 3;
-    if (g_cuda.memcpy_async(d_in0_, host_in0_.data(), bytes, CudaApi::kHostToDevice, stream) != 0 ||
-        g_cuda.memcpy_async(d_in1_, host_in1_.data(), bytes, CudaApi::kHostToDevice, stream) != 0 ||
+    if (g_cuda.memcpy_async(d_in0_, host_in0_, bytes, CudaApi::kHostToDevice, stream) != 0 ||
+        g_cuda.memcpy_async(d_in1_, host_in1_, bytes, CudaApi::kHostToDevice, stream) != 0 ||
         g_cuda.memcpy_async(d_timestep_, &timestep, sizeof(float), CudaApi::kHostToDevice,
                             stream) != 0) {
         detail = "upload failed";
@@ -293,7 +312,7 @@ bool Rife::Process(const uint8_t* rgba_a, const uint8_t* rgba_b, float timestep,
         detail = "enqueueV3 failed";
         return false;
     }
-    if (g_cuda.memcpy_async(host_out_.data(), d_out_, bytes, CudaApi::kDeviceToHost, stream) != 0) {
+    if (g_cuda.memcpy_async(host_out_, d_out_, bytes, CudaApi::kDeviceToHost, stream) != 0) {
         detail = "download failed";
         return false;
     }
