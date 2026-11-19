@@ -5,17 +5,20 @@ Resolution, DLSS Frame Generation (through the closed NeuralScreen worker),
 GPU colour and sharpening, a custom PS5-style UI and native DualSense support.
 Build `0.3`. Run `git log -1` for the current commit.
 
-Version 0.4.9 (20 Nov 2026).
+Version 0.5.0 (20 Nov 2026).
 
-- Standalone: `dist\BetterRemotePlay-0.4.9-standalone.zip`, 622.6 MB, SHA256
-  `7192792BEDBB65C711B997D835A171F80372BF3610FD480B2CCBC68FD0E90A4B`.
-- Update from 0.4.8: `dist\BetterRemotePlay-0.4.9-update.exe`, **0.72 MB, one
+- Standalone: `dist\BetterRemotePlay-0.5.0-standalone.zip`, 623.2 MB, SHA256
+  `FEB6396D69DB75574C5EA8ABBC77F30D9731C84EA92457598A8686E4817851C4`.
+- Update from 0.4.9: `dist\BetterRemotePlay-0.5.0-update.exe`, **1.29 MB, one
   file**, SHA256
-  `472AD556EC130AEA5F9D57437F076501D03ACE7FBA27B295D845CD370DCD9FC4`.
-- `dist\BetterRemotePlay\brp.exe` matches `build\Release\brp.exe`
-  (SHA256 `8B48BE7979C676AEDAF29FEBFBF876331186CAEA4CDE20766D494EB26276A7F2`).
-- The package includes `rife\rife425_1080.engine` (12.5 MB, built for the
-  reference RTX 4090), both RIFE models, `cudart64_13.dll` and `update.exe`.
+  `E398273D77E85E3D74CDBC4F9D86B399B5B6BDB39EF6034E5F05A6B9C0D069E3`.
+- `dist\BetterRemotePlay\brp.exe` SHA256
+  `90AF1EBF8106E271A7BE44876FB321032BF9FDBDE74F6BC50F0EE6051FB246BD`.
+- `dist\BetterRemotePlay\brpnext.exe` SHA256
+  `BB6D1321499C09AB9E2D46B0AD97ACB852F7781538EA40098F629BC70059029B`.
+- The package includes both executables, `rife\rife425_1080.engine` (12.5 MB,
+  built for the reference RTX 4090), both RIFE models, `cudart64_13.dll` and
+  `update.exe`.
 - No `session.json`, no pairing data, no runtime logs.
 
 ## What works
@@ -269,3 +272,28 @@ Measured (4090, 1080p, DLAA + FG, 1440p240 display):
 Honest limit: DLSS-G here is 2x only. 30 fps -> 60 with NVIDIA; 60 fps -> 120.
 RIFE remains the better 30 -> 60 midpoint. Status map for the full AI engine
 spec is in `docs/32-nvidia-ai-engine.md`.
+
+## 0.5.0 - BetterRemotePlay Next packaged (Stages 5-11)
+
+The package now contains both executables:
+
+- `brp.exe` 0.5.0: the reference product (version bump only; feature set is
+  0.4.9, including DLSS-G 60 -> 120 and the proven RIFE path).
+- `brpnext.exe` 0.5.0-next: the rebuilt application.
+
+`brpnext` working on the reference PS5:
+
+- Discovery, PSN browser login + clipboard redirect, PIN pairing, rest-mode
+  wake, connect/disconnect, auto reconnect (5 attempts) and device-loss stop.
+- Full-window video through D3D11, WASAPI audio, DualSense input at 250 Hz.
+- DLSS SR 1920x1080 -> 2560x1440.
+- RIFE 30 -> 60: 29 generated/s, 58 shown/s from a 28.8 fps source.
+- Independent layered overlay, typed settings, profiles, reset/import/export,
+  session report.
+- DLSS-G 60 -> 120 is a visible but disabled reference option in `brpnext`
+  (Stage 6c skipped by decision); use `brp.exe` for 60 -> 120.
+
+Verified: update 0.4.9 -> 0.5.0, `files_differ=0`, 0 markers; both executables
+launch from the clean package. Not done: automated four-case benchmark matrix,
+4K display validation, multi-hour soak, and the RTX 5080 second-machine pass
+for `brpnext`.

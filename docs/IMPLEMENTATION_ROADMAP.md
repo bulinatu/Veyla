@@ -180,14 +180,14 @@ center, and full restart-required classification.
 - Not yet: multi-hour soak, forced network interruption, VRAM pressure, and the
   RTX 5080 second-machine pass.
 
-## Stage 11 - Release
+## Stage 11 - Release (packaged, migration still dual-exe)
 
-- Package both executables during migration; then retire the old one.
-- Single `update.exe`, versioning, model/engine deployment, notices/licenses.
-- Final feature matrix, known issues, system requirements.
-
-Acceptance: clean install on a machine without the dev tree, update from
-0.4.9, rollback documented.
+- 0.5.0 package contains both `brp.exe` and `brpnext.exe`.
+- Single `update.exe` (1.29 MB) from 0.4.9; verified `files_differ=0`.
+- Both executables launch from the clean package.
+- Model/engine deployment unchanged: the package ships the lite engine and
+  both ONNX models; TensorRT/heavy engines are built on demand by brp.exe.
+- Not done: retiring brp.exe, signing, and a public release channel.
 
 ## Current position
 

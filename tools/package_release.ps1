@@ -11,7 +11,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $release = Join-Path $root "build\Release"
 $distRoot = Join-Path $root "dist"
 $dest = Join-Path $distRoot "BetterRemotePlay"
-$version = "0.4.9"
+$version = "0.5.0"
 
 function Require-File([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -41,6 +41,7 @@ New-Item -ItemType Directory -Path (Join-Path $dest "fonts") -Force | Out-Null
 
 # --- core executable and FFmpeg runtime ------------------------------------
 Copy-Required (Join-Path $release "brp.exe") $dest
+Copy-Required (Join-Path $release "brpnext.exe") $dest
 
 # Updater: lets a small patch zip replace only the files that changed.
 $updater = Join-Path $release "brp_update.exe"
@@ -131,6 +132,26 @@ BetterRemotePlay $version - standalone build
 =============================================
 
 Run brp.exe. No installer, no console window, no network service.
+
+Two executables
+---------------
+- brp.exe: the reference product. Full feature set, including DLSS Frame
+  Generation 60 -> 120 and the proven RIFE path.
+- brpnext.exe: the rebuilt application (Stages 5-11). New UI, real streaming,
+  full-window video, audio, controller, DLSS Super Resolution, RIFE 30 -> 60,
+  typed settings, profiles, diagnostics and an independent overlay.
+  DLSS-G 60 -> 120 is shown as a disabled reference option in brpnext (Stage
+  6c was skipped); use brp.exe for 60 -> 120. The two apps share the runtimes
+  but keep separate profiles:
+  %APPDATA%\BetterRemotePlay and %APPDATA%\BetterRemotePlayNext.
+
+brpnext quick start
+-------------------
+1. Run brpnext.exe. It imports the legacy session once, if present.
+2. Console: Discover or enter the address, PSN login / PIN pairing if needed.
+3. Connect. The Watch view opens automatically; Esc returns to Console.
+4. AI Video Engine: DLSS SR or RIFE 30 -> 60; DLSS-G is reference-only.
+5. Settings > Overlay enables the independent stats window.
 
 Requirements
 ------------

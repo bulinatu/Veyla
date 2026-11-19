@@ -75,3 +75,6 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 - Stage 9 has a real session report; the automated four-case matrix is pending.
 - Stage 10 has auto reconnect and device-loss handling; soak tests are pending.
 - `brp.exe` 0.4.9 still builds and runs.
+
+- Stage 11: 0.5.0 package with both executables and a 1.29 MB update from
+  0.4.9; clean-package launch verified.

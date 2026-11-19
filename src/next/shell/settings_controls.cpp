@@ -367,13 +367,23 @@ float SettingsControls::Ai(float x, float y, float width) {
 
     if (settings_.ai.fg_backend == AiBackend::Rife) {
         int model = settings_.ai.rife_model;
+        const std::vector<bool> model_enabled = {true, system_.rife_heavy};
         if (widgets_.Choice(Next(), Row(x, y, width), L"RIFE model",
                             {L"Lite 4.25", L"Heavy 4.26"}, model,
-                            settings_.ai.frame_generation)) {
-            settings_.ai.rife_model = model;
-            Touch();
+                            settings_.ai.frame_generation, &model_enabled)) {
+            if (model_enabled[static_cast<std::size_t>(model)]) {
+                settings_.ai.rife_model = model;
+                Touch();
+            }
         }
         y += kRow + kGap;
+        if (settings_.ai.rife_model == 1 && !system_.rife_heavy) {
+            widgets_.Label(Rect(x, y, x + width, y + 34),
+                           L"Heavy engine is not built; Lite is used until Set up RIFE "
+                           L"builds it in the reference app.",
+                           widgets_.Tokens().warning, 11.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+            y += 36.0f;
+        }
 
         float blend = static_cast<float>(settings_.ai.blend);
         if (widgets_.Slider(Next(), Row(x, y, width), L"RIFE blend", blend, 0.0f, 40.0f,
