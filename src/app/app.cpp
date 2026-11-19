@@ -3003,6 +3003,16 @@ bool App::EnsureRife() {
     if (!instance->Load(runtime, engine, profile_.width, profile_.height, detail)) {
         rife_note_ = L"RIFE: " + Widen(detail);
         std::fprintf(stderr, "[rife] load failed: %s\n", detail.c_str());
+        // An engine built for another TensorRT version or GPU cannot be fixed
+        // in place. Remove it so Home offers "Set up RIFE" and rebuilds one for
+        // this machine instead of failing every session.
+        if (detail.find("deserialize") != std::string::npos ||
+            detail.find("another TensorRT") != std::string::npos) {
+            std::error_code ec;
+            std::filesystem::remove(std::filesystem::path(engine), ec);
+            rife_note_ = L"RIFE engine does not match this GPU; press Set up RIFE to "
+                         L"rebuild it.";
+        }
         return false;
     }
     rife_ = std::move(instance);

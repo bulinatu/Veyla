@@ -484,3 +484,11 @@ different GPU, delete `rife\rife425_1080.engine` and press Set up RIFE; the
 engine is architecture-specific (the shipped one is sm89, RTX 4090). The manual
 link remains available for an offline install:
 `https://developer.download.nvidia.com/compute/machine-learning/tensorrt/10.16.0/zip/TensorRT-10.16.0.72.Windows.amd64.cuda-13.2.zip`.
+
+### Mismatched engine handling
+
+If the engine was built for another TensorRT version or GPU, loading fails with a
+serialization error. Instead of failing every session, the app deletes that
+engine, falls back to NVIDIA for the current session, and Home offers
+**Set up RIFE** again. Verified by replacing the engine with 2 MB of random
+bytes: detected, removed, stream started on NVIDIA.
