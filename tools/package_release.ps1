@@ -106,6 +106,10 @@ if (Test-Path $rife) {
     Copy-Item -LiteralPath $rife -Destination (Join-Path $dest "rife") -Recurse -Force
 }
 
+# --- keep runtime logs from the build machine out of the package -------------
+Get-ChildItem -LiteralPath $dest -Recurse -File -Include *.jsonl,*.log -ErrorAction SilentlyContinue |
+    Remove-Item -Force -ErrorAction SilentlyContinue
+
 # --- readme -----------------------------------------------------------------
 $readme = @"
 BetterRemotePlay $version - standalone build
@@ -157,6 +161,23 @@ Features and runtimes
   An engine built for another GPU will not load; rebuild it with trtexec.
 - The app is not affiliated with Sony Interactive Entertainment. No Sony
   artwork, code, keys or fonts are included.
+
+Giving this to someone else
+---------------------------
+- Copy the whole folder. Nothing is installed, no admin rights, no service.
+  The Visual C++ runtime and FFmpeg DLLs are already inside.
+- Each person signs in to PSN and pairs their own console; session.json is not
+  included and holds your own credentials, so keep it in %APPDATA%.
+- NVIDIA RTX GPU + a current driver are needed for DLSS SR, Neural Rendering
+  and DLSS Frame Generation. Without one the app still streams and upscales
+  with FSR1/Lanczos, and RIFE is unavailable.
+- RIFE is optional and not self-contained. It needs a TensorRT 10.16 + CUDA 13
+  runtime on the PC: put nvinfer_10.dll and cudart64_13.dll in rife\runtime
+  next to brp.exe, or set BRP_TENSORRT_DIR. The engine in rife\ was built for
+  the GPU of the machine this package came from; another GPU needs its own
+  engine built with trtexec (command in docs/15-frame-generation.md). Without
+  these the app falls back to NVIDIA and says so.
+- The console must be on the same LAN with Remote Play enabled.
 
 Settings worth knowing
 ----------------------

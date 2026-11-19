@@ -2923,9 +2923,19 @@ bool App::EnsureRife() {
     }
     StopRife();
     std::string runtime = EnvString("BRP_TENSORRT_DIR");
+    wchar_t exe_path[MAX_PATH] = {};
+    ::GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+    const std::filesystem::path exe_dir = std::filesystem::path(exe_path).parent_path();
     if (runtime.empty()) {
-        // Reference machine: the runtime that ships with vs-mlrt. Documented as
-        // a user-supplied requirement, like the NVIDIA VFX runtime.
+        // Portable location: drop the TensorRT/CUDA DLLs in rife\runtime next to
+        // the exe. On the reference machine they live in the vs-mlrt install,
+        // which stays a fallback; on another PC it simply will not exist.
+        const std::filesystem::path local = exe_dir / "rife" / "runtime";
+        if (std::filesystem::exists(local / "nvinfer_10.dll")) {
+            runtime = local.string();
+        }
+    }
+    if (runtime.empty()) {
         const std::string fallback =
             "C:\\mpv-upscaler-video-player\\vs-plugins\\vsmlrt-cuda";
         if (std::filesystem::exists(fallback + "\\nvinfer_10.dll")) {
@@ -2934,10 +2944,7 @@ bool App::EnsureRife() {
     }
     std::string engine = EnvString("BRP_RIFE_ENGINE");
     if (engine.empty()) {
-        wchar_t exe[MAX_PATH] = {};
-        ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
-        const std::filesystem::path dir = std::filesystem::path(exe).parent_path();
-        const std::filesystem::path candidate = dir / "rife" / "rife425_1080.engine";
+        const std::filesystem::path candidate = exe_dir / "rife" / "rife425_1080.engine";
         if (std::filesystem::exists(candidate)) {
             engine = candidate.string();
         }
