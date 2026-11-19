@@ -421,3 +421,32 @@ health: src=28.6  drops=0  lost=0  audio underruns=0
 The console honours the request: 28.6 fps arrive, no duplicates, half the
 frames to decode, and RIFE makes the 60. The duplicate detector still matters
 for games that ignore the hint or for the 60 fps setting.
+
+## Neural Rendering in the RIFE path (19 Nov 2026)
+
+Settings > Upscaling > **Neural rendering (DLSS 5)** now works with either
+engine. In RIFE mode the NR worker runs on the 1080p stream **before**
+interpolation:
+
+- Duplicate detection runs on the raw frame; only unique frames enter NR, so
+  the worker does not waste passes on repeated frames and its output does not
+  confuse the comparison.
+- The NR stage is pinned to the stream size (1920x1080) when RIFE is selected,
+  so its output matches the engine. `NrStageSize` returns the stream size for
+  the RIFE engine.
+- The worker must not enter FG present mode in this path; `EnsureNr` skips
+  `EnablePresent` when `fg_engine == 1`. Without that it presented frames itself
+  and RIFE received nothing (measured: 0 fps shown).
+- Toggle it live from the same dropdown (Off/On); the existing Neural tab still
+  holds the style, passes, tone and mask controls.
+
+Measured with NR on (4 passes) + RIFE, 30 fps stream:
+
+```
+[rife] 60 fps shown, 30 generated, 23-29 ms/frame,
+       cadence avg 16.6-16.9 ms, content 30.0 fps, dupes 0
+```
+
+The inference cost rises (22 -> 23-29 ms) because NR and RIFE share the GPU, and
+one window dipped to 51 fps with a 40 ms frame. Passes and strength are the
+controls for that trade-off.

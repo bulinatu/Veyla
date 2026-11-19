@@ -217,7 +217,7 @@ private:
     bool EnsureRife();
     void StopRife();
     void RifeThreadMain();
-    void RifePush(media::DecodedFrame& frame);
+    void RifePush(media::DecodedFrame& frame, bool unique = false);
     void RifePresentDue();
 
     bool TakeNrResult(int& width, int& height, bool& pq);

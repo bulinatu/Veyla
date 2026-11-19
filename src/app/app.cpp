@@ -2328,6 +2328,12 @@ bool App::NrAvailable() const {
 }
 
 void App::NrStageSize(int* width, int* height) const {
+    if (profile_.fg_engine == 1) {
+        // RIFE consumes 1080p stream frames; the NR stage must match the engine.
+        *width = profile_.width > 0 ? profile_.width : 1920;
+        *height = profile_.height > 0 ? profile_.height : 1080;
+        return;
+    }
     if (profile_.dlss_fg >= 2) {
         // The FG worker consumes the DLSS SR output when both are enabled, so
         // it must run at the SR output size, exactly like a game's render
@@ -2639,7 +2645,7 @@ bool App::EnsureNr() {
     nr_shown_ = 0;
     nr_last_ms_ = 0.0;
     StartNrThread();
-    if (profile_.dlss_fg >= 2) {
+    if (profile_.dlss_fg >= 2 && profile_.fg_engine != 1) {
         std::string fg_detail;
         nr_.SetFrameGeneration(profile_.dlss_fg);
         fg_mult_live_ = profile_.dlss_fg;
@@ -3025,11 +3031,11 @@ void App::RifeThreadMain() {
     }
 }
 
-void App::RifePush(media::DecodedFrame& frame) {
+void App::RifePush(media::DecodedFrame& frame, bool unique) {
     if (!rife_ || !rife_->ready() || frame.rgba.empty()) {
         return;
     }
-    if (FrameIsDuplicate(frame)) {
+    if (!unique && FrameIsDuplicate(frame)) {
         ++rife_dupes_;
         return;  // an identical pair has nothing to interpolate
     }
@@ -4169,10 +4175,32 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         const bool vfg_active = frame_gen_ >= 2 && fg_ready_;
         const bool rife_mode = rife_ && rife_->ready() && profile_.fg_engine == 1;
         if (rife_mode) {
+            const bool nr_on = profile_.neural_nr > 0 && nr_ready_;
             if (video_due &&
                 streaming_.TakeFrame(stream_frame_, stream_buffer_, video_paced)) {
                 NoteSourceFrame();
-                RifePush(stream_frame_);
+                if (nr_on) {
+                    // Detect duplicates on the raw frame: the NR worker's output
+                    // can differ by a few counts and defeat the comparison.
+                    if (!FrameIsDuplicate(stream_frame_)) {
+                        SubmitNrFrame(stream_frame_);
+                    }
+                } else {
+                    RifePush(stream_frame_);
+                }
+            }
+            if (nr_on) {
+                int nw = 0;
+                int nh = 0;
+                bool npq = false;
+                if (TakeNrResult(nw, nh, npq)) {
+                    media::DecodedFrame nrf;
+                    nrf.rgba = std::move(nr_out_);
+                    nrf.width = nw;
+                    nrf.height = nh;
+                    nrf.pq = npq;
+                    RifePush(nrf, true);
+                }
             }
         } else if (vfg_active) {
             if (fg_queue_.size() <= 2 &&
@@ -5816,7 +5844,7 @@ void App::RenderSettings(double t) {
                      {kContentX, y + 2.0f, w - 64.0f, y + 26.0f}, 11.5f, th::Rgba(th::kMuted));
             y += 30.0f;
 
-            if (profile_.neural_sr > 0 && dlss_ready_) {
+            if (profile_.neural_sr > 0 && dlss_ready_ && profile_.fg_engine != 1) {
                 wchar_t text[224];
                 swprintf_s(text,
                            L"DLSS SR %s active  -  %dx%d -> %dx%d  -  %.1f ms  -  %s",
@@ -5870,10 +5898,14 @@ void App::RenderSettings(double t) {
                          profile_.rife_output == 0 ? 1 : 0, y, W_RifeOutput,
                          profile_.dlss_fg >= 2 && profile_.fg_engine == 1);
             y += kRowH;
+            DrawDropdown(L"Neural rendering (DLSS 5)", {L"Off", L"On"},
+                         profile_.neural_nr > 0 ? 1 : 0, y, W_NeuralNr, NrAvailable());
+            y += kRowH;
             if (profile_.fg_engine == 1) {
                 ui_.Text(L"RIFE generates one frame per pair: a 30 fps game plays at 60. "
                          L"90/120 need the NVIDIA engine. The model is fixed (4.25 lite). "
-                         L"DLSS SR is bypassed here; clarity comes from the upscaler and "
+                         L"DLSS SR is bypassed here; neural rendering, when on, runs on the 1080p "
+                         L"stream before RIFE. Clarity comes from the upscaler and "
                          L"sharpening below.",
                          {kContentX, y + 2.0f, w - 64.0f, y + 46.0f}, 11.5f,
                          th::Rgba(th::kMuted));
@@ -5906,9 +5938,12 @@ void App::RenderSettings(double t) {
                 } else if (rife_ && rife_->ready()) {
                     swprintf_s(text,
                                L"RIFE %.0f fps shown  -  %.1f ms/frame  -  %dx%d engine  -  "
-                               L"content %.1f fps",
+                               L"content %.1f fps  -  %s",
                                rife_out_fps_, rife_ms_, rife_->width(), rife_->height(),
-                               fg_content_hz_);
+                               fg_content_hz_,
+                               profile_.neural_nr > 0 && nr_ready_
+                                   ? L"Neural Rendering before RIFE"
+                                   : L"Neural Rendering off");
                 } else {
                     swprintf_s(text, L"RIFE engine not loaded. %s", rife_note_.c_str());
                 }
@@ -6647,6 +6682,9 @@ void App::RenderStreamSettings(double t) {
                          {L"60 fps (one frame between each pair)", L"Pass-through"},
                          profile_.rife_output == 0 ? 1 : 0, y, W_RifeOutput,
                          profile_.dlss_fg >= 2 && profile_.fg_engine == 1);
+            y += row;
+            DrawDropdown(L"Neural rendering (DLSS 5)", {L"Off", L"On"},
+                         profile_.neural_nr > 0 ? 1 : 0, y, W_NeuralNr, NrAvailable());
             y += row;
             if (profile_.fg_engine != 1) {
                 DrawDropdown(L"Output frame rate",
