@@ -374,3 +374,32 @@ Settings > **Upscaling**:
 RIFE has no quality slider because only one model is wired (4.25 lite). The
 model is fixed; clarity comes from the upscaler, the target and sharpening.
 DLSS SR is bypassed in RIFE mode: RIFE takes the 1080p stream frames.
+
+### Why it felt like 30 fps (fixed 19 Nov 2026)
+
+Two separate faults:
+
+1. **Duplicate detection was exact-hash.** A 30 fps game arrives as 60 fps with
+   every other frame duplicated, but the two copies can differ by a count or two
+   after decoding. The hash missed them, so the app measured 60 fps of content
+   and passed every frame through: on screen that is 30 fps of motion repeated
+   twice, which reads as 30 fps.
+   Fix: compare a 64x64 sample with a small tolerance (mean < 1.2 counts, under
+   ~1.5 % of channels above 8). Now content reads ~29.8 fps and ~30 duplicates a
+   second are skipped.
+2. **The presentation schedule was uneven.** The held frame was shown when its
+   successor arrived, and the generated midpoint only after inference (~22 ms),
+   so intervals were 22 ms then 11 ms. Fix: delay the held frame by
+   `max(0, inference_ms - half_interval)`, then place the midpoint exactly half
+   an interval after it. Measured cadence is now **16.69 ms average** (60 fps)
+   with a 20-25 ms tail.
+
+Measured after both fixes, live session, 30 fps game:
+
+```
+[rife] 60 fps shown, 30 generated, 21.5 ms/frame,
+       cadence avg 16.69 ms max 24.97 ms, content 29.8 fps, dupes 30
+```
+
+Test hooks: `BRP_RIFE_SIM30` halves a 60 fps source to exercise the 30 -> 60
+path; `BRP_RIFE_FORCE_GEN` generates on every pair regardless of content.

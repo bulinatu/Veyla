@@ -2798,28 +2798,45 @@ bool App::FrameIsDuplicate(const media::DecodedFrame& frame) {
         return false;
     }
     // A duplicate from a 30 fps game is coded as skipped blocks, so the decoded
-    // pixels are identical. A 64x64 sample is enough to tell, and costs a few
-    // microseconds instead of hashing 8 MB.
-    uint64_t hash = 1469598103934665603ull;
-    const int cols = 64;
-    const int rows = 64;
+    // picture carries no motion. Compare a 64x64 sample with a small tolerance:
+    // an exact hash missed pairs whose decoder output differed by a count or two.
+    constexpr int kCols = 64;
+    constexpr int kRows = 64;
+    std::array<uint32_t, 4096> samples{};
     const size_t stride = static_cast<size_t>(frame.width) * 4;
-    for (int gy = 0; gy < rows; ++gy) {
-        const size_t y = (static_cast<size_t>(gy) * frame.height) / rows;
+    for (int gy = 0; gy < kRows; ++gy) {
+        const size_t y = (static_cast<size_t>(gy) * frame.height) / kRows;
         const uint8_t* row = frame.rgba.data() + y * stride;
-        for (int gx = 0; gx < cols; ++gx) {
-            const size_t x = (static_cast<size_t>(gx) * frame.width) / cols;
-            uint32_t px = 0;
-            std::memcpy(&px, row + x * 4, sizeof(px));
-            hash = (hash ^ px) * 1099511628211ull;
+        for (int gx = 0; gx < kCols; ++gx) {
+            const size_t x = (static_cast<size_t>(gx) * frame.width) / kCols;
+            std::memcpy(&samples[static_cast<size_t>(gy) * kCols + gx],
+                        row + x * 4, sizeof(uint32_t));
         }
     }
-    const bool duplicate = frame_sig_valid_ && hash == frame_sig_;
-    frame_sig_ = hash;
+    bool duplicate = false;
+    if (frame_sig_valid_) {
+        long long sum = 0;
+        int outliers = 0;
+        for (size_t i = 0; i < samples.size(); ++i) {
+            const uint32_t a = samples[i];
+            const uint32_t b = frame_samples_[i];
+            for (int c = 0; c < 3; ++c) {
+                const int d = std::abs(static_cast<int>((a >> (8 * c)) & 0xFF) -
+                                       static_cast<int>((b >> (8 * c)) & 0xFF));
+                sum += d;
+                if (d > 8) {
+                    ++outliers;
+                }
+            }
+        }
+        const double mean = static_cast<double>(sum) /
+                            (static_cast<double>(samples.size()) * 3.0);
+        duplicate = mean < 1.2 && outliers < 96;  // under ~1.5 % of channels
+    }
+    frame_samples_ = samples;
     frame_sig_valid_ = true;
     return duplicate;
 }
-
 bool App::ShouldDropDuplicate(const media::DecodedFrame& frame) {
     UpdateInterpolationMode();
     if (profile_.dlss_fg < 2 || !nr_ready_ || !nr_.present_mode()) {
@@ -2995,7 +3012,7 @@ void App::RifeThreadMain() {
         out.pq = false;
         // The held frame was shown when its successor arrived; the midpoint
         // belongs half an interval after that.
-        out.due = job.t1 + std::max(0.0, (job.t1 - job.t0) * 0.5);
+        out.due = job.base_due + std::max(0.0, (job.t1 - job.t0) * 0.5);
         {
             std::lock_guard<std::mutex> lock(rife_mutex_);
             rife_out_.push_back(std::move(out));
@@ -3013,7 +3030,12 @@ void App::RifePush(media::DecodedFrame& frame) {
         return;
     }
     if (FrameIsDuplicate(frame)) {
+        ++rife_dupes_;
         return;  // an identical pair has nothing to interpolate
+    }
+    static const bool sim30 = std::getenv("BRP_RIFE_SIM30") != nullptr;
+    if (sim30 && (++rife_sim_skip_ % 2) != 0) {
+        return;  // test hook: halve a 60 fps source so the 30 -> 60 path runs
     }
     // Content rate, for the status text: unique frames over a 0.75 s window.
     if (fg_window_at_ < 0.0) {
@@ -3042,7 +3064,8 @@ void App::RifePush(media::DecodedFrame& frame) {
     const double interval = t1 - rife_prev_t_;
     // Pass-through, or 60 fps content where a generated mid-frame adds nothing
     // (and would not fit the 8 ms budget). Show the frame as it arrives.
-    if (profile_.rife_output == 0 || (interval > 0.0 && interval < 0.025)) {
+    static const bool force_gen = std::getenv("BRP_RIFE_FORCE_GEN") != nullptr;
+    if (!force_gen && (profile_.rife_output == 0 || (interval > 0.0 && interval < 0.025))) {
         RifeOut direct;
         direct.rgba = frame.rgba;
         direct.width = frame.width;
@@ -3074,12 +3097,19 @@ void App::RifePush(media::DecodedFrame& frame) {
 
     // The frame we were holding is shown now: this is the one source interval
     // of delay that lets RIFE see both ends of the pair.
+    // Schedule the held frame late enough that the midpoint, which cannot be
+    // ready before the engine finishes (rife_ms_), lands exactly half an
+    // interval after it. Without this the cadence is 22 ms then 11 ms, which
+    // reads as 30 fps with a stutter.
+    const double half = std::max(0.0, (t1 - pair.t0) * 0.5);
+    const double offset = std::max(0.0, rife_ms_ / 1000.0 - half);
     RifeOut held;
     held.rgba = pair.a;
     held.width = pair.width;
     held.height = pair.height;
     held.pq = rife_prev_pq_;
-    held.due = t1;
+    held.due = t1 + offset;
+    pair.base_due = held.due;
     {
         std::lock_guard<std::mutex> lock(rife_mutex_);
         rife_out_.push_back(std::move(held));
@@ -3119,6 +3149,13 @@ void App::RifePresentDue() {
         presenter_.SetSourceFinal(false);
         presenter_.SetSourceFrame(pick.data(), w, h, pq);
         ++rife_shown_;
+        if (rife_last_show_ >= 0.0) {
+            const double dt = clock_ - rife_last_show_;
+            rife_interval_sum_ += dt;
+            rife_interval_max_ = std::max(rife_interval_max_, dt);
+            ++rife_interval_n_;
+        }
+        rife_last_show_ = clock_;
     }
     if (rife_rate_at_ < 0.0) {
         rife_rate_at_ = clock_;
@@ -3128,9 +3165,19 @@ void App::RifePresentDue() {
         rife_rate_at_ = clock_;
         rife_shown_ = 0;
         if (std::getenv("BRP_FG_PROBE")) {
-            std::fprintf(stderr, "[rife] %.0f fps shown, %d generated, %.1f ms/frame\n",
-                         rife_out_fps_, rife_generated_, rife_ms_);
+            const double avg = rife_interval_n_ > 0
+                                   ? rife_interval_sum_ * 1000.0 / rife_interval_n_
+                                   : 0.0;
+            std::fprintf(stderr,
+                         "[rife] %.0f fps shown, %d generated, %.1f ms/frame, "
+                         "cadence avg %.2f ms max %.2f ms, content %.1f fps, dupes %d\n",
+                         rife_out_fps_, rife_generated_, rife_ms_, avg,
+                         rife_interval_max_ * 1000.0, fg_content_hz_, rife_dupes_);
             rife_generated_ = 0;
+            rife_interval_sum_ = 0.0;
+            rife_interval_max_ = 0.0;
+            rife_interval_n_ = 0;
+            rife_dupes_ = 0;
         }
     }
 }

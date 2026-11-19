@@ -363,7 +363,9 @@ private:
     // every other frame duplicated; an identical pair has nothing to
     // interpolate, so duplicates are skipped and the worker multiplier is
     // chosen from the measured content rate and the requested output rate.
-    uint64_t frame_sig_ = 0;
+    // 64x64 sample of the previous frame, compared with a tolerance: a
+    // duplicated frame can differ by a few counts and still carry no motion.
+    std::array<uint32_t, 4096> frame_samples_{};
     bool frame_sig_valid_ = false;
     int fg_mult_live_ = -1;      // multiplier currently sent to the worker
     double fg_content_hz_ = 0.0; // measured unique-frame rate
@@ -387,6 +389,7 @@ private:
         int height = 0;
         double t0 = 0.0;
         double t1 = 0.0;
+        double base_due = 0.0;  // when the held frame is shown
     };
     struct RifeOut {
         std::vector<uint8_t> rgba;
@@ -409,6 +412,12 @@ private:
     int rife_shown_ = 0;
     double rife_rate_at_ = -1.0;
     double rife_out_fps_ = 0.0;
+    double rife_last_show_ = -1.0;
+    double rife_interval_sum_ = 0.0;
+    double rife_interval_max_ = 0.0;
+    int rife_interval_n_ = 0;
+    int rife_dupes_ = 0;
+    int rife_sim_skip_ = 0;
     std::wstring rife_note_;
 
     // neural rendering (DLSS Super Resolution, D3D12)
