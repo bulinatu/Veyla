@@ -37,7 +37,7 @@ private:
     void Run(std::filesystem::path exe_dir);
     void SetStatus(const std::wstring& text, float progress);
     bool Download(const std::wstring& url, const std::filesystem::path& path,
-                  std::string& detail);
+                  std::string& detail, float base, float span);
     bool BuildEngine(const std::filesystem::path& exe_dir,
                      const std::filesystem::path& runtime_dir, std::string& detail);
 

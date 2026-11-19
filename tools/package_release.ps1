@@ -108,18 +108,17 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 # --- optional RIFE engine (TensorRT, built for one GPU architecture) --------
 $rife = Join-Path $release "rife"
 if (Test-Path $rife) {
-    Copy-Item -LiteralPath $rife -Destination (Join-Path $dest "rife") -Recurse -Force
-    # runtime.txt points at a TensorRT install on this PC; it must not travel.
-    Remove-Item -LiteralPath (Join-Path $dest "rife\runtime.txt") -Force -ErrorAction SilentlyContinue
+    # Only the portable pieces: engine, model and the CUDA runtime. The
+    # downloaded zip, the extracted SDK and runtime.txt stay on this machine.
+    $rifeDest = Join-Path $dest "rife"
+    New-Item -ItemType Directory -Path $rifeDest -Force | Out-Null
+    foreach ($name in @("rife425_1080.engine", "rife425lite.onnx", "cudart64_13.dll")) {
+        $source = Join-Path $rife $name
+        if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination $rifeDest -Force
+        }
+    }
 }
-
-# --- keep runtime logs from the build machine out of the package -------------
-# Filter on Extension: -Include with -LiteralPath matched every file and wiped
-# the package once.
-Get-ChildItem -LiteralPath $dest -Recurse -File -ErrorAction SilentlyContinue |
-    Where-Object { $_.Extension -eq '.jsonl' -or $_.Extension -eq '.log' } |
-    Remove-Item -Force -ErrorAction SilentlyContinue
-
 # --- readme -----------------------------------------------------------------
 $readme = @"
 BetterRemotePlay $version - standalone build
@@ -164,11 +163,11 @@ Features and runtimes
 - nvidia-vfx\runtime\ contains the optional legacy NVIDIA VFG runtime. RTX VSR
   has been removed from the client; DLSS SR/DLAA, DLSS NR and DLSS Frame
   Generation are the supported neural paths.
-- rife\ contains a TensorRT engine for RIFE 4.25 lite, built for the GPU of the
-  machine this package came from. RIFE also needs TensorRT 10.16 and CUDA 13 on
-  the PC: point BRP_TENSORRT_DIR at a folder with nvinfer_10.dll and
-  cudart64_13.dll. Without them the app falls back to NVIDIA frame generation.
-  An engine built for another GPU will not load; rebuild it with trtexec.
+- rife\ holds the RIFE model, the matching CUDA 13 runtime (cudart64_13.dll) and
+  an engine built for the GPU of the machine this package came from. Press
+  "Set up RIFE" on Home to fetch TensorRT 10.16 automatically (1.9 GB) and build
+  an engine for the local GPU. An engine built for another GPU will not load:
+  delete it and press the button again.
 - The app is not affiliated with Sony Interactive Entertainment. No Sony
   artwork, code, keys or fonts are included.
 
@@ -181,12 +180,10 @@ Giving this to someone else
 - NVIDIA RTX GPU + a current driver are needed for DLSS SR, Neural Rendering
   and DLSS Frame Generation. Without one the app still streams and upscales
   with FSR1/Lanczos, and RIFE is unavailable.
-- RIFE is optional and not self-contained. It needs a TensorRT 10.16 + CUDA 13
-  runtime on the PC: put nvinfer_10.dll and cudart64_13.dll in rife\runtime
-  next to brp.exe, or set BRP_TENSORRT_DIR. The engine in rife\ was built for
-  the GPU of the machine this package came from; another GPU needs its own
-  engine built with trtexec (command in docs/15-frame-generation.md). Without
-  these the app falls back to NVIDIA and says so.
+- RIFE is optional. "Set up RIFE" on Home downloads TensorRT 10.16 from NVIDIA
+  and builds the engine for that PC (about 1.9 GB download, 3 GB free during
+  setup, 2-4 minutes). If a TensorRT 10.16 install already exists, it is reused.
+  Without it the app falls back to NVIDIA frame generation and says so.
 - The console must be on the same LAN with Remote Play enabled.
 
 Settings worth knowing
@@ -198,10 +195,11 @@ Settings worth knowing
   DLSS Frame Generation 2x at 1440p; also SR only and Low latency. Presets are
   saved and applied at the start of the next session (reconnect), never while
   streaming.
-- Home, top right: "Set up RIFE". It finds TensorRT on the PC, downloads the
-  RIFE model and builds the engine for this GPU. TensorRT itself comes from
-  NVIDIA's download page (browser click-through); the tool says where to point
-  BRP_TENSORRT_DIR. Without it, RIFE stays unavailable and NVIDIA is used.
+- Home, top right: "Set up RIFE". One click: finds a TensorRT 10.16 install or
+  downloads the official 1.9 GB Windows zip, extracts it under rife\tensorrt,
+  downloads the RIFE model, and builds the engine for this GPU. Needs about
+  3 GB free during setup. Without TensorRT, RIFE stays unavailable and NVIDIA
+  frame generation is used.
 - Settings > Upscaling > Interpolation engine: NVIDIA DLSS FG (fast) or RIFE
   4.25 lite (TensorRT). RIFE output is 60 fps (one generated frame per pair, so
   a 30 fps game plays at 60) or pass-through. Output frame rate (60/90/120) is

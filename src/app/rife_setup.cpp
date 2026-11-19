@@ -15,6 +15,12 @@ namespace {
 constexpr wchar_t kModelUrl[] =
     L"https://huggingface.co/t9749/rife-4.25-lite-onnx/resolve/main/rife_v425lite.onnx";
 
+// Official TensorRT 10.16 for Windows, CUDA 13.2. NVIDIA's page requires a
+// browser click, but this file is served straight from developer.download.
+constexpr wchar_t kTensorRtUrl[] =
+    L"https://developer.download.nvidia.com/compute/machine-learning/tensorrt/"
+    L"10.16.0/zip/TensorRT-10.16.0.72.Windows.amd64.cuda-13.2.zip";
+
 std::string Utf8(const std::wstring& text) {
     if (text.empty()) {
         return std::string();
@@ -94,6 +100,45 @@ std::filesystem::path FindTensorRt(const std::filesystem::path& exe_dir,
     return {};
 }
 
+bool Extract(const std::filesystem::path& zip, const std::filesystem::path& dest,
+             const std::string& filter, std::string& detail) {
+    std::error_code ec;
+    std::filesystem::create_directories(dest, ec);
+    wchar_t system_dir[MAX_PATH] = {};
+    ::GetSystemDirectoryW(system_dir, MAX_PATH);
+    const std::filesystem::path tar = std::filesystem::path(system_dir) / "tar.exe";
+    if (!std::filesystem::exists(tar, ec)) {
+        detail = "tar.exe is missing";
+        return false;
+    }
+    std::wstring command = L"\"" + tar.wstring() + L"\" -xf \"" + zip.wstring() + L"\" -C \"" +
+                           dest.wstring() + L"\"";
+    if (!filter.empty()) {
+        command += L" " + Widen(filter);
+    }
+    std::vector<wchar_t> mutable_command(command.begin(), command.end());
+    mutable_command.push_back(L'\0');
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!::CreateProcessW(tar.wstring().c_str(), mutable_command.data(), nullptr, nullptr, FALSE,
+                          CREATE_NO_WINDOW, nullptr, dest.wstring().c_str(), &startup,
+                          &process)) {
+        detail = "could not start tar.exe";
+        return false;
+    }
+    const DWORD wait = ::WaitForSingleObject(process.hProcess, 15 * 60 * 1000);
+    DWORD exit_code = 1;
+    ::GetExitCodeProcess(process.hProcess, &exit_code);
+    ::CloseHandle(process.hThread);
+    ::CloseHandle(process.hProcess);
+    if (wait != WAIT_OBJECT_0 || exit_code != 0) {
+        detail = "tar failed (exit " + std::to_string(exit_code) + ")";
+        return false;
+    }
+    return true;
+}
+
 }  // namespace
 
 RifeSetup::~RifeSetup() { Join(); }
@@ -161,10 +206,52 @@ void RifeSetup::Run(std::filesystem::path exe_dir) {
     SetStatus(L"Looking for TensorRT 10.16 on this PC...", -1.0f);
     std::wstring note;
     std::filesystem::path runtime = FindTensorRt(exe_dir, note);
+    const bool force_download = std::getenv("BRP_FORCE_TRT_DOWNLOAD") != nullptr;
+    if (force_download) {
+        runtime.clear();
+    }
     if (runtime.empty()) {
-        SetStatus(note, -1.0f);
-        state_.store(State::Failed);
-        return;
+        // Nothing installed: fetch the official Windows zip. NVIDIA's page needs
+        // a browser click, but the file itself is served without one.
+        const std::filesystem::path downloads = rife / "downloads";
+        std::filesystem::create_directories(downloads, ec);
+        const std::filesystem::path zip = downloads / "TensorRT-10.16.0.72.zip";
+        std::error_code zip_ec;
+        const auto zip_size = std::filesystem::exists(zip, zip_ec)
+                                  ? std::filesystem::file_size(zip, zip_ec)
+                                  : 0ull;
+        std::string detail;
+        if (zip_size > 1500ull * 1024ull * 1024ull) {
+            SetStatus(L"Using the TensorRT archive already downloaded.", 0.55f);
+        } else {
+            SetStatus(L"Downloading TensorRT 10.16 (1.9 GB, one time)...", 0.0f);
+            if (!Download(kTensorRtUrl, zip, detail, 0.0f, 0.55f)) {
+                SetStatus(L"TensorRT download failed: " + Widen(detail), -1.0f);
+                state_.store(State::Failed);
+                return;
+            }
+        }
+        SetStatus(L"Extracting TensorRT...", 0.56f);
+        const std::filesystem::path extract = rife / "tensorrt";
+        if (!Extract(zip, extract, std::string("TensorRT-10.16.0.72/bin"), detail)) {
+            SetStatus(L"TensorRT extraction failed: " + Widen(detail), -1.0f);
+            state_.store(State::Failed);
+            return;
+        }
+        runtime = extract / "TensorRT-10.16.0.72" / "bin";
+        if (!HasTensorRt(runtime)) {
+            SetStatus(L"TensorRT was extracted but nvinfer_10.dll is missing.", -1.0f);
+            state_.store(State::Failed);
+            return;
+        }
+        std::filesystem::remove(zip, ec);
+        // The runtime needs cudart; the app ships the matching CUDA 13 runtime.
+        const std::filesystem::path cudart = rife / "cudart64_13.dll";
+        if (std::filesystem::exists(cudart, ec) &&
+            !std::filesystem::exists(runtime / "cudart64_13.dll", ec)) {
+            std::filesystem::copy_file(cudart, runtime / "cudart64_13.dll",
+                                       std::filesystem::copy_options::overwrite_existing, ec);
+        }
     }
     std::fprintf(stderr, "[setup] TensorRT: %s\n", Utf8(runtime.wstring()).c_str());
 
@@ -178,15 +265,15 @@ void RifeSetup::Run(std::filesystem::path exe_dir) {
     const std::filesystem::path model = rife / "rife425lite.onnx";
     if (!std::filesystem::exists(model, ec) ||
         std::filesystem::file_size(model, ec) < 10u * 1024u * 1024u) {
-        SetStatus(L"Downloading the RIFE model (22 MB)...", 0.0f);
+        SetStatus(L"Downloading the RIFE model (22 MB)...", 0.62f);
         std::string detail;
-        if (!Download(kModelUrl, model, detail)) {
+        if (!Download(kModelUrl, model, detail, 0.62f, 0.10f)) {
             SetStatus(L"Model download failed: " + Widen(detail), -1.0f);
             state_.store(State::Failed);
             return;
         }
     }
-    SetStatus(L"RIFE model ready.", 0.35f);
+    SetStatus(L"RIFE model ready.", 0.72f);
     std::fprintf(stderr, "[setup] model ready\n");
 
     const std::filesystem::path engine = rife / "rife425_1080.engine";
@@ -210,7 +297,7 @@ void RifeSetup::Run(std::filesystem::path exe_dir) {
 }
 
 bool RifeSetup::Download(const std::wstring& url, const std::filesystem::path& path,
-                         std::string& detail) {
+                         std::string& detail, float base, float span) {
     URL_COMPONENTS parts{};
     parts.dwStructSize = sizeof(parts);
     parts.dwSchemeLength = static_cast<DWORD>(-1);
@@ -308,9 +395,9 @@ bool RifeSetup::Download(const std::wstring& url, const std::filesystem::path& p
         if (length > 0) {
             SetStatus(L"Downloading the RIFE model... " +
                           std::to_wstring(received * 100 / length) + L"%",
-                      length > 0 ? 0.05f + 0.30f * static_cast<float>(received) /
+                      length > 0 ? base + span * static_cast<float>(received) /
                                                static_cast<float>(length)
-                                 :  0.05f);
+                                 :  base);
         }
     }
     std::fclose(file);
