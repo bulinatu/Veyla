@@ -43,23 +43,35 @@ Acceptance (met):
   stable, AppHost wires the services.
 - The reference `brp` target still builds unchanged.
 
-## Stage 3 - New UI shell (next)
+## Stage 3 - New UI shell (working preview)
 
-Deliverables:
+Deliverables present:
 
-- `brpnext.exe` with Win32 window and D2D renderer.
-- Design tokens: typography, spacing, radii, colours, dark/light.
-- Components: sidebar, page header, button, toggle, dropdown, slider, status,
-  tooltip, modal, toast.
-- Pages: Home (real system/GPU/app data), Settings (typed config), Profiles,
-  Diagnostics (live counters from the foundation), About.
-- No streaming page yet; no fake "connected" state.
+- `brpnext.exe`: Win32 + D2D shell with the new dark/light design tokens.
+- Persistent sidebar (9 pages, collapsed mode), custom title bar, toasts.
+- Home with real OS/CPU/GPU/display facts and active configuration.
+- Settings hub with 11 categories, typed controls and immediate save.
+- Profiles page: create from current, apply, set default, delete, export and
+  import (JSON file dialogs).
+- Diagnostics page: real system facts, UI frame p50/p95/p99, report writer.
+- AI Video Engine page: capability checks for DLSS SR, DLSS-G worker, RIFE
+  engines and TensorRT runtime; unavailable backends are labelled missing.
+- Display/Overlay/Console/Streaming pages expose real settings and honest
+  stage notes where execution is not wired.
 
-Acceptance:
+Not yet in this stage:
 
-- Window opens, resizes, navigates, theme switches, settings persist.
-- Every visible control is bound to a real setting with validation.
-- UI thread never blocks on I/O.
+- The streaming service and media pipeline (Stage 4/5). Console/Streaming
+  pages do not connect yet and say so.
+- AI execution (Stage 6). The AI page persists choices and shows capabilities,
+  but does not run SR/FG.
+- The independent overlay window (Stage 7); the Overlay page is a layout
+  preview driven by saved values.
+
+Acceptance for the shell: window opens/resizes, navigation and theme work,
+settings survive restart, profiles and diagnostics work, no fake connected
+state. Verified manually on the reference 4090; `brp.exe` still builds and
+runs unchanged.
 
 ## Stage 4 - Streaming service (next)
 
@@ -146,7 +158,10 @@ Acceptance: clean install on a machine without the dev tree, update from
 - Stage 0: done (0.4.9).
 - Stage 1: done (five documents).
 - Stage 2: done (foundation library, AppHost, theme tokens, 79 tests).
-- Stage 3 onward: not started; no UI or streaming claims yet.
+- Stage 3: shell working (`brpnext.exe`), with streaming/AI execution and the
+  independent overlay deferred to Stages 4-7. No page claims a connection it
+  does not have.
+- Stage 4 onward: not started.
 
 ## Guardrails
 

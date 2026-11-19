@@ -32,6 +32,8 @@ public:
     virtual ~IProfileStore() = default;
     virtual Status List(std::vector<Profile>& out) = 0;
     virtual Status Save(const Profile& profile) = 0;
+    virtual Status Create(const std::string& name, const AppSettings& settings,
+                          Profile& out) = 0;
     virtual Status Delete(const std::string& id) = 0;
     virtual Status SetDefault(const std::string& id) = 0;
     virtual Status Import(const std::string& path, Profile& out) = 0;

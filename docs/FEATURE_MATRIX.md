@@ -62,5 +62,8 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
   `config` (typed settings, legacy import, profiles), `diagnostics` (logger,
   rolling p50/p95/p99, report), `app` (navigation, DI registry, AppHost),
   `ui/theme` (dark/light tokens) and `brp_next_tests` (79 assertions).
-- No streaming, AI or UI code has been moved yet; nothing in `brp.exe` was
-  removed. The old app still builds and runs.
+- Stage 3 shell is working as `brpnext.exe`: sidebar, theme switching, Home,
+  Settings, Profiles, Diagnostics, AI/Display/Console/Streaming/Overlay pages,
+  real system facts and persistent typed configuration. Streaming and AI
+  execution are still Stages 4-7; those pages say so.
+- `brp.exe` 0.4.9 still builds and runs; no streaming code was moved.

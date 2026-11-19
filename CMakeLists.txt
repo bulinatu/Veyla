@@ -331,3 +331,18 @@ target_link_libraries(brp_next_tests PRIVATE brp_next_core)
 if (MSVC)
     target_compile_options(brp_next_tests PRIVATE /W4 /permissive- /utf-8)
 endif()
+
+# --- BetterRemotePlay Next shell (Stage 3) -----------------------------------
+add_executable(brpnext
+    src/next/shell/main_next.cpp
+    src/next/shell/next_app.cpp
+    src/next/shell/settings_controls.cpp
+    src/next/ui/widgets.cpp
+    src/next/ui/theme.cpp
+    src/next/platform/system_info.cpp
+)
+target_link_libraries(brpnext PRIVATE brp_next_core brp_ui brp_media comdlg32 shell32 winmm)
+set_target_properties(brpnext PROPERTIES WIN32_EXECUTABLE TRUE)
+if (MSVC)
+    target_compile_options(brpnext PRIVATE /W4 /permissive- /utf-8)
+endif()

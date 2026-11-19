@@ -316,8 +316,11 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
     s.video.color_space = FlatJson::GetString(f, "video.color_space", s.video.color_space);
     s.video.sharpening = ClampInt(
         FlatJson::GetInt(f, "video.sharpening", s.video.sharpening), 0, 100);
-    s.video.render_target = ClampInt(
+    const int render_target = ClampInt(
         FlatJson::GetInt(f, "video.render_target", s.video.render_target), 0, 2160);
+    s.video.render_target = render_target == 1 ? 1080
+                                : (render_target == 2 ? 1440
+                                                     : (render_target == 3 ? 2160 : render_target));
 
     s.ai.super_resolution =
         FlatJson::GetBool(f, "ai.super_resolution", s.ai.super_resolution);
@@ -436,8 +439,10 @@ Status ImportLegacySettings(const std::filesystem::path& path, AppSettings& out,
         ClampInt(FlatJson::GetInt(flat, "frame_buffer", 1), 0, 3);
     out.video.hdr = out.streaming.hdr;
     out.video.sharpening = ClampInt(FlatJson::GetInt(flat, "sharpness", 10), 0, 100);
-    out.video.render_target =
-        ClampInt(FlatJson::GetInt(flat, "render_target", 0), 0, 2160);
+    const int legacy_target = ClampInt(FlatJson::GetInt(flat, "render_target", 0), 0, 2160);
+    out.video.render_target = legacy_target == 1 ? 1080
+                              : (legacy_target == 2 ? 1440
+                                                   : (legacy_target == 3 ? 2160 : legacy_target));
 
     out.ai.super_resolution = FlatJson::GetInt(flat, "neural_sr", 0) > 0;
     out.ai.sr_quality = ClampInt(FlatJson::GetInt(flat, "dlss_mode", 4), 0, 5);

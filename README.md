@@ -1,12 +1,12 @@
 # BetterRemotePlay
 
 > **BetterRemotePlay Next (rebuild in progress).** The working product is still
-> `brp.exe` 0.4.9. A new, modular application is being built alongside it:
-> Stages 1-2 of `docs/IMPLEMENTATION_ROADMAP.md` are complete (architecture,
-> typed configuration, profiles, diagnostics, navigation, AppHost, theme tokens).
-> The new foundation is tested with `brp_next_tests` (79 assertions). No
-> streaming, AI or UI code has been moved yet, and the existing app is
-> untouched. Start with `docs/ARCHITECTURE.md` and `docs/REPOSITORY_ANALYSIS.md`.
+> `brp.exe` 0.4.9. The new application is `brpnext.exe`: Stage 3 shell with the
+> new design system, typed settings, profiles, diagnostics, AI capability
+> checks and real system facts. Streaming and AI execution are Stages 4-7 and
+> are not claimed by the UI. Foundation tests: `brp_next_tests` (79 assertions).
+> Start with `docs/ARCHITECTURE.md`, `docs/IMPLEMENTATION_ROADMAP.md` and
+> `docs/FEATURE_MATRIX.md`.
 
 A better PlayStation 5 → PC Remote Play client.
 
