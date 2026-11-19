@@ -5,14 +5,14 @@ Resolution, DLSS Frame Generation (through the closed NeuralScreen worker),
 GPU colour and sharpening, a custom PS5-style UI and native DualSense support.
 Build `0.3`. Run `git log -1` for the current commit.
 
-Version 0.4.1 (19 Nov 2026).
+Version 0.4.2 (19 Nov 2026).
 
-- Standalone: `dist\BetterRemotePlay-0.4.1-standalone.zip`, 602.2 MB, SHA256
-  `8A1848709AC760020CC70C06BEB78083688272A978ECD522542D5379F7FD65C0`.
-- Update: `dist\BetterRemotePlay-0.4.1-update.exe`, **0.71 MB, one file**, SHA256
-  `494D5CADED094583EF44C14BC1B0EED6C3D4C94FFB84A8CDBA6D92ECFB67706A`.
+- Standalone: `dist\BetterRemotePlay-0.4.2-standalone.zip`, 602.2 MB, SHA256
+  `4E868B9B2F4F903CA72710FDBC71FDA66DD94EA7AB9B592378B898D8B83C7AE9`.
+- Update: `dist\BetterRemotePlay-0.4.2-update.exe`, **0.71 MB, one file**, SHA256
+  `D62A2184B3E1E411A118436C5FFC737671090C382D14AC541E4421535B4E1DE2`.
 - `dist\BetterRemotePlay\brp.exe` matches `build\Release\brp.exe`
-  (SHA256 `78B5C6971D13C11E4C60C51929B292DD876046750E0891390738001271C857FE`).
+  (SHA256 `F644528304EA3C22653A2037EE359562F7F4719C771C7A7415ED268D9B5BC2C2`).
 - The package includes `rife\rife425_1080.engine` (12.5 MB, built for the
   reference RTX 4090), the RIFE model, `cudart64_13.dll` and `update.exe`.
 - No `session.json`, no pairing data, no runtime logs.
