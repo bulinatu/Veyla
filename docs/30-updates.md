@@ -64,3 +64,19 @@ Applied to an extracted 0.3 folder: copied 2 files, wrote version 0.4, removed
   zip if you need to recover.
 - Files are compared by size first and hash second, so a same-size change is
   still caught.
+
+## Single-file update.exe (0.4.1)
+
+Since 0.4.1 the patch is one executable instead of a zip of files:
+
+```
+BetterRemotePlay-0.4.1-update.exe
+```
+
+`tools\make_update.ps1` packs the changed files into a zip, appends it to
+`brp_update.exe`, then writes a 24-byte footer (`BRPUP01`, offset, size).
+
+Run it in the app folder. It reads its own tail, extracts the zip with
+`tar.exe`, removes `_delete.txt` entries, writes `version.txt` from
+`_version.txt`, deletes the markers and starts the app. The older folder form
+(`payload\`) still works if someone has an old patch zip.

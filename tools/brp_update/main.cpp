@@ -25,6 +25,8 @@ namespace fs = std::filesystem;
 
 namespace {
 
+constexpr char kFooterMagic[8] = {'B', 'R', 'P', 'U', 'P', '0', '1', '\0'};
+
 std::string Utf8(const std::wstring& text) {
     if (text.empty()) {
         return {};
@@ -109,6 +111,123 @@ int wmain(int argc, wchar_t** argv) {
         std::printf("Press Enter to close.");
         std::getchar();
         return 1;
+    }
+
+    // Single-file form: the patch zip is appended to this exe, followed by a
+    // 24-byte footer. Extract it, then fall through to the same delete/version
+    // handling the folder form uses.
+    {
+        wchar_t self_path[MAX_PATH] = {};
+        ::GetModuleFileNameW(nullptr, self_path, MAX_PATH);
+        std::ifstream self(self_path, std::ios::binary | std::ios::ate);
+        if (self) {
+            const std::streamoff size = self.tellg();
+            if (size > 24) {
+                self.seekg(size - 24);
+                char magic[8] = {};
+                uint64_t offset = 0;
+                uint64_t length = 0;
+                self.read(magic, sizeof(magic));
+                self.read(reinterpret_cast<char*>(&offset), sizeof(offset));
+                self.read(reinterpret_cast<char*>(&length), sizeof(length));
+                if (std::memcmp(magic, kFooterMagic, sizeof(magic)) == 0 && length > 0 &&
+                    static_cast<uint64_t>(size) >= offset + length) {
+                    const fs::path temp_zip = dir / "_update_payload.zip";
+                    std::vector<char> buffer(256 * 1024);
+                    std::ofstream out(temp_zip, std::ios::binary | std::ios::trunc);
+                    self.seekg(static_cast<std::streamoff>(offset));
+                    uint64_t left = length;
+                    while (left > 0 && self) {
+                        const size_t chunk =
+                            static_cast<size_t>(std::min<uint64_t>(left, buffer.size()));
+                        self.read(buffer.data(), static_cast<std::streamsize>(chunk));
+                        out.write(buffer.data(), static_cast<std::streamsize>(chunk));
+                        left -= chunk;
+                    }
+                    out.close();
+                    if (left != 0) {
+                        std::printf("Embedded payload is truncated.\n");
+                        return 1;
+                    }
+                    wchar_t system_dir[MAX_PATH] = {};
+                    ::GetSystemDirectoryW(system_dir, MAX_PATH);
+                    const fs::path tar = fs::path(system_dir) / "tar.exe";
+                    std::wstring command = L"\"" + tar.wstring() + L"\" -xf \"" +
+                                           temp_zip.wstring() + L"\" -C \"" +
+                                           dir.wstring() + L"\"";
+                    std::vector<wchar_t> mutable_command(command.begin(), command.end());
+                    mutable_command.push_back(L'\0');
+                    STARTUPINFOW startup{};
+                    startup.cb = sizeof(startup);
+                    PROCESS_INFORMATION process{};
+                    const BOOL started =
+                        ::CreateProcessW(tar.wstring().c_str(), mutable_command.data(), nullptr,
+                                         nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
+                                         dir.wstring().c_str(), &startup, &process);
+                    if (!started) {
+                        std::printf("Could not start tar.exe.\n");
+                        return 1;
+                    }
+                    ::WaitForSingleObject(process.hProcess, 5 * 60 * 1000);
+                    DWORD exit_code = 1;
+                    ::GetExitCodeProcess(process.hProcess, &exit_code);
+                    ::CloseHandle(process.hThread);
+                    ::CloseHandle(process.hProcess);
+                    std::error_code ec;
+                    fs::remove(temp_zip, ec);
+                    if (exit_code != 0) {
+                        std::printf("Extracting the payload failed (tar exit %lu).\n",
+                                    exit_code);
+                        return 1;
+                    }
+                    std::printf("Applied embedded payload.\n");
+                }
+            }
+        }
+    }
+
+    if (!fs::exists(dir / "payload")) {
+        // Single-file updates unpack straight into the folder, so there is no
+        // payload\ to copy. Only the delete list and version remain.
+        const fs::path deletes = dir / "_delete.txt";
+        if (fs::exists(deletes)) {
+            std::ifstream list(deletes);
+            std::string line;
+            int removed = 0;
+            while (std::getline(list, line)) {
+                while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
+                    line.pop_back();
+                }
+                if (line.empty()) {
+                    continue;
+                }
+                std::error_code ec;
+                if (fs::remove(dir / fs::path(line), ec)) {
+                    ++removed;
+                }
+            }
+            std::error_code ec;
+            fs::remove(deletes, ec);
+            std::printf("Removed %d obsolete file(s).\n", removed);
+        }
+        std::string version;
+        const fs::path version_marker = dir / "_version.txt";
+        if (fs::exists(version_marker)) {
+            std::ifstream in(version_marker);
+            std::getline(in, version);
+            std::error_code ec;
+            fs::remove(version_marker, ec);
+            std::ofstream out(dir / "version.txt", std::ios::trunc);
+            out << version << "\n";
+        }
+        std::printf("\nUpdate complete%s%s.\n", version.empty() ? "" : ": version ",
+                    version.c_str());
+        if (launch) {
+            const fs::path exe = dir / "brp.exe";
+            ::ShellExecuteW(nullptr, L"open", exe.wstring().c_str(), nullptr,
+                            dir.wstring().c_str(), SW_SHOWNORMAL);
+        }
+        return 0;
     }
 
     const fs::path payload = dir / "payload";

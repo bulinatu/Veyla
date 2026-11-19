@@ -492,3 +492,19 @@ serialization error. Instead of failing every session, the app deletes that
 engine, falls back to NVIDIA for the current session, and Home offers
 **Set up RIFE** again. Verified by replacing the engine with 2 MB of random
 bytes: detected, removed, stream started on NVIDIA.
+
+### 0.4.1 - another GPU (RTX 5080) and late inferences
+
+- **Engine validation.** Setup used to skip building when
+  `rife425_1080.engine` existed, even if it was the shipped sm89 engine. On an
+  RTX 5080 (sm120) that meant a "ready" setup with an engine that could never
+  load. Setup now opens the engine with the local runtime first; a rejected
+  engine is deleted and rebuilt for the GPU in the machine. `EnsureRife` still
+  removes one that fails at session start.
+- **Spike headroom.** The presentation offset used the last inference time, so a
+  single slow frame moved the midpoint late (a visible dropped frame on cards
+  whose clocks spike). It now uses the p90 of the last 12 inferences, which
+  spreads the delay slightly instead of missing a slot. The extra delay stays
+  inside the 50 ms budget.
+- Measured path on the reference 4090 is unchanged (cadence 16.6-16.9 ms); the
+  changes are architecture-agnostic and take effect when setup rebuilds.

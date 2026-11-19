@@ -1,5 +1,7 @@
 #include "app/rife_setup.h"
 
+#include "media/rife.h"
+
 #include <windows.h>
 #include <winhttp.h>
 
@@ -277,8 +279,21 @@ void RifeSetup::Run(std::filesystem::path exe_dir) {
     std::fprintf(stderr, "[setup] model ready\n");
 
     const std::filesystem::path engine = rife / "rife425_1080.engine";
-    if (!std::filesystem::exists(engine, ec) ||
-        std::filesystem::file_size(engine, ec) < 1024u * 1024u) {
+    bool engine_ok = false;
+    if (std::filesystem::exists(engine, ec) &&
+        std::filesystem::file_size(engine, ec) >= 1024u * 1024u) {
+        // Presence is not enough: an engine built for another GPU architecture
+        // (for example the shipped sm89 one on an RTX 5080) must be replaced.
+        media::Rife probe;
+        std::string probe_detail;
+        engine_ok = probe.Load(runtime.string(), engine.string(), 1920, 1080, probe_detail);
+        if (!engine_ok) {
+            std::fprintf(stderr, "[setup] existing engine rejected: %s\n",
+                         probe_detail.c_str());
+            std::filesystem::remove(engine, ec);
+        }
+    }
+    if (!engine_ok) {
         std::fprintf(stderr, "[setup] building engine\n");
         SetStatus(L"Building the engine for this GPU (2-4 minutes; the app stays "
                   L"responsive)...",

@@ -941,7 +941,7 @@ void App::RenderBoot(double t) {
              th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    ui_.Text(L"v0.4", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
+    ui_.Text(L"v0.4.1", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
              th::Rgba(th::kMuted, 0.55f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
 }
@@ -3093,6 +3093,15 @@ void App::RifeThreadMain() {
             }
         }
         rife_ms_ = rife_->last_ms();
+        // Keep a small window and schedule with its p90: a single slow
+        // inference should not make the next midpoint miss its slot (seen as an
+        // occasional dropped frame on faster cards with spikier clocks).
+        rife_samples_[static_cast<size_t>(rife_sample_pos_)] = rife_ms_;
+        rife_sample_pos_ = (rife_sample_pos_ + 1) % static_cast<int>(rife_samples_.size());
+        rife_sample_n_ = std::min(rife_sample_n_ + 1, static_cast<int>(rife_samples_.size()));
+        std::array<double, 12> sorted = rife_samples_;
+        std::sort(sorted.begin(), sorted.begin() + rife_sample_n_);
+        rife_headroom_ms_.store(sorted[static_cast<size_t>(rife_sample_n_) * 9 / 10]);
         ++rife_generated_;
     }
 }
@@ -3174,7 +3183,8 @@ void App::RifePush(media::DecodedFrame& frame, bool unique) {
     // interval after it. Without this the cadence is 22 ms then 11 ms, which
     // reads as 30 fps with a stutter.
     const double half = std::max(0.0, (t1 - pair.t0) * 0.5);
-    const double offset = std::max(0.0, rife_ms_ / 1000.0 - half);
+    const double headroom = std::max(rife_ms_, rife_headroom_ms_.load());
+    const double offset = std::max(0.0, headroom / 1000.0 - half);
     RifeOut held;
     held.rgba = pair.a;
     held.width = pair.width;
@@ -6468,7 +6478,7 @@ void App::RenderSettings(double t) {
             break;
         }
         case Tab::About: {
-            ui_.Text(L"BetterRemotePlay 0.4", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
+            ui_.Text(L"BetterRemotePlay 0.4.1", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
                      th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 48.0f;
             ui_.Text(L"A PS5 to PC Remote Play client with a real post-process pipeline: "

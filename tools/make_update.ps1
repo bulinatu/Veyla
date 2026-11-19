@@ -1,12 +1,12 @@
-# Builds a small update zip between two packaged versions.
+# Builds a single self-contained update.exe between two packaged versions.
 #
 #   powershell -File tools\make_update.ps1 `
-#       -BaselineZip dist\BetterRemotePlay-0.3-standalone.zip `
-#       -NewFolder dist\BetterRemotePlay -Version 0.4
+#       -BaselineZip dist\BetterRemotePlay-0.4-standalone.zip `
+#       -NewFolder dist\BetterRemotePlay -Version 0.4.1
 #
-# The result contains update.exe, payload\ (changed and new files only),
-# delete.txt (files that no longer exist) and version.txt. The friend extracts
-# it into the app folder and runs update.exe.
+# The output is one file: update.exe. The changed files are packed in a zip and
+# appended to the updater, followed by a 24-byte footer (magic, offset, size).
+# Run it inside the app folder; it extracts itself over brp.exe.
 
 param(
     [Parameter(Mandatory = $true)][string]$BaselineZip,
@@ -36,21 +36,17 @@ if (-not (Test-Path -LiteralPath $updateExe)) {
 $temp = Join-Path $env:TEMP ("brp_patch_" + [guid]::NewGuid().ToString("N"))
 $baseDir = Join-Path $temp "base"
 $stage = Join-Path $temp "stage"
-$payload = Join-Path $stage "payload"
-New-Item -ItemType Directory -Path $baseDir, $payload -Force | Out-Null
+New-Item -ItemType Directory -Path $baseDir, $stage -Force | Out-Null
 
 try {
     Expand-Archive -LiteralPath $baseline -DestinationPath $baseDir -Force
-    # The standalone zips wrap everything in a "BetterRemotePlay" folder.
     $inner = @(Get-ChildItem -LiteralPath $baseDir)
     if ($inner.Count -eq 1 -and $inner[0].PSIsContainer) {
         $baseDir = $inner[0].FullName
     }
 
-    Copy-Item -LiteralPath $updateExe -Destination (Join-Path $stage "update.exe") -Force
-    Set-Content -LiteralPath (Join-Path $stage "version.txt") -Value $Version -Encoding ASCII
-
-    $skip = @("update.exe", "payload", "delete.txt", "version.txt")
+    $skip = @("update.exe", "payload", "delete.txt", "_delete.txt", "version.txt",
+              "_version.txt")
     $deletes = New-Object System.Collections.Generic.List[string]
     $added = 0
     $changed = 0
@@ -72,7 +68,7 @@ try {
         }
         if ($same) { return }
 
-        $target = Join-Path $payload $rel
+        $target = Join-Path $stage $rel
         New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
         Copy-Item -LiteralPath $_.FullName -Destination $target -Force
         if (Test-Path -LiteralPath $oldFile) { $changed++ } else { $added++ }
@@ -85,24 +81,41 @@ try {
         }
     }
     if ($deletes.Count -gt 0) {
-        Set-Content -LiteralPath (Join-Path $stage "delete.txt") -Value $deletes -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $stage "_delete.txt") -Value $deletes -Encoding ASCII
     }
+    Set-Content -LiteralPath (Join-Path $stage "_version.txt") -Value $Version -Encoding ASCII
+
+    $payloadZip = Join-Path $temp "payload.zip"
+    Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $payloadZip -CompressionLevel Optimal
 
     if ([string]::IsNullOrWhiteSpace($Out)) {
-        $Out = Join-Path $root ("dist\BetterRemotePlay-$Version-update.zip")
+        $Out = Join-Path $root ("dist\BetterRemotePlay-$Version-update.exe")
     } else {
         $Out = Resolve-UnderRoot $Out
     }
     if (Test-Path -LiteralPath $Out) { Remove-Item -LiteralPath $Out -Force }
-    Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $Out -CompressionLevel Optimal
 
-    $size = [math]::Round((Get-Item -LiteralPath $Out).Length / 1MB, 1)
-    "Patch:   $Out"
+    $baseBytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $updateExe).Path)
+    $zipBytes = [System.IO.File]::ReadAllBytes($payloadZip)
+    $stream = [System.IO.File]::Create($Out)
+    try {
+        $stream.Write($baseBytes, 0, $baseBytes.Length)
+        $stream.Write($zipBytes, 0, $zipBytes.Length)
+        $magic = [System.Text.Encoding]::ASCII.GetBytes("BRPUP01")
+        $stream.Write($magic, 0, 8)                       # 7 chars + the NUL byte
+        $stream.Write([BitConverter]::GetBytes([uint64]$baseBytes.Length), 0, 8)
+        $stream.Write([BitConverter]::GetBytes([uint64]$zipBytes.Length), 0, 8)
+    } finally {
+        $stream.Close()
+    }
+
+    $size = [math]::Round((Get-Item -LiteralPath $Out).Length / 1MB, 2)
+    "Update:  $Out"
     "Version: $Version"
     "Added:   $added file(s)"
     "Changed: $changed file(s)"
     "Deleted: $($deletes.Count) file(s)"
-    "Size:    $size MB"
+    "Size:    $size MB (single file)"
 } finally {
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
 }

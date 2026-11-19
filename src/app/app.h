@@ -426,6 +426,10 @@ private:
     int rife_dupes_ = 0;
     int rife_sim_skip_ = 0;
     std::wstring rife_note_;
+    std::atomic<double> rife_headroom_ms_{0.0};
+    std::array<double, 12> rife_samples_{};
+    int rife_sample_pos_ = 0;
+    int rife_sample_n_ = 0;
     RifeSetup rife_setup_;
     bool setup_modal_ = false;
 
