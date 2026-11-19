@@ -101,8 +101,8 @@ try {
     try {
         $stream.Write($baseBytes, 0, $baseBytes.Length)
         $stream.Write($zipBytes, 0, $zipBytes.Length)
-        $magic = [System.Text.Encoding]::ASCII.GetBytes("BRPUP01")
-        $stream.Write($magic, 0, 8)                       # 7 chars + the NUL byte
+        $magic = [byte[]](0x42, 0x52, 0x50, 0x55, 0x50, 0x30, 0x31, 0x00)  # BRPUP01\0
+        $stream.Write($magic, 0, 8)
         $stream.Write([BitConverter]::GetBytes([uint64]$baseBytes.Length), 0, 8)
         $stream.Write([BitConverter]::GetBytes([uint64]$zipBytes.Length), 0, 8)
     } finally {

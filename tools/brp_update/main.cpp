@@ -213,8 +213,10 @@ int wmain(int argc, wchar_t** argv) {
         std::string version;
         const fs::path version_marker = dir / "_version.txt";
         if (fs::exists(version_marker)) {
-            std::ifstream in(version_marker);
-            std::getline(in, version);
+            {
+                std::ifstream in(version_marker);
+                std::getline(in, version);
+            }
             std::error_code ec;
             fs::remove(version_marker, ec);
             std::ofstream out(dir / "version.txt", std::ios::trunc);
