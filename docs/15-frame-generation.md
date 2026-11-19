@@ -358,3 +358,19 @@ A still from that session shows the stream sharp at 1440p. The HUD reports
 `RIFE <shown> fps  <ms>/frame`, and the settings page shows the engine size and
 the measured content rate. Quality versus DLSS FG on the same scene has not been
 compared side by side yet.
+
+### Where the settings are
+
+Settings > **Upscaling**:
+
+| Control | What it does |
+| --- | --- |
+| Interpolation engine | NVIDIA DLSS FG (fast) or RIFE 4.25 lite (TensorRT) |
+| RIFE output | 60 fps (one frame between each pair) or Pass-through |
+| Output frame rate | NVIDIA only: Match display / 60 / 90 / 120 |
+| Upscaler, Upscale target | Apply to both engines (FSR1/Lanczos/etc.) |
+| Colour > Sharpening | Applies to both; the clearness control for RIFE |
+
+RIFE has no quality slider because only one model is wired (4.25 lite). The
+model is fixed; clarity comes from the upscaler, the target and sharpening.
+DLSS SR is bypassed in RIFE mode: RIFE takes the 1080p stream frames.

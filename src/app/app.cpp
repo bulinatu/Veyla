@@ -254,6 +254,7 @@ enum WidgetId {
     W_DlssFg = 79,
     W_FgTarget = 78,
     W_FgEngine = 86,
+    W_RifeOutput = 87,
     W_NrOrder = 66,
     W_NeuralNr = 67,
     W_NrPasses = 68,
@@ -1471,6 +1472,14 @@ void App::ApplyDropdown(int id, int index) {
             stream_note_ = profile_.dlss_fg >= 2
                                ? "Frame generation on; the multiplier follows the content and the target."
                                : "DLSS Frame Generation off.";
+            break;
+        }
+        case W_RifeOutput: {
+            profile_.rife_output = index == 1 ? 0 : 60;
+            SaveProfile();
+            stream_note_ = profile_.rife_output == 0
+                               ? "RIFE pass-through: source frames only."
+                               : "RIFE: one generated frame between each pair.";
             break;
         }
         case W_FgEngine: {
@@ -3030,6 +3039,31 @@ void App::RifePush(media::DecodedFrame& frame) {
     }
 
     const double t1 = clock_;
+    const double interval = t1 - rife_prev_t_;
+    // Pass-through, or 60 fps content where a generated mid-frame adds nothing
+    // (and would not fit the 8 ms budget). Show the frame as it arrives.
+    if (profile_.rife_output == 0 || (interval > 0.0 && interval < 0.025)) {
+        RifeOut direct;
+        direct.rgba = frame.rgba;
+        direct.width = frame.width;
+        direct.height = frame.height;
+        direct.pq = frame.pq;
+        direct.due = t1;
+        {
+            std::lock_guard<std::mutex> lock(rife_mutex_);
+            rife_out_.push_back(std::move(direct));
+            while (rife_out_.size() > 3) {
+                rife_out_.pop_front();
+            }
+        }
+        rife_prev_ = frame.rgba;
+        rife_prev_w_ = frame.width;
+        rife_prev_h_ = frame.height;
+        rife_prev_pq_ = frame.pq;
+        rife_prev_t_ = t1;
+        return;
+    }
+
     RifePair pair;
     pair.a = std::move(rife_prev_);
     pair.b = frame.rgba;
@@ -3330,6 +3364,10 @@ void App::PadThreadMain() {
 }
 
 void App::SaveProfile() {
+    if (std::getenv("BRP_PROFILE_PROBE")) {
+        std::fprintf(stderr, "[profile] save engine=%d rife_out=%d target=%d\n",
+                     profile_.fg_engine, profile_.rife_output, profile_.fg_target);
+    }
     std::string detail;
     session::Save(profile_, session::DefaultProfilePath(), detail);
 }
@@ -5780,13 +5818,31 @@ void App::RenderSettings(double t) {
                          profile_.fg_engine == 1 ? 1 : 0, y, W_FgEngine,
                          profile_.dlss_fg >= 2);
             y += kRowH;
-            DrawDropdown(L"Output frame rate",
-                         {L"Match display", L"60 fps", L"90 fps", L"120 fps"},
-                         profile_.fg_target == 60
-                             ? 1
-                             : (profile_.fg_target == 90 ? 2 : (profile_.fg_target == 120 ? 3 : 0)),
-                         y, W_FgTarget, profile_.dlss_fg >= 2);
+            DrawDropdown(L"RIFE output",
+                         {L"60 fps (one frame between each pair)", L"Pass-through"},
+                         profile_.rife_output == 0 ? 1 : 0, y, W_RifeOutput,
+                         profile_.dlss_fg >= 2 && profile_.fg_engine == 1);
             y += kRowH;
+            if (profile_.fg_engine == 1) {
+                ui_.Text(L"RIFE generates one frame per pair: a 30 fps game plays at 60. "
+                         L"90/120 need the NVIDIA engine. The model is fixed (4.25 lite). "
+                         L"DLSS SR is bypassed here; clarity comes from the upscaler and "
+                         L"sharpening below.",
+                         {kContentX, y + 2.0f, w - 64.0f, y + 46.0f}, 11.5f,
+                         th::Rgba(th::kMuted));
+                y += 50.0f;
+            }
+            if (profile_.fg_engine != 1) {
+                DrawDropdown(L"Output frame rate",
+                             {L"Match display", L"60 fps", L"90 fps", L"120 fps"},
+                             profile_.fg_target == 60
+                                 ? 1
+                                 : (profile_.fg_target == 90
+                                        ? 2
+                                        : (profile_.fg_target == 120 ? 3 : 0)),
+                             y, W_FgTarget, profile_.dlss_fg >= 2);
+                y += kRowH;
+            }
 
             if (frame_gen_ >= 2 && fg_ready_) {
                 wchar_t text[192];
@@ -6540,12 +6596,21 @@ void App::RenderStreamSettings(double t) {
                          profile_.fg_engine == 1 ? 1 : 0, y, W_FgEngine,
                          profile_.dlss_fg >= 2);
             y += row;
-            DrawDropdown(L"Output frame rate",
-                         {L"Match display", L"60 fps", L"90 fps", L"120 fps"},
-                         profile_.fg_target == 60
-                             ? 1
-                             : (profile_.fg_target == 90 ? 2 : (profile_.fg_target == 120 ? 3 : 0)),
-                         y, W_FgTarget, profile_.dlss_fg >= 2);
+            DrawDropdown(L"RIFE output",
+                         {L"60 fps (one frame between each pair)", L"Pass-through"},
+                         profile_.rife_output == 0 ? 1 : 0, y, W_RifeOutput,
+                         profile_.dlss_fg >= 2 && profile_.fg_engine == 1);
+            y += row;
+            if (profile_.fg_engine != 1) {
+                DrawDropdown(L"Output frame rate",
+                             {L"Match display", L"60 fps", L"90 fps", L"120 fps"},
+                             profile_.fg_target == 60
+                                 ? 1
+                                 : (profile_.fg_target == 90
+                                        ? 2
+                                        : (profile_.fg_target == 120 ? 3 : 0)),
+                             y, W_FgTarget, profile_.dlss_fg >= 2);
+            }
             y += row;
             break;
         }
