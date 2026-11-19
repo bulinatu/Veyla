@@ -307,3 +307,27 @@ file(GLOB BRP_JER_SRC "${CHIAKI_ROOT}/third-party/jerasure/src/*.c")
 target_sources(brp_session PRIVATE ${BRP_GF_SRC} ${BRP_JER_SRC})
 target_sources(brp_session PRIVATE "${CMAKE_SOURCE_DIR}/src/session/holepunch_stub.c")
 target_sources(brp_session PRIVATE "${CHIAKI_ROOT}/lib/src/fec.c")
+
+# --- BetterRemotePlay Next foundation ---------------------------------------
+# Independent of the working brp.exe target. No Windows headers in core.
+add_library(brp_next_core STATIC
+    src/next/config/flat_json.cpp
+    src/next/config/settings.cpp
+    src/next/config/profiles.cpp
+    src/next/diagnostics/log.cpp
+    src/next/diagnostics/metrics.cpp
+    src/next/app/navigation.cpp
+    src/next/app/app_host.cpp
+    src/next/ui/theme.cpp
+)
+target_include_directories(brp_next_core PUBLIC src/next)
+target_compile_definitions(brp_next_core PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
+if (MSVC)
+    target_compile_options(brp_next_core PRIVATE /W4 /permissive- /utf-8)
+endif()
+
+add_executable(brp_next_tests src/next/tests/main.cpp)
+target_link_libraries(brp_next_tests PRIVATE brp_next_core)
+if (MSVC)
+    target_compile_options(brp_next_tests PRIVATE /W4 /permissive- /utf-8)
+endif()

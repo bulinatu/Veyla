@@ -1,5 +1,13 @@
 # BetterRemotePlay
 
+> **BetterRemotePlay Next (rebuild in progress).** The working product is still
+> `brp.exe` 0.4.9. A new, modular application is being built alongside it:
+> Stages 1-2 of `docs/IMPLEMENTATION_ROADMAP.md` are complete (architecture,
+> typed configuration, profiles, diagnostics, navigation, AppHost, theme tokens).
+> The new foundation is tested with `brp_next_tests` (79 assertions). No
+> streaming, AI or UI code has been moved yet, and the existing app is
+> untouched. Start with `docs/ARCHITECTURE.md` and `docs/REPOSITORY_ANALYSIS.md`.
+
 A better PlayStation 5 → PC Remote Play client.
 
 **Status:** **Live** — pairs with a real PS5, streams 1080p60 video (HEVC/D3D11VA) and Opus audio through the post-process pipeline.
