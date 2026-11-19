@@ -23,7 +23,7 @@ RTX 4090). The package contains no `session.json` or pairing data.
 | Frame generation | Two engines. NVIDIA DLSS FG through the worker: 120.0 fps displayed on 240 Hz. RIFE 4.25 lite through TensorRT: a 30 fps stream plays at 60, cadence 16.69 ms average, 22 ms/frame, 0 underruns. Output targets 60/90/120 with duplicate-aware adaptive multiplier. |
 | Launch presets | Launch (SR UQ + FG 2x), SR only, Low latency. Saved while streaming; the chain applies at the next start. |
 | Colour | 11 controls and 4 presets, applied on the GPU before the FG worker. |
-| Controller | DualSense over USB and Bluetooth: buttons, sticks, touchpad, motion, lightbar, LEDs, rumble, adaptive triggers, console feedback. |
+| Controller | DualSense over USB and Bluetooth: buttons, sticks, touchpad, motion, lightbar, LEDs, adaptive triggers, console feedback. PS5 **haptics** (3 kHz stereo) decoded into motor rumble with an intensity setting; classic rumble kept for PS4. |
 | Session | PSN sign-in, pairing, LAN discovery, wake, probe. Disconnect sends an idle pad state and an RST, so the console frees the session at once. No automatic re-dial. |
 | UI | Start-up intro, boot loader, Home, Settings (10 tabs), in-stream sheet (Tab), double-Esc confirmation, connecting loader. |
 | Diagnostics | `%APPDATA%\BetterRemotePlay\health.log` every 30 s, `nr-worker.log`, probes `BRP_FRAME_PROBE`, `BRP_DECODE_PROBE`, `BRP_PAD_PROBE`. |
