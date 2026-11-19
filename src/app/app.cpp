@@ -941,7 +941,7 @@ void App::RenderBoot(double t) {
              th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    ui_.Text(L"v0.3", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
+    ui_.Text(L"v0.4", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
              th::Rgba(th::kMuted, 0.55f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
 }
@@ -6468,7 +6468,7 @@ void App::RenderSettings(double t) {
             break;
         }
         case Tab::About: {
-            ui_.Text(L"BetterRemotePlay 0.3", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
+            ui_.Text(L"BetterRemotePlay 0.4", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
                      th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 48.0f;
             ui_.Text(L"A PS5 to PC Remote Play client with a real post-process pipeline: "

@@ -147,3 +147,19 @@ engine for the local GPU with trtexec. TensorRT itself still needs a browser
 download from NVIDIA; the tool explains that instead of pretending otherwise.
 Packages strip `runtime.txt` and include the model so another machine can
 rebuild its engine.
+
+## 0.4 - controller haptics (19 Nov 2026)
+
+- Root cause of "no vibration": PS5 games use the haptics stream (3 kHz stereo
+  int16 on a separate sink), not `CHIAKI_EVENT_RUMBLE`. The app never set the
+  haptics sink, so the frames were dropped.
+- Fix: `Streaming` subscribes with `chiaki_session_set_haptics_sink`, computes
+  the per-channel envelope, and `App` converts it with chiaki-ng's arithmetic
+  (threshold 100, intensity scale, minimum 512, `>> 8`). Values are marked as
+  haptics so the gamepad layer does not scale twice.
+- New setting: Settings > Controller > Haptics intensity (Off..Very strong).
+- Motors are released 100 ms after the last frame; HID refresh while rumbling is
+  10 ms.
+- Measured over Bluetooth (DualSense fw 0x0630): 17 haptics frames/s, peak
+  L=1023 R=924, `[hid] rumble` 2..12; vibration felt in game.
+- Still absent: full DualSense haptics through its audio endpoint (USB-only).

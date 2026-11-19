@@ -206,3 +206,31 @@ Verified on this machine: DualSense over **Bluetooth**, input 78 bytes. Output r
   route it to the DualSense 4-channel USB audio endpoint. Over Bluetooth there
   is no audio endpoint, so this cannot work wirelessly.
 - Trigger effect calibration from firmware ranges (currently pass-through).
+
+## PS5 haptics (0.4, 19 Nov 2026)
+
+PS5 games do not use the classic rumble path. They stream **haptics**: stereo
+int16 at 3 kHz, on a separate chiaki sink. The app used to subscribe only to
+`CHIAKI_EVENT_RUMBLE` (a PS4-era message), so a DualSense stayed silent in PS5
+titles.
+
+Now:
+
+- `Streaming` sets `chiaki_session_set_haptics_sink` before the session starts
+  and computes the average `|sample| * 2` per channel, like chiaki-ng's
+  `PushHapticsFrame`.
+- `App` turns that envelope into motor bytes: threshold 100, intensity scale
+  (Off / Very weak / Weak / Normal / Strong / Very strong), minimum 512 for the
+  9-bit shift, then `>> 8` -- the same arithmetic as chiaki-ng.
+- The values go into `PadConsoleFeedback` with `haptics = true`, so the gamepad
+  layer does not scale them a second time; the console's own Off nibble still
+  applies.
+- If no haptics frame arrives for 100 ms the motors are released.
+- The HID refresh while rumbling is now 10 ms instead of 20 ms.
+- New setting: Settings > Controller > **Haptics intensity** (also in the
+  in-stream sheet). Default Normal.
+
+Measured with `BRP_PAD_PROBE`: `[pad] haptics 17 frames/s peak L=1023 R=924`
+and `[hid] rumble weak=2..12 strong=2..12` on a DualSense over Bluetooth
+(firmware 0x0630). Rumble is felt in game. Full DualSense haptics (audio
+endpoint) remains USB-only and is not implemented; Bluetooth uses the motors.
