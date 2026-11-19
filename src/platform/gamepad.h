@@ -117,6 +117,9 @@ struct PadConsoleFeedback {
     bool rumble = false;
     uint8_t weak = 0;    // right / high frequency
     uint8_t strong = 0;  // left / low frequency
+    // True when the values already came from the haptics envelope (already
+    // scaled by the user's haptics intensity); do not scale again.
+    bool haptics = false;
 
     bool triggers = false;
     TriggerEffect left;

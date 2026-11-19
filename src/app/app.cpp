@@ -277,6 +277,7 @@ enum WidgetId {
     W_SetupRife = 96,
     W_SetupStart,
     W_SetupClose,
+    W_HapticIntensity = 99,
     W_PsnLogin = 90,
     W_PsnOpen,
     W_PsnPaste,
@@ -1511,6 +1512,14 @@ void App::ApplyDropdown(int id, int index) {
             stream_note_ = profile_.rife_output == 0
                                ? "RIFE pass-through: source frames only."
                                : "RIFE: one generated frame between each pair.";
+            break;
+        }
+        case W_HapticIntensity: {
+            profile_.haptic_intensity = std::clamp(index, 0, 5);
+            SaveProfile();
+            stream_note_ = profile_.haptic_intensity == 0
+                               ? "Haptics off."
+                               : "Haptics intensity set.";
             break;
         }
         case W_FgEngine: {
@@ -3416,16 +3425,66 @@ void App::PadThreadMain() {
             streaming_.SendController(pad_.snapshot());
 
             const uint32_t version = streaming_.feedback_version();
+            bool feedback_changed = false;
             if (version != feedback_version_) {
                 feedback_version_ = version;
-                PadConsoleFeedback feedback = streaming_.feedback();
+                pad_feedback_ = streaming_.feedback();
+                feedback_changed = true;
+            }
+
+            // PS5 haptics: convert the 3 kHz stereo envelope to motor values the
+            // same way chiaki-ng does (threshold 100, intensity scale, min 512,
+            // byte via >> 8). Without this a DualSense stays silent in PS5 games.
+            uint16_t haptics_l = 0;
+            uint16_t haptics_r = 0;
+            if (streaming_.TakeHaptics(haptics_l, haptics_r)) {
+                last_haptics_at_ = clock_;
+                if (profile_.haptic_intensity > 0) {
+                    double scale = 1.0;
+                    switch (profile_.haptic_intensity) {
+                        case 1: scale = 0.2; break;
+                        case 2: scale = 0.5; break;
+                        case 4: scale = 2.0; break;
+                        case 5: scale = 5.0; break;
+                        default: break;
+                    }
+                    const auto to_motor = [scale](uint16_t amplitude) -> uint8_t {
+                        if (amplitude < 100) {
+                            return 0;
+                        }
+                        double scaled = amplitude * scale;
+                        if (scaled < 512.0) {
+                            scaled = 512.0;  // chiaki's minimum for 9-bit shift
+                        }
+                        const int value = static_cast<int>(scaled) >> 8;
+                        return static_cast<uint8_t>(std::clamp(value, 0, 255));
+                    };
+                    pad_feedback_.rumble = true;
+                    pad_feedback_.haptics = true;
+                    pad_feedback_.strong = to_motor(haptics_l);
+                    pad_feedback_.weak = to_motor(haptics_r);
+                    feedback_changed = true;
+                }
+            } else if (pad_feedback_.haptics && last_haptics_at_ >= 0.0 &&
+                       clock_ - last_haptics_at_ > 0.1) {
+                // The haptics stream stopped: release the motors instead of
+                // leaving them at the last value.
+                pad_feedback_.rumble = false;
+                pad_feedback_.haptics = false;
+                pad_feedback_.strong = 0;
+                pad_feedback_.weak = 0;
+                last_haptics_at_ = -1.0;
+                feedback_changed = true;
+            }
+
+            if (feedback_changed) {
                 if (!console_rumble_) {
-                    feedback.rumble = false;
+                    pad_feedback_.rumble = false;
                 }
                 if (!console_triggers_) {
-                    feedback.triggers = false;
+                    pad_feedback_.triggers = false;
                 }
-                pad_.SetConsoleFeedback(feedback);
+                pad_.SetConsoleFeedback(pad_feedback_);
             }
         }
         last_send_ok_ = pad_.PumpOutput();
@@ -6227,6 +6286,10 @@ void App::RenderSettings(double t) {
             DrawDropdown(L"Console rumble", {L"On", L"Off"}, console_rumble_ ? 0 : 1, y,
                          W_ConsoleRumble);
             y += row;
+            DrawDropdown(L"Haptics intensity",
+                         {L"Off", L"Very weak", L"Weak", L"Normal", L"Strong", L"Very strong"},
+                         std::clamp(profile_.haptic_intensity, 0, 5), y, W_HapticIntensity);
+            y += row;
             DrawDropdown(L"Console adaptive triggers", {L"On", L"Off"},
                          console_triggers_ ? 0 : 1, y, W_ConsoleTriggers);
             y += row;
@@ -6952,6 +7015,10 @@ void App::RenderStreamSettings(double t) {
             y += row;
             DrawDropdown(L"Console rumble", {L"On", L"Off"}, console_rumble_ ? 0 : 1, y,
                          W_ConsoleRumble);
+            y += row;
+            DrawDropdown(L"Haptics intensity",
+                         {L"Off", L"Very weak", L"Weak", L"Normal", L"Strong", L"Very strong"},
+                         std::clamp(profile_.haptic_intensity, 0, 5), y, W_HapticIntensity);
             y += row;
             DrawDropdown(L"Console triggers", {L"On", L"Off"}, console_triggers_ ? 0 : 1, y,
                          W_ConsoleTriggers);

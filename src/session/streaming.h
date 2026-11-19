@@ -87,16 +87,22 @@ public:
     PadConsoleFeedback feedback() const;
     uint32_t feedback_version() const { return feedback_version_.load(); }
 
+    // Haptics: the PS5 sends 3 kHz stereo int16 on its own sink. Returns true
+    // when a new frame arrived, with the average |sample| per channel.
+    bool TakeHaptics(uint16_t& left, uint16_t& right);
+
 private:
     static bool VideoCallback(uint8_t* buf, size_t size, int32_t frames_lost, bool recovered,
                               void* user);
     static void EventCallback(ChiakiEvent* event, void* user);
     static void AudioHeaderCallback(ChiakiAudioHeader* header, void* user);
     static void AudioFrameCallback(uint8_t* buf, size_t size, void* user);
+    static void HapticsFrameCallback(uint8_t* buf, size_t size, void* user);
 
     void OnVideo(uint8_t* buf, size_t size, int32_t frames_lost);
     void OnEvent(ChiakiEvent* event);
     void OnAudio(uint8_t* buf, size_t size);
+    void OnHaptics(uint8_t* buf, size_t size);
 
     // Compressed access units are copied off chiaki's receive thread and
     // decoded here. Hardware-to-system transfer plus swscale costs several
@@ -176,6 +182,13 @@ private:
     uint8_t trigger_nibble_ = 0x00;
     uint8_t haptic_nibble_ = 0x00;
     std::atomic<uint32_t> feedback_version_{0};
+
+    // haptics (separate 3 kHz stream)
+    mutable std::mutex haptics_mutex_;
+    uint16_t haptics_left_ = 0;
+    uint16_t haptics_right_ = 0;
+    std::atomic<uint32_t> haptics_seq_{0};
+    uint32_t haptics_seen_ = 0;
 
     // audio
     audio::Engine* audio_ = nullptr;

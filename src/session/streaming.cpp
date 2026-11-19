@@ -189,6 +189,17 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
         chiaki_session_set_audio_sink(&session_, &sink);
     }
 
+    // PS5 haptics arrive as their own 3 kHz audio stream. Without this sink the
+    // frames are dropped and a DualSense never vibrates in PS5 games (classic
+    // CHIAKI_EVENT_RUMBLE is a PS4-era path).
+    {
+        ChiakiAudioSink haptics{};
+        haptics.user = this;
+        haptics.header_cb = nullptr;
+        haptics.frame_cb = &Streaming::HapticsFrameCallback;
+        chiaki_session_set_haptics_sink(&session_, &haptics);
+    }
+
     if (chiaki_session_start(&session_) != CHIAKI_ERR_SUCCESS) {
         error = "session start failed";
         chiaki_session_fini(&session_);
@@ -304,6 +315,13 @@ void Streaming::Stop() {
         trigger_nibble_ = 0;
         haptic_nibble_ = 0;
         feedback_version_.store(0);
+    }
+    {
+        std::lock_guard<std::mutex> lock(haptics_mutex_);
+        haptics_left_ = 0;
+        haptics_right_ = 0;
+        haptics_seq_.store(0);
+        haptics_seen_ = 0;
     }
     chiaki_controller_state_set_idle(&controller_state_);
     chiaki_orientation_tracker_init(&tracker_);
@@ -554,6 +572,69 @@ void Streaming::AudioHeaderCallback(ChiakiAudioHeader* header, void* user) {
 
 void Streaming::AudioFrameCallback(uint8_t* buf, size_t size, void* user) {
     static_cast<Streaming*>(user)->OnAudio(buf, size);
+}
+
+void Streaming::HapticsFrameCallback(uint8_t* buf, size_t size, void* user) {
+    static_cast<Streaming*>(user)->OnHaptics(buf, size);
+}
+
+void Streaming::OnHaptics(uint8_t* buf, size_t size) {
+    // Stereo int16 at 3 kHz; a frame is about 10 ms. The average |sample| per
+    // channel is what chiaki-ng feeds to rumble when full haptics are not
+    // available (Bluetooth, or a non-DualSense pad).
+    if (!buf || size == 0 || (size % (2 * sizeof(int16_t))) != 0) {
+        return;
+    }
+    const size_t count = size / (2 * sizeof(int16_t));
+    uint64_t sum_left = 0;
+    uint64_t sum_right = 0;
+    for (size_t i = 0; i < count; ++i) {
+        int16_t left = 0;
+        int16_t right = 0;
+        std::memcpy(&left, buf + i * 4, sizeof(int16_t));
+        std::memcpy(&right, buf + i * 4 + 2, sizeof(int16_t));
+        sum_left += static_cast<uint64_t>(left < 0 ? -left : left) * 2;
+        sum_right += static_cast<uint64_t>(right < 0 ? -right : right) * 2;
+    }
+    uint16_t left = static_cast<uint16_t>(std::min<uint64_t>(sum_left / count, 0xFFFF));
+    uint16_t right = static_cast<uint16_t>(std::min<uint64_t>(sum_right / count, 0xFFFF));
+    {
+        std::lock_guard<std::mutex> lock(haptics_mutex_);
+        haptics_left_ = left;
+        haptics_right_ = right;
+        haptics_seq_.fetch_add(1);
+    }
+    static const bool probe = std::getenv("BRP_PAD_PROBE") != nullptr;
+    if (probe) {
+        static uint64_t frames = 0;
+        static uint64_t last_report = 0;
+        static uint16_t peak_l = 0;
+        static uint16_t peak_r = 0;
+        ++frames;
+        peak_l = std::max(peak_l, left);
+        peak_r = std::max(peak_r, right);
+        const uint64_t now = chiaki_time_now_monotonic_ms();
+        if (now - last_report >= 1000) {
+            std::fprintf(stderr, "[pad] haptics %llu frames/s  peak L=%u R=%u\n",
+                         static_cast<unsigned long long>(frames), peak_l, peak_r);
+            frames = 0;
+            peak_l = 0;
+            peak_r = 0;
+            last_report = now;
+        }
+    }
+}
+
+bool Streaming::TakeHaptics(uint16_t& left, uint16_t& right) {
+    const uint32_t seq = haptics_seq_.load();
+    if (seq == haptics_seen_) {
+        return false;
+    }
+    haptics_seen_ = seq;
+    std::lock_guard<std::mutex> lock(haptics_mutex_);
+    left = haptics_left_;
+    right = haptics_right_;
+    return true;
 }
 
 void Streaming::OnAudio(uint8_t* buf, size_t size) {

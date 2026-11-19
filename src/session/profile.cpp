@@ -412,6 +412,7 @@ json << "  \"rife_output\": " << profile.rife_output << ",\n";
     json << "  \"mic_led\": " << profile.mic_led << ",\n";
     json << "  \"console_rumble\": " << profile.console_rumble << ",\n";
     json << "  \"console_triggers\": " << profile.console_triggers << ",\n";
+json << "  \"haptic_intensity\": " << profile.haptic_intensity << ",\n";
     json << "  \"motion\": " << profile.motion << "\n";
     json << "}\n";
 
@@ -505,6 +506,7 @@ p.fg_target = p.fg_target == 60 || p.fg_target == 90 || p.fg_target == 120 ? p.f
 p.fg_engine = p.fg_engine == 1 ? 1 : 0;
 p.rife_output = p.rife_output == 0 ? 0 : 60;
     p.reflex = std::clamp(p.reflex, 0, 2);
+    p.haptic_intensity = std::clamp(p.haptic_intensity, 0, 5);
     p.sharpness = std::clamp(p.sharpness, 0, 100);
     p.color_on = std::clamp(p.color_on, 0, 1);
     p.color_exposure = std::clamp(p.color_exposure, -100, 100);
@@ -527,6 +529,7 @@ p.rife_output = p.rife_output == 0 ? 0 : 60;
     if (ExtractNumber(json, "mic_led", number)) p.mic_led = static_cast<int>(number);
     if (ExtractNumber(json, "console_rumble", number)) p.console_rumble = static_cast<int>(number);
     if (ExtractNumber(json, "console_triggers", number)) p.console_triggers = static_cast<int>(number);
+if (ExtractNumber(json, "haptic_intensity", number)) p.haptic_intensity = static_cast<int>(number);
     if (ExtractNumber(json, "motion", number)) p.motion = static_cast<int>(number);
     if (ExtractNumber(json, "sharpness", number)) p.sharpness = static_cast<int>(number);
     if (ExtractNumber(json, "color_on", number)) p.color_on = static_cast<int>(number);

@@ -286,6 +286,8 @@ private:
     std::atomic<bool> console_triggers_{true};
     bool motion_ = true;
     uint32_t feedback_version_ = 0;
+    PadConsoleFeedback pad_feedback_{};
+    double last_haptics_at_ = -1.0;
     double rumble_until_ = 0.0;
     double last_output_ = 0.0;
     bool output_dirty_ = true;

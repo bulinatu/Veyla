@@ -98,6 +98,7 @@ struct Profile {
     int mic_led = 0;
     int console_rumble = 1;
     int console_triggers = 1;
+    int haptic_intensity = 3;  // 0 off, 1 very weak, 2 weak, 3 normal, 4 strong, 5 very strong
     int motion = 1;
 
     bool has_console() const { return !target_id.empty() || !host.empty(); }

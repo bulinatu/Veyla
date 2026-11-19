@@ -751,8 +751,15 @@ bool Gamepad::PumpOutput() {
         const uint8_t haptic_level = console_.intensity & 0x0F;
         if (!out.rumble && console_.rumble && haptic_level != 0x0F) {
             out.rumble = true;
-            out.weak = ScaleHaptic(console_.weak, haptic_level);
-            out.strong = ScaleHaptic(console_.strong, haptic_level);
+            if (console_.haptics) {
+                // Already scaled from the haptics envelope; only the console's
+                // own off switch (0xF) applies.
+                out.weak = console_.weak;
+                out.strong = console_.strong;
+            } else {
+                out.weak = ScaleHaptic(console_.weak, haptic_level);
+                out.strong = ScaleHaptic(console_.strong, haptic_level);
+            }
         }
 
         const uint8_t trigger_level = console_.intensity >> 4;
@@ -769,7 +776,7 @@ bool Gamepad::PumpOutput() {
         // Rumble motors need periodic refresh, but never at input rate.
         if (!output_dirty_) {
             if (rumble_active) {
-                due = now - last_output_ >= 0.02;
+                due = now - last_output_ >= 0.01;
             } else {
                 due = now - last_output_ >= 0.2;
             }
