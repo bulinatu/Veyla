@@ -5,11 +5,12 @@ Resolution, DLSS Frame Generation (through the closed NeuralScreen worker),
 GPU colour and sharpening, a custom PS5-style UI and native DualSense support.
 Build `0.3`. Run `git log -1` for the current commit.
 
-Standalone ZIP (rebuilt 18 Nov 2026, 19:53): `dist\BetterRemotePlay-0.3-standalone.zip`,
-571.6 MB, SHA256 `11EB6A515E71AB8BA790E9D967C171C32E38F2E4FB675AD56DE96150D0A6A9F9`.
+Standalone ZIP (rebuilt 19 Nov 2026, 13:37): `dist\BetterRemotePlay-0.3-standalone.zip`,
+581.9 MB, SHA256 `0365FE060D28AA67D1DA2C44B2D77FBF453B5389ADCEE21A83668D77321501C7`.
 `dist\BetterRemotePlay\brp.exe` matches `build\Release\brp.exe` (SHA256
-`70F9E2D5E68AFDB2817804FCFE7392E6ACEFD1F2A692398669B903C85EC89CBA`). The package
-contains no `session.json` or pairing data.
+`32B20FFCE399DA683790D00C4829317C381334F23F8AAAB277ADE55F66B426F7`), and the
+package includes `rife\rife425_1080.engine` (12.5 MB, built for the reference
+RTX 4090). The package contains no `session.json` or pairing data.
 
 ## What works
 
