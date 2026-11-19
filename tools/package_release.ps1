@@ -198,6 +198,10 @@ Settings worth knowing
   DLSS Frame Generation 2x at 1440p; also SR only and Low latency. Presets are
   saved and applied at the start of the next session (reconnect), never while
   streaming.
+- Home, top right: "Set up RIFE". It finds TensorRT on the PC, downloads the
+  RIFE model and builds the engine for this GPU. TensorRT itself comes from
+  NVIDIA's download page (browser click-through); the tool says where to point
+  BRP_TENSORRT_DIR. Without it, RIFE stays unavailable and NVIDIA is used.
 - Settings > Upscaling > Interpolation engine: NVIDIA DLSS FG (fast) or RIFE
   4.25 lite (TensorRT). RIFE output is 60 fps (one generated frame per pair, so
   a 30 fps game plays at 60) or pass-through. Output frame rate (60/90/120) is
