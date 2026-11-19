@@ -58,3 +58,21 @@ account.
   `70F9E2D5E68AFDB2817804FCFE7392E6ACEFD1F2A692398669B903C85EC89CBA`, identical
   to `build\Release\brp.exe` at packaging time.
 - No `session.json` or pairing data in the package.
+
+## Optional RIFE runtime (TensorRT)
+
+The RIFE probe (`rife_probe.exe`) and, later, the RIFE engine in the app need a
+TensorRT 10.16 + CUDA 13 runtime on the PC. Nothing is bundled or linked:
+
+- Point `BRP_TENSORRT_DIR` (or `rife_probe --runtime=`) at a folder that contains
+  `nvinfer_10.dll` and `cudart64_13.dll`.
+- On the reference PC those come from an existing vs-mlrt install at
+  `...\vs-plugins\vsmlrt-cuda`, so no extra download was needed.
+- Build one engine per GPU and shape with `trtexec` (command in
+  `docs/15-frame-generation.md`). An engine built for another TensorRT version or
+  GPU architecture will not deserialize.
+- Without the runtime the app keeps using DLSS Frame Generation; the probe exits
+  with a clear message.
+
+This is the same arrangement as the NVIDIA VFX runtime: a user-supplied vendor
+runtime, not part of the AGPL source tree or the standalone ZIP.
