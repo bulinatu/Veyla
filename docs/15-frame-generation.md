@@ -459,19 +459,28 @@ when the pieces are in place). One click starts a worker:
 1. Looks for TensorRT 10.16 on the PC: `BRP_TENSORRT_DIR`, `rife\runtime`,
    the vs-mlrt install, `Program Files\NVIDIA Corporation\TensorRT*`,
    `C:\TensorRT*`. The first folder with `nvinfer_10.dll` wins.
-2. Writes `rife\runtime.txt` with that path instead of copying about 2 GB of
-   DLLs. The app reads it on start; the file is stripped from packages because
-   it is a path on the machine that built them.
-3. Downloads the RIFE 4.25 lite model (22 MB) from Hugging Face when missing.
-4. Builds `rife\rife425_1080.engine` with `trtexec --fp16` for the GPU in the
+2. If nothing is installed, downloads the **official TensorRT 10.16 Windows zip**
+   (1.9 GB) from
+   `developer.download.nvidia.com/.../TensorRT-10.16.0.72.Windows.amd64.cuda-13.2.zip`,
+   extracts only `bin\` under `rife\tensorrt` with `tar.exe`, deletes the zip and
+   copies the bundled `cudart64_13.dll` next to it. NVIDIA's page needs a browser
+   click for the *page*, but this file is served without one, which is what makes
+   one click possible.
+3. Writes `rife\runtime.txt` with the TensorRT path instead of copying about
+   2 GB of DLLs. The app reads it on start; the file is stripped from packages
+   because it is a path on the machine that built them.
+4. Downloads the RIFE 4.25 lite model (22 MB) from Hugging Face when missing.
+5. Builds `rife\rife425_1080.engine` with `trtexec --fp16` for the GPU in the
    machine, 2-4 minutes, without blocking the UI.
 
-Measured end to end on the reference PC with the engine, model and marker
-deleted: found TensorRT, downloaded 21.6 MB, built a 12.5 MB engine, and
-`rife_probe` loaded it at 18.2 ms p50.
+Measured: a clean build using only the official zip's `bin\` plus
+`cudart64_13.dll` produced a 12.6 MB engine in 148 s, so **cuDNN is not needed**.
+The full setup path (archive present, engine present) extracted the SDK, wrote
+the marker, removed the zip and finished in about 40 s; `rife_probe` loads the
+result at 18.2 ms p50.
 
-**TensorRT itself is the one step that cannot be silent.** NVIDIA's download
-page needs a browser click-through, so the tool says exactly what to fetch and
-where to point `BRP_TENSORRT_DIR`, and the button can be pressed again. For a
+Needs about **6 GB free** while the zip and the extracted SDK coexist. For a
 different GPU, delete `rife\rife425_1080.engine` and press Set up RIFE; the
-engine is architecture-specific (the shipped one is sm89, RTX 4090).
+engine is architecture-specific (the shipped one is sm89, RTX 4090). The manual
+link remains available for an offline install:
+`https://developer.download.nvidia.com/compute/machine-learning/tensorrt/10.16.0/zip/TensorRT-10.16.0.72.Windows.amd64.cuda-13.2.zip`.

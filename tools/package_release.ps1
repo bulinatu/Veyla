@@ -198,7 +198,8 @@ Settings worth knowing
 - Home, top right: "Set up RIFE". One click: finds a TensorRT 10.16 install or
   downloads the official 1.9 GB Windows zip, extracts it under rife\tensorrt,
   downloads the RIFE model, and builds the engine for this GPU. Needs about
-  3 GB free during setup. Without TensorRT, RIFE stays unavailable and NVIDIA
+  6 GB free during setup (the zip plus the extracted SDK). Without TensorRT,
+  RIFE stays unavailable and NVIDIA
   frame generation is used.
 - Settings > Upscaling > Interpolation engine: NVIDIA DLSS FG (fast) or RIFE
   4.25 lite (TensorRT). RIFE output is 60 fps (one generated frame per pair, so
