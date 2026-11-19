@@ -19,7 +19,7 @@ contains no `session.json` or pairing data.
 | Stream smoothness | Streams start borderless fullscreen (F11 returns to the window). With SR on, 60 fps source on 240 Hz: 4 refreshes on 100 % of frames, 0 late ticks, interval p99 4.4 ms. |
 | Audio | Opus 48 kHz stereo to WASAPI, device picker, 10-40 ms buffer, test tone. |
 | Upscalers | Bilinear, Catmull-Rom, Lanczos+RCAS, FSR1, DLSS SR (33-77 %) and DLAA with K/L/M presets. |
-| Frame generation | DLSS FG 2x through the worker: 120.0 fps displayed on 240 Hz. 3x-6x are GPU-limited (~140-165 fps). |
+| Frame generation | Two engines. NVIDIA DLSS FG through the worker: 120.0 fps displayed on 240 Hz. RIFE 4.25 lite through TensorRT: measured 60 fps shown from a 30 fps game at 1080p, 24 ms/frame, 0 underruns. Output targets 60/90/120 with duplicate-aware adaptive multiplier. |
 | Launch presets | Launch (SR UQ + FG 2x), SR only, Low latency. Saved while streaming; the chain applies at the next start. |
 | Colour | 11 controls and 4 presets, applied on the GPU before the FG worker. |
 | Controller | DualSense over USB and Bluetooth: buttons, sticks, touchpad, motion, lightbar, LEDs, rumble, adaptive triggers, console feedback. |
@@ -88,7 +88,8 @@ contains no `session.json` or pairing data.
    start-up time, so the 3.25 s shot still showed the settled mark rather than
    the fade. The boot step card, and the Upscaling and Performance tabs of the
    in-stream sheet, were captured and look correct.
-10. **No self-update.** Distribution is the ZIP.
+10. **RIFE needs a user-supplied runtime.** TensorRT 10.16 + CUDA 13 and an engine built for the GPU (ife\rife425_1080.engine or `BRP_RIFE_ENGINE`). Without them the app falls back to NVIDIA. RIFE adds one source interval of video delay and uses a 40 ms audio buffer to match. Quality against DLSS FG is not compared side by side yet.
+11. **No self-update.** Distribution is the ZIP.
 11. **Structure debt**: `app.cpp` is 6.3k lines. Settings and the stream sheet
     still repeat control code. The VFG and Reflex paths stay on purpose.
 
