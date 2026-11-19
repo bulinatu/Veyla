@@ -50,17 +50,18 @@ account.
   NGX components: one is the NeuralScreen worker, the other the DLSS SR feature
   DLL.
 
-## Build 0.3, 19 Nov 2026 (13:57)
+## Build 0.3, 19 Nov 2026 (14:02)
 
 - ZIP: `dist\BetterRemotePlay-0.3-standalone.zip`, 581.9 MB,
-  SHA256 `8428D1E6AAB5E5B63EC4E765C0954DD94F8533D6149DEBC4AA0C6DCD08E41D30`.
+  SHA256 `96D8BF5557469AF427CE0E8EC71EAA8088263CF6C8B1718F8A0A8531AECE2FA7`.
 - Unpacked: 865.5 MB, 53 files.
 - `dist\BetterRemotePlay\brp.exe` SHA256
-  `63F4C2012E7911CFC1B6670F7FBEB07A73D1B481CBCB1E4FB79D7C148DA342BB`, identical
+  `ED6FE55BFC74A1300112104F63261097C55BD3C60F58AC1A79B426235A4D9DE8`, identical
   to `build\Release\brp.exe` at packaging time.
 - Includes `rife\rife425_1080.engine` (12.5 MB) when present in the release
   folder. Written for one GPU architecture; another GPU needs its own engine.
-- No `session.json` or pairing data in the package.
+- No `session.json` or pairing data in the package. Runtime logs from the
+  build machine (*.log, *.jsonl) are stripped.
 
 ## Optional RIFE runtime (TensorRT)
 
