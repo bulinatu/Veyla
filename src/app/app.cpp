@@ -951,7 +951,7 @@ void App::RenderBoot(double t) {
              th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    ui_.Text(L"v0.4.8", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
+    ui_.Text(L"v0.4.9", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
              th::Rgba(th::kMuted, 0.55f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
 }
@@ -2127,7 +2127,7 @@ void App::LogTestingLine() {
     char line[640];
     std::snprintf(line, sizeof(line),
                   "t=%.1f %s fps=%.1f src=%.1f content=%.1f rife=%.1f/%.2f cad=%.2f/%.2f "
-                  "gen=%d q=%zu fg=%.1f late=%d stalls=%d miss=%llu dec=%.2f/%.2f "
+                  "gen=%d q=%zu fg=%.1f fgm=%d late=%d stalls=%d miss=%llu dec=%.2f/%.2f "
                   "drops=%d lost=%d buf=%d aud=%d fs=%d ref=%u skip=%d/%d/%d\n",
                   clock_, bad ? "!!" : "  ", stream_active_ ? stream_stats_.elapsed > 0.0
                                                                    ? static_cast<double>(stream_stats_.frames) / stream_stats_.elapsed
@@ -2135,7 +2135,7 @@ void App::LogTestingLine() {
                                                              : 0.0,
                   static_cast<double>(streaming_.fps()), fg_content_hz_, rife_out_fps_,
                   rife_ms_, rife_cadence_ms_, rife_cadence_max_ms_, rife_generated_,
-                  rife_out_.size(), fg_worker_fps_, stat_late_, stat_stalls_, miss_delta,
+                  rife_out_.size(), fg_worker_fps_, fg_mult_live_, stat_late_, stat_stalls_, miss_delta,
                   stream_stats_.decode_ms_avg, stream_stats_.decode_ms_max,
                   stream_stats_.buffer_drops + streaming_.video_queue_drops(),
                   stream_stats_.lost, stream_stats_.buffer, aud_delta, borderless_ ? 1 : 0, refresh_delta,
@@ -2182,7 +2182,7 @@ void App::LogHealth() {
     std::snprintf(line, sizeof(line),
                   "%04d-%02d-%02dT%02d:%02d:%02d sr=%d mode=%d fg=%d nr=%d hdr=%d tgt=%d buf=%d "
                   "eng=%s rife=%.1f/%.2f cad=%.2f | "
-                  "worker=%.1f dlss=%.2f enh=%.2f | frame_p99=%.2f work=%.2f late=%d stalls=%d | "
+                  "worker=%.1f fgm=%d dlss=%.2f enh=%.2f | frame_p99=%.2f work=%.2f late=%d stalls=%d | "
                   "src=%.1f 4v=%d q=%d drops=%d lost=%d dec=%.2f/%.2f out=%d | "
                   "audio=%d handles=%lu vram=%llu/%llu\n",
                   st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
@@ -2192,7 +2192,7 @@ void App::LogHealth() {
                       ? (profile_.rife_model == 1 ? "RIFE-H" : "RIFE")
                       : "NVIDIA",
                   rife_out_fps_, rife_ms_,
-                  rife_cadence_ms_, fg_worker_fps_,
+                  rife_cadence_ms_, fg_worker_fps_, fg_mult_live_,
                   dlss_sr_.last_ms(), presenter_.enhance_ms(), static_cast<double>(stat_p99_),
                   frame_work_ms_, stat_late_, stat_stalls_, src_fps, four_pct,
                   stream_stats_.queue, stream_stats_.buffer_drops + streaming_.video_queue_drops(),
@@ -2762,13 +2762,14 @@ bool App::AttachFgWindowNow() {
     if (!find.hwnd) {
         return false;
     }
-    ::SetParent(find.hwnd, window_->hwnd());
-    LONG_PTR style = ::GetWindowLongPtrW(find.hwnd, GWL_STYLE);
-    style &= ~(WS_POPUP | WS_CAPTION | WS_THICKFRAME);
-    style |= WS_CHILD | WS_VISIBLE;
-    ::SetWindowLongPtrW(find.hwnd, GWL_STYLE, style);
-    ::SetWindowPos(find.hwnd, HWND_TOP, 0, 0, static_cast<int>(ui_w_),
-                   static_cast<int>(ui_h_), SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+    // Keep the worker's presenter as a top-level overlay. Reparenting it as a
+    // child made the worker believe the app window covered it (its occlusion
+    // check sees the parent through the click-through layer). It then throttled
+    // itself: 25-90 fps instead of the 150+ it reaches on its own, which read
+    // as dropped frames.
+    LONG_PTR ex = ::GetWindowLongPtrW(find.hwnd, GWL_EXSTYLE);
+    ex |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+    ::SetWindowLongPtrW(find.hwnd, GWL_EXSTYLE, ex);
     fg_window_ = find.hwnd;
     fg_visible_ = true;
     return true;
@@ -3040,8 +3041,12 @@ int App::FgChosenMultiplier(double content_hz, int target) const {
     if (content_hz >= target * 0.95) {
         return 0;
     }
+    // The DLSS-G runtime behind this worker reports a 2x ceiling ("6x refused
+    // 0xBAD00005; stepping down"). Asking for 4-6x made the worker cap itself,
+    // the app see a shortfall and oscillate between 3x and 6x - the visible
+    // dropping. Two is the honest maximum.
     int best = 0;
-    for (int m = 2; m <= 6; ++m) {
+    for (int m = 2; m <= 2; ++m) {
         if (content_hz * m <= target * 1.08 + 0.5) {
             best = m;
         }
@@ -3097,19 +3102,6 @@ bool App::FrameIsDuplicate(const media::DecodedFrame& frame) {
     frame_sig_valid_ = true;
     return duplicate;
 }
-bool App::ShouldDropDuplicate(const media::DecodedFrame& frame) {
-    UpdateInterpolationMode();
-    if (profile_.dlss_fg < 2 || !nr_ready_ || !nr_.present_mode()) {
-        return false;
-    }
-    const bool duplicate = FrameIsDuplicate(frame);
-    if (!duplicate || fg_mult_live_ < 2) {
-        return false;
-    }
-    ++fg_dupes_;
-    // A still image must not starve the worker: feed at least every 80 ms.
-    return last_feed_at_ >= 0.0 && clock_ - last_feed_at_ < 0.08;
-}
 
 void App::UpdateInterpolationMode() {
     if (profile_.dlss_fg < 2 || !nr_ready_ || !nr_.present_mode()) {
@@ -3131,13 +3123,6 @@ void App::UpdateInterpolationMode() {
 
     const int target = FgTargetHz();
     int candidate = FgChosenMultiplier(fg_content_hz_, target);
-    // If the worker cannot hold the requested rate, step the multiplier down.
-    // At 1440p, 4x from 30 fps content sustains about 92 fps, so 3x (90) is the
-    // honest choice; the next window confirms the new rate before going lower.
-    if (candidate > 2 && fg_worker_fps_ > 0.0 &&
-        fg_worker_fps_ < fg_content_hz_ * candidate * 0.88) {
-        --candidate;
-    }
     static const bool probe = std::getenv("BRP_FG_MULT_PROBE") != nullptr;
     static double probe_at = 0.0;
     if (probe) {
@@ -3147,10 +3132,13 @@ void App::UpdateInterpolationMode() {
             return;
         }
         probe_at = clock_;
-        candidate = fg_mult_live_ >= 2 ? 0 : 4;
+        candidate = fg_mult_live_ >= 2 ? 0 : 2;
     }
     if (candidate == fg_mult_live_) {
         fg_pending_streak_ = 0;
+        return;
+    }
+    if (!probe && fg_mult_changed_at_ >= 0.0 && clock_ - fg_mult_changed_at_ < 2.0) {
         return;
     }
     // Two windows in a row, so a menu that briefly runs at 60 fps does not
@@ -3166,6 +3154,7 @@ void App::UpdateInterpolationMode() {
     }
     fg_pending_streak_ = 0;
     fg_mult_live_ = candidate;
+    fg_mult_changed_at_ = clock_;
     nr_.SetFrameGeneration(candidate);
     std::fprintf(stderr, "[fg] content %.1f fps -> %s for %d fps output\n",
                  fg_content_hz_, candidate < 2 ? "pass-through" : "interpolation",
@@ -4425,20 +4414,27 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         if (screen_ != Screen::Stream) {
             fg_reveal_until_ = 0.0;
         }
-        const int want_w = static_cast<int>(ui_w_ * ui_scale_);
-        const int want_h = static_cast<int>(ui_h_ * ui_scale_);
-        if (want_w != fg_w_ || want_h != fg_h_) {
-            ::SetWindowPos(fg_window_, HWND_TOP, 0, 0, want_w, want_h,
-                           SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+        POINT origin{};
+        ::ClientToScreen(window_->hwnd(), &origin);
+        RECT client{};
+        ::GetClientRect(window_->hwnd(), &client);
+        const int want_w = client.right - client.left;
+        const int want_h = client.bottom - client.top;
+        if (want_w != fg_w_ || want_h != fg_h_ || origin.x != fg_x_ || origin.y != fg_y_) {
+            // Top-level, topmost and never activated: it is a pure overlay over
+            // our client. Reparenting it as a child made the worker treat the
+            // app window as a cover and throttle.
+            ::SetWindowPos(fg_window_, HWND_TOPMOST, origin.x, origin.y, want_w, want_h,
+                           SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
             fg_w_ = want_w;
             fg_h_ = want_h;
+            fg_x_ = origin.x;
+            fg_y_ = origin.y;
         }
 
         POINT cursor{};
         ::GetCursorPos(&cursor);
         ::ScreenToClient(window_->hwnd(), &cursor);
-        RECT client{};
-        ::GetClientRect(window_->hwnd(), &client);
 
         const float chrome_trigger = 124.0f * ui_scale_;
         const bool inside = cursor.x >= 0 && cursor.y >= 0 && cursor.x < client.right &&
@@ -4455,7 +4451,10 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
 
         const bool reveal =
             screen_ == Screen::Stream && inside && (in_chrome || clock_ < fg_reveal_until_);
-        fg_covering = screen_ == Screen::Stream && !reveal;
+        // A topmost overlay must not cover other applications after Alt-Tab.
+        const HWND foreground = ::GetForegroundWindow();
+        const bool app_focused = foreground == window_->hwnd() || foreground == fg_window_;
+        fg_covering = screen_ == Screen::Stream && !reveal && app_focused;
         // ShowWindow is a synchronous window-manager call; doing it every
         // 240 Hz tick made the worker window re-enter composition for no
         // reason. Only touch it on an actual visibility change.
@@ -4590,6 +4589,8 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
         }
         const bool vfg_active = frame_gen_ >= 2 && fg_ready_;
         const bool rife_mode = rife_ && rife_->ready() && profile_.fg_engine == 1;
+        const bool fg_direct = !rife_mode && !vfg_active && profile_.fg_engine == 0 &&
+                               profile_.dlss_fg >= 2 && nr_ready_ && nr_.present_mode();
         if (rife_mode) {
             const bool nr_on = profile_.neural_nr > 0 && nr_ready_;
             if (video_due &&
@@ -4645,15 +4646,22 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                                               stream_frame_.height, stream_frame_.pq);
                 }
             }
-        } else if (video_due &&
-                   streaming_.TakeFrame(stream_frame_, stream_buffer_, video_paced)) {
+        } else if ((fg_direct ? streaming_.TakeFrameNow(stream_frame_)
+                              : (video_due && streaming_.TakeFrame(stream_frame_, stream_buffer_,
+                                                                   video_paced)))) {
             NoteSourceFrame();
             if (profile_.dlss_fg >= 2 && nr_ready_ && nr_.present_mode()) {
+                UpdateInterpolationMode();
                 // DLSS Frame Generation: the worker presents generated frames
                 // in its own window. When SR is also enabled it receives the
                 // SR output (render-resolution -> FG, as in a game); otherwise
                 // it receives the raw stream.
-                const bool drop_duplicate = ShouldDropDuplicate(stream_frame_);
+                //
+                // Feed every decoded frame, including exact duplicates. The
+                // generator is paced by its input: skipping still frames at a
+                // menu dropped the input to ~12 fps and the worker throttled,
+                // which showed up as dropped frames on screen.
+                const bool drop_duplicate = false;
                 bool fed = false;
                 if (!drop_duplicate && profile_.neural_sr > 0 && dlss_ready_) {
                     media::NvDlssSr::Frame sr_frame;
@@ -6427,6 +6435,15 @@ void App::RenderSettings(double t) {
                              y, W_FgTarget, profile_.dlss_fg >= 2);
                 y += kRowH;
             }
+            if (profile_.fg_engine != 1 && profile_.dlss_fg >= 2) {
+                ui_.Text(L"DLSS FG is 2x: 60 fps content plays at 120, 30 fps content at 60. "
+                         L"Every decoded frame is fed, so the generator never starves; for "
+                         L"30 -> 60 RIFE has the better midpoint. 4-6x is refused by the "
+                         L"runtime (2x ceiling), so the target above is capped in practice.",
+                         {kContentX, y + 2.0f, w - 64.0f, y + 40.0f}, 11.5f,
+                         th::Rgba(th::kMuted));
+                y += 44.0f;
+            }
 
             if (frame_gen_ >= 2 && fg_ready_) {
                 wchar_t text[192];
@@ -6793,7 +6810,7 @@ void App::RenderSettings(double t) {
             break;
         }
         case Tab::About: {
-            ui_.Text(L"BetterRemotePlay 0.4.8", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
+            ui_.Text(L"BetterRemotePlay 0.4.9", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
                      th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 48.0f;
             ui_.Text(L"A PS5 to PC Remote Play client with a real post-process pipeline: "

@@ -595,3 +595,47 @@ pinned buffer, so no extra conversion pass is needed.
 Settings > Upscaling > RIFE model selects Lite or Heavy. The heavy engine
 (`rife426h_1080.engine`) is built on demand by the same one-click setup; the
 heavy ONNX ships in the package. Health log shows `eng=RIFE-H` for Heavy.
+
+### 0.4.9 - NVIDIA DLSS FG: the drop-frame fix (verified at 60 and 120)
+
+The NVIDIA path was not GPU-bound. Three app-side bugs starved or throttled
+the worker:
+
+1. **A rigid feed grid skipped frames.** In covered mode the app pulled a
+   source frame on a wall-clock slot at `profile_.fps`; when `TakeFrame`
+   found the decode queue empty, that slot was lost. The worker received
+   ~10-15 input frames/s and throttled, which read as dropped frames.
+2. **Duplicate skipping starved still scenes.** A static menu was fed at
+   most every 80 ms; the generator is paced by its input, so it idled.
+3. **The multiplier chased 3-6x, but the runtime refuses it.** The worker
+   log says `4x refused 0xBAD00005; stepping down` and the runtime reports a
+   **2x ceiling**. The app saw a shortfall and oscillated 3x -> 6x every
+   1.5 s, restarting the presenter each time. Pulling the worker window into
+   the app as a child also made it believe it was covered (the click-through
+   layer hit-tests the parent), so it throttled itself.
+
+0.4.9 changes:
+
+- **Feed every decoded frame immediately** (`Streaming::TakeFrameNow`), in
+  order, with no duplicate skipping and no wall-clock gaps.
+- **Cap the DLSS-G multiplier at 2** (the runtime ceiling) and change it at
+  most once every 2 s. The app no longer asks for 3-6x.
+- **Keep the worker overlay top-level, topmost, no-activate** instead of
+  reparenting it as a child; hide it when the app loses focus. No more false
+  "covered" throttling.
+- Health line adds `fgm=`; testing line adds `fgm=` after `fg=`.
+
+Measured on the reference 4090, 1920x1080 stream, DLAA + DLSS FG, 2560x1440
+240 Hz display:
+
+| Source | Output | Result |
+| --- | --- | --- |
+| 30 fps + DLAA | 60 fps | 59.4-60.6 fps, 0 drops/late/stalls, dec 8.4 ms, DLSS 0.74 ms |
+| 60 fps + DLAA | 120 fps | 119.8-120.2 fps, 0 drops/late/stalls, dec 7.9-8.6 ms, DLSS 0.74 ms |
+
+The worker's own log confirms `displayed 120.0 FPS (real + generated, 2x)`
+for the 60 -> 120 case.
+
+**Honest limit:** DLSS-G in this runtime is 2x only. 30 fps can reach 60 with
+NVIDIA FG, not 120. For 30 -> 60, RIFE still has the better midpoint; for
+60 -> 120, DLSS FG is the smoother path now that it is fed correctly.

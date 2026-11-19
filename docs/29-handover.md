@@ -5,16 +5,15 @@ Resolution, DLSS Frame Generation (through the closed NeuralScreen worker),
 GPU colour and sharpening, a custom PS5-style UI and native DualSense support.
 Build `0.3`. Run `git log -1` for the current commit.
 
-Version 0.4.8 (20 Nov 2026).
+Version 0.4.9 (20 Nov 2026).
 
-- Standalone: `dist\BetterRemotePlay-0.4.8-standalone.zip`, 622.6 MB, SHA256
-  `2E0C539CC8ADAA9EB2DF271D25CB7F2A657FD541452285BC317D0AF9B76DDD0F`.
-- Update from 0.4.7: `dist\BetterRemotePlay-0.4.8-update.exe`, **21.07 MB, one
+- Standalone: `dist\BetterRemotePlay-0.4.9-standalone.zip`, 622.6 MB, SHA256
+  `7192792BEDBB65C711B997D835A171F80372BF3610FD480B2CCBC68FD0E90A4B`.
+- Update from 0.4.8: `dist\BetterRemotePlay-0.4.9-update.exe`, **0.72 MB, one
   file**, SHA256
-  `D7E3A4E79BA2A463C1EF6F10876EFE00050605325DD68AF18A549FDB48CB09A6`.
-  The size is the one-time addition of the 22 MB heavy ONNX.
+  `472AD556EC130AEA5F9D57437F076501D03ACE7FBA27B295D845CD370DCD9FC4`.
 - `dist\BetterRemotePlay\brp.exe` matches `build\Release\brp.exe`
-  (SHA256 `7BA2E17158F42CCD60E442650C205F760BF01772C92236AA3A3040329E6B252B`).
+  (SHA256 `8B48BE7979C676AEDAF29FEBFBF876331186CAEA4CDE20766D494EB26276A7F2`).
 - The package includes `rife\rife425_1080.engine` (12.5 MB, built for the
   reference RTX 4090), both RIFE models, `cudart64_13.dll` and `update.exe`.
 - No `session.json`, no pairing data, no runtime logs.
@@ -245,3 +244,28 @@ rebuild its engine.
   loader (12.4 ms GPU compute, p99 13.6 ms) versus 17.7 ms for Lite with the
   same loader. Still inside the 33 ms budget for 30 -> 60.
 - Health log marks the model: `eng=RIFE-H`.
+
+## 0.4.9 - NVIDIA DLSS FG actually smooth (verified 60 and 120)
+
+Three app-side causes, all fixed:
+
+- **Feed starvation:** covered mode used a wall-clock grid and skipped a slot
+  whenever the decode queue was empty; static scenes were also duplicate-skipped
+  to 12.5 fps. The worker received ~10-15 fps and throttled. It now gets every
+  decoded frame immediately via `Streaming::TakeFrameNow`.
+- **Multiplier chase:** the app asked for 4-6x, but the DLSS-G runtime refuses
+  more than 2x (`4x refused 0xBAD00005`). It oscillated 3x-6x every 1.5 s. Now
+  capped at 2 and changed at most every 2 s.
+- **Overlay throttling:** reparenting the worker as a child made it think the
+  app covered it and self-throttle. It is now a top-level topmost no-activate
+  overlay, hidden when the app loses focus.
+
+Measured (4090, 1080p, DLAA + FG, 1440p240 display):
+
+- 30 -> 60: 59.4-60.6 fps, 0 drops/late/stalls, decode 8.4 ms, DLSS 0.74 ms.
+- 60 -> 120: 119.8-120.2 fps, 0 drops/late/stalls, decode 7.9-8.6 ms.
+- Worker log: `displayed 120.0 FPS (real + generated, 2x)`.
+
+Honest limit: DLSS-G here is 2x only. 30 fps -> 60 with NVIDIA; 60 fps -> 120.
+RIFE remains the better 30 -> 60 midpoint. Status map for the full AI engine
+spec is in `docs/32-nvidia-ai-engine.md`.

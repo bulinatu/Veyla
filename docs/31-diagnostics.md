@@ -95,3 +95,22 @@ The health line records `eng=RIFE` for Lite 4.25 and `eng=RIFE-H` for Heavy
 loader (12.4 ms of it GPU compute on a 4090) versus about 18 ms for Lite; if
 `rife=` sits near 25-30 and `cad` starts missing, the model is the limit, not
 the stream. Switch back to Lite in Settings > Upscaling > RIFE model.
+
+## 0.4.9 - fgm and the DLSS FG feed fix
+
+`fgm=` is the multiplier currently sent to the DLSS-G worker (2 while frame
+generation runs, 0 when the source already reaches the target). The
+`content=` field now equals the actual source rate because every decoded
+frame is fed; before 0.4.9 it read ~12 on a static menu because duplicate
+skipping starved the worker.
+
+A healthy NVIDIA run looks like:
+
+```
+fps=59.9 src=57.0 content=59.9 ... fg=120.1 fgm=2 late=0 stalls=0 miss=0
+drops=0 lost=0 dec=7.81/9.23
+```
+
+The worker's `nr-worker.log` should print `displayed 120.0 FPS (real +
+generated, 2x)` and no repeated `refused 0xBAD00005`. If `fgm` is 3 or more,
+the app is asking the runtime for a multiplier it refuses; 0.4.9 caps it at 2.

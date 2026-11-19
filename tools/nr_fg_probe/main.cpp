@@ -51,6 +51,8 @@ int main(int argc, char** argv) {
         argc > 1 ? std::wstring(argv[1], argv[1] + std::strlen(argv[1]))
                  : L"C:\\Users\\Cosmin\\Desktop\\dlss5overlay\\neuralscreen-v2.6.0-full";
     const int multiplier = argc > 2 ? std::atoi(argv[2]) : 2;
+    const int sleep_ms = argc > 3 ? std::atoi(argv[3]) : 16;
+    const int frames = argc > 4 ? std::atoi(argv[4]) : 120;
 
     brp::media::NvDlssnr::Options options;
     options.work_scale = 1.0f;
@@ -70,7 +72,8 @@ int main(int argc, char** argv) {
     nr.SetFrameGeneration(multiplier);
 
     std::vector<uint8_t> out;
-    for (int i = 0; i < 120; ++i) {
+    const ULONGLONG started = ::GetTickCount64();
+    for (int i = 0; i < frames; ++i) {
         auto frame = Scene(i);
         if (!nr.Process(frame.data(), kW, kH, out, detail)) {
             std::fprintf(stderr, "process %d: %s\n", i, detail.c_str());
@@ -79,8 +82,13 @@ int main(int argc, char** argv) {
         if ((i % 20) == 0) {
             std::printf("frame %d submitted\n", i);
         }
-        ::Sleep(16);
+        if (sleep_ms > 0) {
+            ::Sleep(sleep_ms);
+        }
     }
+    const double seconds = (::GetTickCount64() - started) / 1000.0;
+    std::printf("fed %d frames in %.2f s = %.1f input/s\n", frames, seconds,
+                frames / seconds);
     std::printf("done, leaving the window up for 3 s\n");
     ::Sleep(3000);
     nr.Stop();

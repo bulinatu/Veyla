@@ -51,6 +51,10 @@ public:
     // `paced` is used when the caller already decides the display cadence: the
     // frame is taken from the front and at most two frames of latency are kept.
     bool TakeFrame(media::DecodedFrame& out, int buffer, bool paced = false);
+    // Pops the oldest decoded frame immediately, keeping every frame in order.
+    // Used for frame generation, where a skipped input slot starves the
+    // generator and shows up as a dropped output frame.
+    bool TakeFrameNow(media::DecodedFrame& out);
     int buffer_target() const { return buffer_target_.load(); }
     int buffer_drops() const { return buffer_drops_.load(); }
     int video_queue_drops() const { return video_queue_drops_.load(); }

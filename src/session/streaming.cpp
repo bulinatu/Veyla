@@ -704,6 +704,18 @@ std::string Streaming::message() const {
     return message_;
 }
 
+bool Streaming::TakeFrameNow(media::DecodedFrame& out) {
+    std::lock_guard<std::mutex> lock(frame_mutex_);
+    if (frames_.empty()) {
+        last_queue_ = 0;
+        return false;
+    }
+    out = std::move(frames_.front());
+    frames_.pop_front();
+    last_queue_ = static_cast<int>(frames_.size());
+    return true;
+}
+
 bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, bool paced) {
     std::lock_guard<std::mutex> lock(frame_mutex_);
     const auto now = std::chrono::steady_clock::now();

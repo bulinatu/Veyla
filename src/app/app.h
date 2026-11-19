@@ -216,7 +216,6 @@ private:
     int FgTargetHz() const;
     int FgChosenMultiplier(double content_hz, int target) const;
     bool FrameIsDuplicate(const media::DecodedFrame& frame);
-    bool ShouldDropDuplicate(const media::DecodedFrame& frame);
     void UpdateInterpolationMode();
 
     // RIFE (TensorRT) engine. Frames are generated on a worker thread and
@@ -380,11 +379,11 @@ private:
     bool frame_sig_valid_ = false;
     int fg_mult_live_ = -1;      // multiplier currently sent to the worker
     double fg_content_hz_ = 0.0; // measured unique-frame rate
-    double fg_dupes_ = 0.0;      // duplicates skipped in the current window
     double fg_window_at_ = -1.0;
     int fg_window_uniques_ = 0;
     int fg_pending_mult_ = -1;
     int fg_pending_streak_ = 0;
+    double fg_mult_changed_at_ = -1.0;
 
     // RIFE (TensorRT): an alternative interpolation engine. Frames are
     // generated on a worker thread and presented from a small queue, so
@@ -506,6 +505,8 @@ private:
     bool fg_visible_ = false;
     int fg_w_ = 0;
     int fg_h_ = 0;
+    int fg_x_ = 0;
+    int fg_y_ = 0;
     bool borderless_ = false;
     RECT windowed_rect_{};
     LONG_PTR windowed_style_ = 0;

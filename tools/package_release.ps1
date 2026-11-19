@@ -11,7 +11,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $release = Join-Path $root "build\Release"
 $distRoot = Join-Path $root "dist"
 $dest = Join-Path $distRoot "BetterRemotePlay"
-$version = "0.4.8"
+$version = "0.4.9"
 
 function Require-File([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -219,8 +219,9 @@ Settings worth knowing
 - Settings > Upscaling > Interpolation engine: NVIDIA DLSS FG (fast) or RIFE
   (TensorRT). RIFE model: Lite 4.25 (fast, default) or Heavy 4.26 (about twice
   the GPU time, cleaner on fast motion). RIFE output is 60 fps (one generated
-  frame per pair, so a 30 fps game plays at 60) or pass-through. Output frame
-  rate (60/90/120) is the NVIDIA control and only appears for that engine.
+  frame per pair, so a 30 fps game plays at 60) or pass-through. With the NVIDIA
+  engine, 60 fps content becomes 120 (DLSS-G is 2x); 30 fps content becomes 60.
+  The output frame rate control only appears for that engine.
 - Health log: %APPDATA%\BetterRemotePlay\health.log, one line every 30 seconds
   (worker fps, frame timing, source cadence, drops, decode, audio, handles,
   VRAM). Rotates at 2 MB.
