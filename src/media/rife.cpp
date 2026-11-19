@@ -137,7 +137,7 @@ Rife::~Rife() {
 }
 
 bool Rife::Load(const std::string& runtime_dir, const std::string& engine_path,
-                std::string& detail) {
+                int width, int height, std::string& detail) {
     ready_ = false;
     if (runtime_dir.empty()) {
         detail = "no TensorRT runtime directory (set BRP_TENSORRT_DIR or pass --runtime)";
@@ -220,8 +220,8 @@ bool Rife::Load(const std::string& runtime_dir, const std::string& engine_path,
         detail = "engine has no img0 input";
         return false;
     }
-    width_ = engine_width_;
-    height_ = engine_height_;
+    width_ = width > 0 ? std::min(width, engine_width_) : engine_width_;
+    height_ = height > 0 ? std::min(height, engine_height_) : engine_height_;
 
     plane_bytes_ = static_cast<size_t>(engine_width_) * engine_height_ * sizeof(float);
     const size_t plane_count = 3;

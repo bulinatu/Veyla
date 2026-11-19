@@ -253,6 +253,7 @@ enum WidgetId {
     W_Reflex = 65,
     W_DlssFg = 79,
     W_FgTarget = 78,
+    W_FgEngine = 86,
     W_NrOrder = 66,
     W_NeuralNr = 67,
     W_NrPasses = 68,
@@ -1472,6 +1473,14 @@ void App::ApplyDropdown(int id, int index) {
                                : "DLSS Frame Generation off.";
             break;
         }
+        case W_FgEngine: {
+            profile_.fg_engine = index == 1 ? 1 : 0;
+            SaveProfile();
+            stream_note_ = profile_.fg_engine == 1
+                               ? "RIFE engine selected; it loads when the session starts."
+                               : "NVIDIA DLSS Frame Generation selected.";
+            break;
+        }
         case W_FgTarget: {
             static const int kTargets[] = {0, 60, 90, 120};
             profile_.fg_target = kTargets[std::clamp(index, 0, 3)];
@@ -2501,6 +2510,10 @@ bool App::AttachFgWindowNow() {
 }
 
 void App::ApplyDlssFrameGen() {
+    if (profile_.fg_engine == 1) {
+        // RIFE runs in-process; the worker must stay out of the way.
+        return;
+    }
     std::string detail;
     if (profile_.dlss_fg >= 2) {
         // The worker's presenter owns the screen: everything else that also
@@ -2872,6 +2885,222 @@ void App::UpdateInterpolationMode() {
                  fg_content_hz_, candidate < 2 ? "pass-through" : "interpolation",
                  FgTargetHz());
 }
+bool App::EnsureRife() {
+    if (rife_ && rife_->ready()) {
+        return true;
+    }
+    StopRife();
+    std::string runtime = EnvString("BRP_TENSORRT_DIR");
+    if (runtime.empty()) {
+        // Reference machine: the runtime that ships with vs-mlrt. Documented as
+        // a user-supplied requirement, like the NVIDIA VFX runtime.
+        const std::string fallback =
+            "C:\\mpv-upscaler-video-player\\vs-plugins\\vsmlrt-cuda";
+        if (std::filesystem::exists(fallback + "\\nvinfer_10.dll")) {
+            runtime = fallback;
+        }
+    }
+    std::string engine = EnvString("BRP_RIFE_ENGINE");
+    if (engine.empty()) {
+        wchar_t exe[MAX_PATH] = {};
+        ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        const std::filesystem::path dir = std::filesystem::path(exe).parent_path();
+        const std::filesystem::path candidate = dir / "rife" / "rife425_1080.engine";
+        if (std::filesystem::exists(candidate)) {
+            engine = candidate.string();
+        }
+    }
+    std::fprintf(stderr, "[rife] runtime '%s' engine '%s'\n", runtime.c_str(),
+                 engine.c_str());
+    if (runtime.empty() || engine.empty()) {
+        rife_note_ = L"RIFE needs BRP_TENSORRT_DIR and an engine (rife\\rife425_1080.engine "
+                     L"next to the exe, or BRP_RIFE_ENGINE)";
+        std::fprintf(stderr, "[rife] missing paths; not loading\n");
+        return false;
+    }
+
+    auto instance = std::make_unique<media::Rife>();
+    std::string detail;
+    if (!instance->Load(runtime, engine, profile_.width, profile_.height, detail)) {
+        rife_note_ = L"RIFE: " + Widen(detail);
+        std::fprintf(stderr, "[rife] load failed: %s\n", detail.c_str());
+        return false;
+    }
+    rife_ = std::move(instance);
+    {
+        std::lock_guard<std::mutex> lock(rife_mutex_);
+        rife_run_ = true;
+        rife_jobs_.clear();
+        rife_out_.clear();
+    }
+    rife_has_prev_ = false;
+    rife_prev_.clear();
+    rife_thread_ = std::thread(&App::RifeThreadMain, this);
+    rife_note_ = L"RIFE " + std::to_wstring(rife_->width()) + L"x" +
+                 std::to_wstring(rife_->height()) + L" ready";
+    std::fprintf(stderr, "[rife] engine %dx%d ready\n", rife_->width(), rife_->height());
+    return true;
+}
+
+void App::StopRife() {
+    {
+        std::lock_guard<std::mutex> lock(rife_mutex_);
+        rife_run_ = false;
+        rife_jobs_.clear();
+        rife_out_.clear();
+    }
+    rife_cv_.notify_all();
+    if (rife_thread_.joinable()) {
+        rife_thread_.join();
+    }
+    rife_.reset();
+    rife_has_prev_ = false;
+    rife_prev_.clear();
+}
+
+void App::RifeThreadMain() {
+    for (;;) {
+        RifePair job;
+        {
+            std::unique_lock<std::mutex> lock(rife_mutex_);
+            rife_cv_.wait(lock, [this] { return !rife_run_ || !rife_jobs_.empty(); });
+            if (!rife_run_) {
+                return;
+            }
+            job = std::move(rife_jobs_.front());
+            rife_jobs_.pop_front();
+        }
+        if (!rife_) {
+            continue;
+        }
+        std::vector<uint8_t> mid;
+        std::string detail;
+        if (!rife_->Process(job.a.data(), job.b.data(), 0.5f, mid, detail)) {
+            std::fprintf(stderr, "[rife] %s\n", detail.c_str());
+            continue;
+        }
+        RifeOut out;
+        out.rgba = std::move(mid);
+        out.width = rife_->width();
+        out.height = rife_->height();
+        out.pq = false;
+        // The held frame was shown when its successor arrived; the midpoint
+        // belongs half an interval after that.
+        out.due = job.t1 + std::max(0.0, (job.t1 - job.t0) * 0.5);
+        {
+            std::lock_guard<std::mutex> lock(rife_mutex_);
+            rife_out_.push_back(std::move(out));
+            while (rife_out_.size() > 4) {
+                rife_out_.pop_front();
+            }
+        }
+        rife_ms_ = rife_->last_ms();
+        ++rife_generated_;
+    }
+}
+
+void App::RifePush(media::DecodedFrame& frame) {
+    if (!rife_ || !rife_->ready() || frame.rgba.empty()) {
+        return;
+    }
+    if (FrameIsDuplicate(frame)) {
+        return;  // an identical pair has nothing to interpolate
+    }
+    // Content rate, for the status text: unique frames over a 0.75 s window.
+    if (fg_window_at_ < 0.0) {
+        fg_window_at_ = clock_;
+        fg_window_uniques_ = 0;
+    }
+    ++fg_window_uniques_;
+    if (clock_ - fg_window_at_ >= 0.75) {
+        const double hz =
+            static_cast<double>(fg_window_uniques_) / (clock_ - fg_window_at_);
+        fg_content_hz_ = fg_content_hz_ > 0.0 ? fg_content_hz_ * 0.4 + hz * 0.6 : hz;
+        fg_window_uniques_ = 0;
+        fg_window_at_ = clock_;
+    }
+    if (!rife_has_prev_) {
+        rife_prev_ = frame.rgba;
+        rife_prev_w_ = frame.width;
+        rife_prev_h_ = frame.height;
+        rife_prev_pq_ = frame.pq;
+        rife_prev_t_ = clock_;
+        rife_has_prev_ = true;
+        return;
+    }
+
+    const double t1 = clock_;
+    RifePair pair;
+    pair.a = std::move(rife_prev_);
+    pair.b = frame.rgba;
+    pair.width = frame.width;
+    pair.height = frame.height;
+    pair.t0 = rife_prev_t_;
+    pair.t1 = t1;
+
+    // The frame we were holding is shown now: this is the one source interval
+    // of delay that lets RIFE see both ends of the pair.
+    RifeOut held;
+    held.rgba = pair.a;
+    held.width = pair.width;
+    held.height = pair.height;
+    held.pq = rife_prev_pq_;
+    held.due = t1;
+    {
+        std::lock_guard<std::mutex> lock(rife_mutex_);
+        rife_out_.push_back(std::move(held));
+        while (rife_out_.size() > 4) {
+            rife_out_.pop_front();
+        }
+        rife_jobs_.push_back(std::move(pair));
+        while (rife_jobs_.size() > 1) {
+            rife_jobs_.pop_front();
+        }
+    }
+    rife_cv_.notify_one();
+
+    rife_prev_ = frame.rgba;
+    rife_prev_w_ = frame.width;
+    rife_prev_h_ = frame.height;
+    rife_prev_pq_ = frame.pq;
+    rife_prev_t_ = t1;
+}
+
+void App::RifePresentDue() {
+    std::vector<uint8_t> pick;
+    int w = 0;
+    int h = 0;
+    bool pq = false;
+    {
+        std::lock_guard<std::mutex> lock(rife_mutex_);
+        while (!rife_out_.empty() && rife_out_.front().due <= clock_) {
+            pick = std::move(rife_out_.front().rgba);
+            w = rife_out_.front().width;
+            h = rife_out_.front().height;
+            pq = rife_out_.front().pq;
+            rife_out_.pop_front();
+        }
+    }
+    if (!pick.empty()) {
+        presenter_.SetSourceFinal(false);
+        presenter_.SetSourceFrame(pick.data(), w, h, pq);
+        ++rife_shown_;
+    }
+    if (rife_rate_at_ < 0.0) {
+        rife_rate_at_ = clock_;
+        rife_shown_ = 0;
+    } else if (clock_ - rife_rate_at_ >= 1.0) {
+        rife_out_fps_ = static_cast<double>(rife_shown_) / (clock_ - rife_rate_at_);
+        rife_rate_at_ = clock_;
+        rife_shown_ = 0;
+        if (std::getenv("BRP_FG_PROBE")) {
+            std::fprintf(stderr, "[rife] %.0f fps shown, %d generated, %.1f ms/frame\n",
+                         rife_out_fps_, rife_generated_, rife_ms_);
+            rife_generated_ = 0;
+        }
+    }
+}
+
 bool App::TakeNrResult(int& width, int& height, bool& pq) {
     std::lock_guard<std::mutex> lock(nr_mutex_);
     if (!nr_latest_) {
@@ -2975,6 +3204,7 @@ void App::ApplyNrSettings() {
 }
 
 App::~App() {
+    StopRife();
     boot_cancel_.store(true);
     if (boot_worker_.joinable()) {
         boot_worker_.join();
@@ -3247,6 +3477,29 @@ void App::TickSession() {
     if (!borderless_) {
         ToggleFullscreen();
     }
+    // RIFE engine: load it before the first frame, and delay the audio by the
+    // one source interval the interpolation needs so sound stays with picture.
+    if (profile_.fg_engine == 1) {
+        if (!EnsureRife()) {
+            profile_.fg_engine = 0;
+            SaveProfile();
+            stream_note_ = "RIFE unavailable; using NVIDIA frame generation.";
+        } else {
+            // RIFE holds the picture back by one source interval. A 40 ms
+            // playback buffer delays the audio by the same amount; pushing
+            // silence instead caused underruns.
+            if (audio_buffer_ms_ < 40) {
+                audio_buffer_ms_ = 40;
+                if (audio_.is_open()) {
+                    audio_.Close();
+                    audio_failed_ = !audio_.Open(
+                        audio_devices_.empty() ? std::string()
+                                               : audio_devices_[audio_device_].id,
+                        audio_buffer_ms_);
+                }
+            }
+        }
+    }
     video_holds_.fill(0);
     video_hold_pos_ = 0;
     video_hold_fill_ = 0;
@@ -3389,6 +3642,7 @@ void App::DisconnectStream() {
     // that is being torn down.
     stream_active_ = false;
     streaming_.Stop();
+    StopRife();
     pending_connect_ = PendingConnect::None;
     last_source_at_ = -1.0;
     last_source_refresh_ = 0;
@@ -3828,7 +4082,14 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
             }
         }
         const bool vfg_active = frame_gen_ >= 2 && fg_ready_;
-        if (vfg_active) {
+        const bool rife_mode = rife_ && rife_->ready() && profile_.fg_engine == 1;
+        if (rife_mode) {
+            if (video_due &&
+                streaming_.TakeFrame(stream_frame_, stream_buffer_, video_paced)) {
+                NoteSourceFrame();
+                RifePush(stream_frame_);
+            }
+        } else if (vfg_active) {
             if (fg_queue_.size() <= 2 &&
                 streaming_.TakeFrame(stream_frame_, stream_buffer_)) {
                 NoteSourceFrame();
@@ -4089,6 +4350,10 @@ void App::Frame(double time_seconds, const PointerState& pointer) {
                 presenter_.SetSourceView(fg_last_.srv.Get(), stream_frame_.width,
                                          stream_frame_.height, stream_frame_.pq);
             }
+        }
+
+        if (rife_mode) {
+            RifePresentDue();
         }
 
         if (streaming_.state() == session::StreamState::Failed) {
@@ -5510,6 +5775,11 @@ void App::RenderSettings(double t) {
             DrawDropdown(L"DLSS Frame Generation", {L"Off", L"On"},
                          profile_.dlss_fg >= 2 ? 1 : 0, y, W_DlssFg);
             y += kRowH;
+            DrawDropdown(L"Interpolation engine",
+                         {L"NVIDIA DLSS FG (fast)", L"RIFE 4.25 lite (TensorRT)"},
+                         profile_.fg_engine == 1 ? 1 : 0, y, W_FgEngine,
+                         profile_.dlss_fg >= 2);
+            y += kRowH;
             DrawDropdown(L"Output frame rate",
                          {L"Match display", L"60 fps", L"90 fps", L"120 fps"},
                          profile_.fg_target == 60
@@ -5524,28 +5794,29 @@ void App::RenderSettings(double t) {
                            60 * frame_gen_, nv_vfx_.last_generate_ms());
                 ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
                          th::Rgba(th::kMuted));
-            } else if (profile_.dlss_fg >= 2) {
-                const int target = FgTargetHz();
+            } else if (profile_.dlss_fg >= 2 && profile_.fg_engine == 1) {
                 wchar_t text[256];
                 if (!stream_active_) {
                     swprintf_s(text,
-                               L"Frame generation on  -  output %d fps  -  starts with the next session",
-                               target);
+                               L"RIFE selected  -  loads at the next session  -  one frame "
+                               L"between each pair (one source interval of delay)");
+                } else if (rife_ && rife_->ready()) {
+                    swprintf_s(text,
+                               L"RIFE %.0f fps shown  -  %.1f ms/frame  -  %dx%d engine  -  "
+                               L"content %.1f fps",
+                               rife_out_fps_, rife_ms_, rife_->width(), rife_->height(),
+                               fg_content_hz_);
                 } else {
-                    swprintf_s(text, L"content %.1f fps   %s   output %.0f fps   worker %.1f ms",
-                               fg_content_hz_,
-                               fg_mult_live_ < 2 ? L"pass-through" : L"interpolating",
-                               fg_worker_fps_, nr_.last_ms());
+                    swprintf_s(text, L"RIFE engine not loaded. %s", rife_note_.c_str());
                 }
-                const bool limited = fg_worker_fps_ > 0.0 && fg_worker_fps_ < target * 0.95;
                 ui_.Text(text, {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
-                         th::Rgba(limited ? 0xFFC145 : th::kMuted, 0.95f));
-                if (target > 0 && present_hz() % target != 0) {
-                    ui_.Text(L"This rate does not divide the display refresh, so some frames hold "
-                             L"an extra refresh. On a 240 Hz screen, 60 and 120 divide evenly.",
-                             {kContentX, y + 28.0f, w - 64.0f, y + 54.0f}, 11.5f,
-                             th::Rgba(th::kMuted));
-                }            } else if (!FrameGenAvailable()) {
+                         th::Rgba(th::kMuted, 0.95f));
+                ui_.Text(L"RIFE needs TensorRT 10.16 + CUDA 13 on the PC and an engine built for "
+                         L"this GPU (rife\\rife425_1080.engine next to the exe, BRP_RIFE_ENGINE "
+                         L"to override).",
+                         {kContentX, y + 28.0f, w - 64.0f, y + 54.0f}, 11.5f,
+                         th::Rgba(th::kMuted));
+            } else if (profile_.dlss_fg >= 2) {            } else if (!FrameGenAvailable()) {
                 ui_.Text(L"NVIDIA VFX runtime not found: third_party\\nvidia-vfx\\runtime",
                          {kContentX, y + 2.0f, w - 64.0f, y + 28.0f}, 12.0f,
                          th::Rgba(th::kMuted));
@@ -6059,6 +6330,11 @@ void App::RenderStream(double t) {
                     wchar_t part[96];
                     swprintf_s(part, L"VFG %dx   ", frame_gen_);
                     chain += part;
+                } else if (profile_.dlss_fg >= 2 && profile_.fg_engine == 1) {
+                    wchar_t part[160];
+                    swprintf_s(part, L"RIFE %.0f fps   %.1f ms/frame   ", rife_out_fps_,
+                               rife_ms_);
+                    chain += part;
                 } else if (profile_.dlss_fg >= 2) {
                     wchar_t part[160];
                     swprintf_s(part, L"FG %.0f fps   content %.1f fps   %s   ", fg_worker_fps_,
@@ -6258,6 +6534,11 @@ void App::RenderStreamSettings(double t) {
             y += row;
             DrawDropdown(L"DLSS Frame Generation", {L"Off", L"On"},
                          profile_.dlss_fg >= 2 ? 1 : 0, y, W_DlssFg);
+            y += row;
+            DrawDropdown(L"Interpolation engine",
+                         {L"NVIDIA DLSS FG (fast)", L"RIFE 4.25 lite (TensorRT)"},
+                         profile_.fg_engine == 1 ? 1 : 0, y, W_FgEngine,
+                         profile_.dlss_fg >= 2);
             y += row;
             DrawDropdown(L"Output frame rate",
                          {L"Match display", L"60 fps", L"90 fps", L"120 fps"},

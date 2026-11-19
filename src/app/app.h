@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -20,6 +21,7 @@
 #include "media/nv_dlss_sr.h"
 #include "media/nv_dlssnr.h"
 #include "media/nv_reflex.h"
+#include "media/rife.h"
 #include "media/pipeline.h"
 #include "net/reachability.h"
 #include "platform/gamepad.h"
@@ -210,6 +212,14 @@ private:
     bool ShouldDropDuplicate(const media::DecodedFrame& frame);
     void UpdateInterpolationMode();
 
+    // RIFE (TensorRT) engine. Frames are generated on a worker thread and
+    // presented from a small queue, so inference never blocks the frame loop.
+    bool EnsureRife();
+    void StopRife();
+    void RifeThreadMain();
+    void RifePush(media::DecodedFrame& frame);
+    void RifePresentDue();
+
     bool TakeNrResult(int& width, int& height, bool& pq);
     bool NrFailed(std::string& error);
 
@@ -362,6 +372,44 @@ private:
     int fg_window_uniques_ = 0;
     int fg_pending_mult_ = -1;
     int fg_pending_streak_ = 0;
+
+    // RIFE (TensorRT): an alternative interpolation engine. Frames are
+    // generated on a worker thread and presented from a small queue, so
+    // inference never blocks the frame loop.
+    std::unique_ptr<media::Rife> rife_;
+    std::thread rife_thread_;
+    std::mutex rife_mutex_;
+    std::condition_variable rife_cv_;
+    struct RifePair {
+        std::vector<uint8_t> a;
+        std::vector<uint8_t> b;
+        int width = 0;
+        int height = 0;
+        double t0 = 0.0;
+        double t1 = 0.0;
+    };
+    struct RifeOut {
+        std::vector<uint8_t> rgba;
+        int width = 0;
+        int height = 0;
+        double due = 0.0;
+        bool pq = false;
+    };
+    std::deque<RifePair> rife_jobs_;
+    std::deque<RifeOut> rife_out_;
+    bool rife_run_ = false;
+    bool rife_has_prev_ = false;
+    std::vector<uint8_t> rife_prev_;
+    int rife_prev_w_ = 0;
+    int rife_prev_h_ = 0;
+    bool rife_prev_pq_ = false;
+    double rife_prev_t_ = 0.0;
+    double rife_ms_ = 0.0;
+    int rife_generated_ = 0;
+    int rife_shown_ = 0;
+    double rife_rate_at_ = -1.0;
+    double rife_out_fps_ = 0.0;
+    std::wstring rife_note_;
 
     // neural rendering (DLSS Super Resolution, D3D12)
     media::NvDlssSr dlss_sr_;

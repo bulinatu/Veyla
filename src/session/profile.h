@@ -75,6 +75,7 @@ struct Profile {
     int nr_order = 1;      // 0 NR before SR (upstream), 1 NR after SR (NVIDIA order)
     int dlss_fg = 0;       // 0 off, 2 = on; the multiplier is chosen live from content and target
     int fg_target = 0;     // 0 match display, else 60 / 90 / 120 output Hz
+    int fg_engine = 0;     // 0 NVIDIA (DLSS FG through the worker), 1 RIFE (TensorRT)
     int reflex = 0;        // 0 off, 1 on, 2 on + boost (NVAPI low-latency)
     int hud_mask = 31;     // debug HUD sections: frames/gpu/pad/stream/net
     int neural_nr = 0;     // DLSSNR on/off (NGX worker at stream size)

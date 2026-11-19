@@ -326,3 +326,35 @@ engine for 120 fps.
 frames; the probe proves the runtime path and gives the numbers. Integration
 means a render thread that owns presentation pacing (which would also remove the
 closed worker's 120-on-240 wobble), or feeding the existing presenter.
+
+## RIFE in the app (19 Nov 2026)
+
+The engine is wired in as an alternative to the NVIDIA worker:
+
+- Settings > Upscaling > **Interpolation engine**: NVIDIA DLSS FG (fast) or
+  RIFE 4.25 lite (TensorRT). The choice is saved and takes effect at the next
+  session.
+- `EnsureRife` finds the runtime (`BRP_TENSORRT_DIR`, else the reference PC's
+  vs-mlrt folder) and the engine (`<exe>\rife\rife425_1080.engine`, or
+  `BRP_RIFE_ENGINE`). If either is missing the app falls back to NVIDIA and says
+  so.
+- A worker thread owns interpolation; the frame loop pushes pairs and presents
+  from a small queue, so inference never blocks the 240 Hz loop.
+- Pairs are formed from unique frames only (duplicate detection), so a 30 fps
+  game produces one generated frame per pair.
+- The held frame is shown when its successor arrives, then the midpoint half an
+  interval later. That is one source interval of added latency, by design.
+- Audio is opened with a 40 ms buffer in RIFE mode so sound stays with the
+  delayed picture (pushing silence instead caused underruns, measured 30/s).
+
+**Measured in a live session (1080p engine, 30 fps game, 1440p target):**
+
+```
+[rife] 60 fps shown, 30 generated, 24.3 ms/frame
+health: frame_p99 5.54  late 0  stalls 0  audio underruns 0
+```
+
+A still from that session shows the stream sharp at 1440p. The HUD reports
+`RIFE <shown> fps  <ms>/frame`, and the settings page shows the engine size and
+the measured content rate. Quality versus DLSS FG on the same scene has not been
+compared side by side yet.

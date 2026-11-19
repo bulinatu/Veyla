@@ -23,7 +23,7 @@ public:
     // runtime_dir: folder with nvinfer_10.dll and cudart64_13.dll.
     // engine_path: a .engine built for the same GPU and shape.
     bool Load(const std::string& runtime_dir, const std::string& engine_path,
-              std::string& detail);
+              int width, int height, std::string& detail);
 
     // width/height are the source frame size. The engine may be larger (RIFE
     // wants multiples of 64 in height): rows are padded and cropped back.

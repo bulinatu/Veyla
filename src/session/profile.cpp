@@ -389,6 +389,7 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"nr_order\": " << profile.nr_order << ",\n";
     json << "  \"dlss_fg\": " << profile.dlss_fg << ",\n";
 json << "  \"fg_target\": " << profile.fg_target << ",\n";
+json << "  \"fg_engine\": " << profile.fg_engine << ",\n";
     json << "  \"reflex\": " << profile.reflex << ",\n";
     json << "  \"hud_mask\": " << profile.hud_mask << ",\n";
     json << "  \"neural_nr\": " << profile.neural_nr << ",\n";
@@ -479,6 +480,7 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     if (ExtractNumber(json, "nr_order", number)) p.nr_order = static_cast<int>(number);
     if (ExtractNumber(json, "dlss_fg", number)) p.dlss_fg = static_cast<int>(number);
 if (ExtractNumber(json, "fg_target", number)) p.fg_target = static_cast<int>(number);
+if (ExtractNumber(json, "fg_engine", number)) p.fg_engine = static_cast<int>(number);
     if (ExtractNumber(json, "reflex", number)) p.reflex = static_cast<int>(number);
     if (ExtractNumber(json, "hud_mask", number)) p.hud_mask = static_cast<int>(number);
     if (ExtractNumber(json, "nr_passes", number)) p.nr_passes = static_cast<int>(number);
@@ -498,6 +500,7 @@ if (ExtractNumber(json, "fg_target", number)) p.fg_target = static_cast<int>(num
     p.nr_order = std::clamp(p.nr_order, 0, 1);
     p.dlss_fg = p.dlss_fg >= 2 ? 2 : 0;  // on or off; the multiplier is chosen live
 p.fg_target = p.fg_target == 60 || p.fg_target == 90 || p.fg_target == 120 ? p.fg_target : 0;
+p.fg_engine = p.fg_engine == 1 ? 1 : 0;
     p.reflex = std::clamp(p.reflex, 0, 2);
     p.sharpness = std::clamp(p.sharpness, 0, 100);
     p.color_on = std::clamp(p.color_on, 0, 1);

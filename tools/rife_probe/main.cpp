@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
 
     brp::media::Rife rife;
     std::string detail;
-    if (!rife.Load(runtime, engine, detail)) {
+    if (!rife.Load(runtime, engine, 1920, 1080, detail)) {
         std::fprintf(stderr, "load failed: %s\n", detail.c_str());
         return 1;
     }
