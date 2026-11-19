@@ -508,3 +508,24 @@ bytes: detected, removed, stream started on NVIDIA.
   inside the 50 ms budget.
 - Measured path on the reference 4090 is unchanged (cadence 16.6-16.9 ms); the
   changes are architecture-agnostic and take effect when setup rebuilds.
+
+### 0.4.2 - gaps and fast turns (RTX 5080 reports)
+
+Two artifact guards, both aimed at what a 5080 user described as "the head
+disappears when rotating":
+
+- **Pair-gap guard.** If the interval between pair frames jumps above 1.7x the
+  running average, a frame was dropped (NR slot, jitter buffer). Interpolating
+  across it invents a pose between non-consecutive frames. The app now shows
+  those frames directly and restarts the pair.
+- **Fast-motion guard.** The 64x64 sample already used for duplicate detection
+  also yields a mean frame difference. Above 12.0 (a fast turn, where
+  disocclusion makes interpolation invent background behind the character), the
+  frame is shown without a generated midpoint. `BRP_RIFE_SAFE_MOTION=0` turns
+  this off for comparison.
+- **Health line** now records which engine ran and its numbers:
+  `eng=RIFE rife=<shown fps>/<ms> cad=<ms>`, so a report from another PC says
+  immediately whether RIFE or NVIDIA was active.
+
+These do not change the 4090 cadence (16.6-16.9 ms); they trade occasional
+smoothness for correctness exactly on the frames that would look wrong.

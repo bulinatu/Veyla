@@ -430,6 +430,9 @@ private:
     std::array<double, 12> rife_samples_{};
     int rife_sample_pos_ = 0;
     int rife_sample_n_ = 0;
+    double rife_gap_ema_ = 0.0;
+    double rife_cadence_ms_ = 0.0;
+    double last_frame_diff_ = 0.0;
     RifeSetup rife_setup_;
     bool setup_modal_ = false;
 

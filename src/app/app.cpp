@@ -941,7 +941,7 @@ void App::RenderBoot(double t) {
              th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    ui_.Text(L"v0.4.1", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
+    ui_.Text(L"v0.4.2", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
              th::Rgba(th::kMuted, 0.55f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
 }
@@ -1976,13 +1976,16 @@ void App::LogHealth() {
 
     char line[512];
     std::snprintf(line, sizeof(line),
-                  "%04d-%02d-%02dT%02d:%02d:%02d sr=%d mode=%d fg=%d nr=%d hdr=%d tgt=%d buf=%d | "
+                  "%04d-%02d-%02dT%02d:%02d:%02d sr=%d mode=%d fg=%d nr=%d hdr=%d tgt=%d buf=%d "
+                  "eng=%s rife=%.1f/%.2f cad=%.2f | "
                   "worker=%.1f dlss=%.2f enh=%.2f | frame_p99=%.2f work=%.2f late=%d stalls=%d | "
                   "src=%.1f 4v=%d q=%d drops=%d lost=%d dec=%.2f/%.2f out=%d | "
                   "audio=%d handles=%lu vram=%llu/%llu\n",
                   st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
                   profile_.neural_sr, profile_.dlss_mode, profile_.dlss_fg, profile_.neural_nr,
-                  hdr_ ? 1 : 0, render_target_, stream_buffer_, fg_worker_fps_,
+                  hdr_ ? 1 : 0, render_target_, stream_buffer_,
+                  profile_.fg_engine == 1 ? "RIFE" : "NVIDIA", rife_out_fps_, rife_ms_,
+                  rife_cadence_ms_, fg_worker_fps_,
                   dlss_sr_.last_ms(), presenter_.enhance_ms(), static_cast<double>(stat_p99_),
                   frame_work_ms_, stat_late_, stat_stalls_, src_fps, four_pct,
                   stream_stats_.queue, stream_stats_.buffer_drops + streaming_.video_queue_drops(),
@@ -2877,6 +2880,7 @@ bool App::FrameIsDuplicate(const media::DecodedFrame& frame) {
         }
         const double mean = static_cast<double>(sum) /
                             (static_cast<double>(samples.size()) * 3.0);
+        last_frame_diff_ = mean;
         duplicate = mean < 1.2 && outliers < 96;  // under ~1.5 % of channels
     }
     frame_samples_ = samples;
@@ -3143,10 +3147,29 @@ void App::RifePush(media::DecodedFrame& frame, bool unique) {
 
     const double t1 = clock_;
     const double interval = t1 - rife_prev_t_;
-    // Pass-through, or 60 fps content where a generated mid-frame adds nothing
-    // (and would not fit the 8 ms budget). Show the frame as it arrives.
+    if (rife_gap_ema_ <= 0.0 && interval > 0.0) {
+        rife_gap_ema_ = interval;
+    }
+    // A gap means a frame was dropped (NR slot, jitter buffer). Interpolating
+    // across it invents a pose between non-consecutive frames, which reads as a
+    // character's head vanishing on a fast turn. Show frames directly instead.
+    const bool gap = rife_gap_ema_ > 0.0 && interval > rife_gap_ema_ * 1.7;
+    if (gap) {
+        rife_gap_ema_ = interval;
+    } else if (interval > 0.0) {
+        rife_gap_ema_ = rife_gap_ema_ * 0.8 +
+                        std::min(interval, rife_gap_ema_ * 2.0) * 0.2;
+    }
+    // Pass-through, gaps, or 60 fps content where a generated mid-frame adds
+    // nothing (and would not fit the 8 ms budget). Show the frame as it arrives.
     static const bool force_gen = std::getenv("BRP_RIFE_FORCE_GEN") != nullptr;
-    if (!force_gen && (profile_.rife_output == 0 || (interval > 0.0 && interval < 0.025))) {
+    // Fast turns are where interpolation invents a wrong pose (the vanishing
+    // head). Default on; BRP_RIFE_SAFE_MOTION=0 disables it.
+    static const bool safe_motion = std::getenv("BRP_RIFE_SAFE_MOTION") == nullptr;
+    const bool fast_motion = safe_motion && last_frame_diff_ > 12.0;
+    if (!force_gen &&
+        (profile_.rife_output == 0 || (interval > 0.0 && interval < 0.025) || gap ||
+         fast_motion)) {
         RifeOut direct;
         direct.rgba = frame.rgba;
         direct.width = frame.width;
@@ -3246,10 +3269,11 @@ void App::RifePresentDue() {
         rife_out_fps_ = static_cast<double>(rife_shown_) / (clock_ - rife_rate_at_);
         rife_rate_at_ = clock_;
         rife_shown_ = 0;
+        const double avg = rife_interval_n_ > 0
+                               ? rife_interval_sum_ * 1000.0 / rife_interval_n_
+                               : 0.0;
+        rife_cadence_ms_ = avg;
         if (std::getenv("BRP_FG_PROBE")) {
-            const double avg = rife_interval_n_ > 0
-                                   ? rife_interval_sum_ * 1000.0 / rife_interval_n_
-                                   : 0.0;
             std::fprintf(stderr,
                          "[rife] %.0f fps shown, %d generated, %.1f ms/frame, "
                          "cadence avg %.2f ms max %.2f ms, content %.1f fps, dupes %d\n",
@@ -6478,7 +6502,7 @@ void App::RenderSettings(double t) {
             break;
         }
         case Tab::About: {
-            ui_.Text(L"BetterRemotePlay 0.4.1", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
+            ui_.Text(L"BetterRemotePlay 0.4.2", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
                      th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 48.0f;
             ui_.Text(L"A PS5 to PC Remote Play client with a real post-process pipeline: "

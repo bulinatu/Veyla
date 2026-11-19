@@ -179,3 +179,11 @@ rebuild its engine.
 - Measured 0.3 -> 0.4: 0.6 MB, 2 changed files; the patched folder matched the
   full package byte for byte.
 - Documented in `docs/30-updates.md`.
+
+## 0.4.2 - 5080 artifacts
+
+- Pair-gap guard: no interpolation across a dropped frame (1.7x interval).
+- Fast-motion guard: mean frame difference above 12 shows the real frame
+  instead of a warped midpoint (the "vanishing head" on turns).
+- Health log records `eng=RIFE|NVIDIA`, `rife=<fps>/<ms>` and `cad=<ms>`.
+- `BRP_RIFE_SAFE_MOTION=0` disables the fast-motion guard for comparison.
