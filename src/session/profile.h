@@ -77,6 +77,7 @@ struct Profile {
     int fg_target = 0;     // 0 match display, else 60 / 90 / 120 output Hz
     int fg_engine = 0;     // 0 NVIDIA (DLSS FG through the worker), 1 RIFE (TensorRT)
     int rife_output = 60;  // RIFE: 60 = one generated frame per pair, 0 = pass-through
+    int rife_model = 0;    // 0 = Lite 4.25 (fast), 1 = Heavy 4.26 (quality)
     int reflex = 0;        // 0 off, 1 on, 2 on + boost (NVAPI low-latency)
     int hud_mask = 31;     // debug HUD sections: frames/gpu/pad/stream/net
     int neural_nr = 0;     // DLSSNR on/off (NGX worker at stream size)

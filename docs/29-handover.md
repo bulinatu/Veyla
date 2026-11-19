@@ -5,17 +5,18 @@ Resolution, DLSS Frame Generation (through the closed NeuralScreen worker),
 GPU colour and sharpening, a custom PS5-style UI and native DualSense support.
 Build `0.3`. Run `git log -1` for the current commit.
 
-Version 0.4.7 (19 Nov 2026).
+Version 0.4.8 (20 Nov 2026).
 
-- Standalone: `dist\BetterRemotePlay-0.4.7-standalone.zip`, 602.2 MB, SHA256
-  `47D35EE7D6980108A794813D5A97F37AC022E4E8D7A294C55081DB8755653212`.
-- Update from 0.4.5 or 0.4.6: `dist\BetterRemotePlay-0.4.7-update.exe`,
-  **0.71 MB, one file**, SHA256
-  `0F550E89EF53FFFC281595ED540D8852DD5C5F954D9D160286CBD7425CA42792`.
+- Standalone: `dist\BetterRemotePlay-0.4.8-standalone.zip`, 909.8 MB, SHA256
+  `2E0C539CC8ADAA9EB2DF271D25CB7F2A657FD541452285BC317D0AF9B76DDD0F`.
+- Update from 0.4.7: `dist\BetterRemotePlay-0.4.8-update.exe`, **21.07 MB, one
+  file**, SHA256
+  `D7E3A4E79BA2A463C1EF6F10876EFE00050605325DD68AF18A549FDB48CB09A6`.
+  The size is the one-time addition of the 22 MB heavy ONNX.
 - `dist\BetterRemotePlay\brp.exe` matches `build\Release\brp.exe`
-  (SHA256 `49F04BBD88EE129D084CD3A36AA3EB26CC79133535E78E59225EBC477E3CFD36`).
+  (SHA256 `7BA2E17158F42CCD60E442650C205F760BF01772C92236AA3A3040329E6B252B`).
 - The package includes `rife\rife425_1080.engine` (12.5 MB, built for the
-  reference RTX 4090), the RIFE model, `cudart64_13.dll` and `update.exe`.
+  reference RTX 4090), both RIFE models, `cudart64_13.dll` and `update.exe`.
 - No `session.json`, no pairing data, no runtime logs.
 
 ## What works
@@ -232,3 +233,15 @@ rebuild its engine.
   small independent motion in a static scene was being skipped as a duplicate.
 - Default RIFE blend lowered 20 -> 10 % (ghosting of moving bodies); note in the
   UI explains the head/ghost trade-off.
+
+## 0.4.8 - selectable RIFE model
+
+- Settings > Upscaling > RIFE model: Lite 4.25 (default) or Heavy 4.26.
+- Heavy needs one 6-channel input; the loader detects that layout from the
+  engine and writes frame B into planes 3..5 of the same pinned buffer.
+- Heavy engine `rife426h_1080.engine` is built on demand by "Set up RIFE"; the
+  22 MB heavy ONNX is bundled in the package.
+- Measured on a 4090 at 1080p: Heavy 23-25 ms per generated frame through the
+  loader (12.4 ms GPU compute, p99 13.6 ms) versus 17.7 ms for Lite with the
+  same loader. Still inside the 33 ms budget for 30 -> 60.
+- Health log marks the model: `eng=RIFE-H`.

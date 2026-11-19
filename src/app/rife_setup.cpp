@@ -14,8 +14,29 @@
 namespace brp {
 namespace {
 
-constexpr wchar_t kModelUrl[] =
-    L"https://huggingface.co/t9749/rife-4.25-lite-onnx/resolve/main/rife_v425lite.onnx";
+struct ModelInfo {
+    const wchar_t* url;
+    const wchar_t* onnx;
+    const wchar_t* engine;
+    const wchar_t* shapes;
+};
+
+// Lite is the default: ~6 ms per frame on a 4090. Heavy 4.26 is about twice
+// the compute but visibly cleaner on fast motion; it takes one 6-channel input
+// (both frames concatenated) instead of img0/img1.
+constexpr ModelInfo kModels[] = {
+    {L"https://huggingface.co/t9749/rife-4.25-lite-onnx/resolve/main/rife_v425lite.onnx",
+     L"rife425lite.onnx", L"rife425_1080.engine",
+     L"img0:1x3x1088x1920,img1:1x3x1088x1920,timestep:1x1x1x1"},
+    {L"https://huggingface.co/SOR2171/RIFE-ONNX/resolve/main/rife2_26h.onnx",
+     L"rife426h.onnx", L"rife426h_1080.engine",
+     L"input:1x6x1088x1920,timestep:1x1x1x1"},
+};
+constexpr int kModelCount = static_cast<int>(sizeof(kModels) / sizeof(kModels[0]));
+
+const ModelInfo& Model(int model) {
+    return kModels[std::clamp(model, 0, kModelCount - 1)];
+}
 
 // Official TensorRT 10.16 for Windows, CUDA 13.2. NVIDIA's page requires a
 // browser click, but this file is served straight from developer.download.
@@ -164,10 +185,10 @@ void RifeSetup::SetStatus(const std::wstring& text, float progress) {
     progress_.store(progress);
 }
 
-bool RifeSetup::ready(const std::filesystem::path& exe_dir) const {
+bool RifeSetup::ready(const std::filesystem::path& exe_dir, int model) const {
     const std::filesystem::path rife = exe_dir / "rife";
     std::error_code ec;
-    const auto engine = rife / "rife425_1080.engine";
+    const auto engine = rife / Model(model).engine;
     if (!std::filesystem::exists(engine, ec) ||
         std::filesystem::file_size(engine, ec) < 1024u * 1024u) {
         return false;
@@ -189,7 +210,7 @@ bool RifeSetup::ready(const std::filesystem::path& exe_dir) const {
     return runtime;
 }
 
-void RifeSetup::Start(const std::filesystem::path& exe_dir) {
+void RifeSetup::Start(const std::filesystem::path& exe_dir, int model) {
     if (state_.load() == State::Running) {
         return;
     }
@@ -197,10 +218,10 @@ void RifeSetup::Start(const std::filesystem::path& exe_dir) {
     state_.store(State::Running);
     progress_.store(-1.0f);
     SetStatus(L"Starting...", -1.0f);
-    thread_ = std::thread(&RifeSetup::Run, this, exe_dir);
+    thread_ = std::thread(&RifeSetup::Run, this, exe_dir, model);
 }
 
-void RifeSetup::Run(std::filesystem::path exe_dir) {
+void RifeSetup::Run(std::filesystem::path exe_dir, int model) {
     std::filesystem::path rife = exe_dir / "rife";
     std::error_code ec;
     std::filesystem::create_directories(rife, ec);
@@ -264,12 +285,13 @@ void RifeSetup::Run(std::filesystem::path exe_dir) {
         marker << Utf8(runtime.wstring());
     }
 
-    const std::filesystem::path model = rife / "rife425lite.onnx";
-    if (!std::filesystem::exists(model, ec) ||
-        std::filesystem::file_size(model, ec) < 10u * 1024u * 1024u) {
+    const ModelInfo& info = Model(model);
+    const std::filesystem::path model_path = rife / info.onnx;
+    if (!std::filesystem::exists(model_path, ec) ||
+        std::filesystem::file_size(model_path, ec) < 10u * 1024u * 1024u) {
         SetStatus(L"Downloading the RIFE model (22 MB)...", 0.62f);
         std::string detail;
-        if (!Download(kModelUrl, model, detail, 0.62f, 0.10f)) {
+        if (!Download(info.url, model_path, detail, 0.62f, 0.10f)) {
             SetStatus(L"Model download failed: " + Widen(detail), -1.0f);
             state_.store(State::Failed);
             return;
@@ -278,7 +300,7 @@ void RifeSetup::Run(std::filesystem::path exe_dir) {
     SetStatus(L"RIFE model ready.", 0.72f);
     std::fprintf(stderr, "[setup] model ready\n");
 
-    const std::filesystem::path engine = rife / "rife425_1080.engine";
+    const std::filesystem::path engine = rife / info.engine;
     bool engine_ok = false;
     if (std::filesystem::exists(engine, ec) &&
         std::filesystem::file_size(engine, ec) >= 1024u * 1024u) {
@@ -299,7 +321,7 @@ void RifeSetup::Run(std::filesystem::path exe_dir) {
                   L"responsive)...",
                   0.4f);
         std::string detail;
-        if (!BuildEngine(exe_dir, runtime, detail)) {
+        if (!BuildEngine(exe_dir, runtime, model, detail)) {
             SetStatus(Widen(detail), -1.0f);
             state_.store(State::Failed);
             return;
@@ -307,7 +329,10 @@ void RifeSetup::Run(std::filesystem::path exe_dir) {
     }
 
     std::fprintf(stderr, "[setup] done\n");
-    SetStatus(L"Ready. RIFE can be enabled in Settings > Upscaling.", 1.0f);
+    SetStatus(std::wstring(L"Ready. ") +
+                  (model == 1 ? L"RIFE Heavy 4.26" : L"RIFE Lite 4.25") +
+                  L" can be enabled in Settings > Upscaling.",
+              1.0f);
     state_.store(State::Done);
 }
 
@@ -427,7 +452,7 @@ bool RifeSetup::Download(const std::wstring& url, const std::filesystem::path& p
 }
 
 bool RifeSetup::BuildEngine(const std::filesystem::path& exe_dir,
-                            const std::filesystem::path& runtime_dir,
+                            const std::filesystem::path& runtime_dir, int model,
                             std::string& detail) {
     std::error_code ec;
     std::filesystem::path trtexec = runtime_dir / "trtexec.exe";
@@ -444,12 +469,12 @@ bool RifeSetup::BuildEngine(const std::filesystem::path& exe_dir,
     }
 
     const std::filesystem::path rife = exe_dir / "rife";
-    const std::filesystem::path model = rife / "rife425lite.onnx";
-    const std::filesystem::path engine = rife / "rife425_1080.engine";
+    const ModelInfo& info = Model(model);
+    const std::filesystem::path model_path = rife / info.onnx;
+    const std::filesystem::path engine = rife / info.engine;
 
-    std::wstring command = L"\"" + trtexec.wstring() + L"\" --onnx=\"" + model.wstring() +
-                           L"\" --fp16 --shapes=img0:1x3x1088x1920,img1:1x3x1088x1920,"
-                           L"timestep:1x1x1x1 --saveEngine=\"" +
+    std::wstring command = L"\"" + trtexec.wstring() + L"\" --onnx=\"" + model_path.wstring() +
+                           L"\" --fp16 --shapes=" + info.shapes + L" --saveEngine=\"" +
                            engine.wstring() + L"\"";
     std::vector<wchar_t> mutable_command(command.begin(), command.end());
     mutable_command.push_back(L'\0');

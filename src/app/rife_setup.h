@@ -25,21 +25,23 @@ public:
     RifeSetup(const RifeSetup&) = delete;
     RifeSetup& operator=(const RifeSetup&) = delete;
 
-    void Start(const std::filesystem::path& exe_dir);
+    // model: 0 = Lite 4.25 (img0/img1), 1 = Heavy 4.26 (one 6-channel input).
+    void Start(const std::filesystem::path& exe_dir, int model = 0);
     void Join();
 
     State state() const { return state_.load(); }
     std::wstring status() const;
     float progress() const { return progress_.load(); }
-    bool ready(const std::filesystem::path& exe_dir) const;
+    bool ready(const std::filesystem::path& exe_dir, int model = 0) const;
 
 private:
-    void Run(std::filesystem::path exe_dir);
+    void Run(std::filesystem::path exe_dir, int model);
     void SetStatus(const std::wstring& text, float progress);
     bool Download(const std::wstring& url, const std::filesystem::path& path,
                   std::string& detail, float base, float span);
     bool BuildEngine(const std::filesystem::path& exe_dir,
-                     const std::filesystem::path& runtime_dir, std::string& detail);
+                     const std::filesystem::path& runtime_dir, int model,
+                     std::string& detail);
 
     std::thread thread_;
     std::atomic<State> state_{State::Idle};

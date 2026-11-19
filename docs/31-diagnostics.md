@@ -87,3 +87,11 @@ were not generated, and `fs` for the borderless state.
   second, not the session total.
 - Presentation hands over **one due frame per tick** instead of the newest of
   several. A stall that makes two frames due no longer drops one.
+
+## 0.4.8 - which RIFE model ran
+
+The health line records `eng=RIFE` for Lite 4.25 and `eng=RIFE-H` for Heavy
+4.26. Heavy measures about 23-25 ms per generated frame at 1080p through the
+loader (12.4 ms of it GPU compute on a 4090) versus about 18 ms for Lite; if
+`rife=` sits near 25-30 and `cad` starts missing, the model is the limit, not
+the stream. Switch back to Lite in Settings > Upscaling > RIFE model.

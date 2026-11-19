@@ -285,6 +285,7 @@ enum WidgetId {
     W_TestingLog = 107,
     W_RifeBlend = 108,
     W_RifeSafe = 109,
+    W_RifeModel = 117,
     W_PsnLogin = 90,
     W_PsnOpen,
     W_PsnPaste,
@@ -950,7 +951,7 @@ void App::RenderBoot(double t) {
              th::Rgba(th::kMuted, 0.85f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_TRAILING);
 
-    ui_.Text(L"v0.4.7", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
+    ui_.Text(L"v0.4.8", {cx - 100.0f, h - 34.0f, cx + 100.0f, h - 14.0f}, 11.0f,
              th::Rgba(th::kMuted, 0.55f * alpha), DWRITE_FONT_WEIGHT_NORMAL,
              DWRITE_TEXT_ALIGNMENT_CENTER);
 }
@@ -1071,12 +1072,11 @@ void App::DispatchClick() {
                     TriggerRumble();
                 } else if (it->index == W_SetupRife) {
                     setup_modal_ = true;
-                    if (rife_setup_.state() != RifeSetup::State::Running &&
-                        rife_setup_.state() != RifeSetup::State::Done) {
-                        rife_setup_.Start(ExeDirPath());
+                    if (rife_setup_.state() != RifeSetup::State::Running) {
+                        rife_setup_.Start(ExeDirPath(), profile_.rife_model);
                     }
                 } else if (it->index == W_SetupStart) {
-                    rife_setup_.Start(ExeDirPath());
+                    rife_setup_.Start(ExeDirPath(), profile_.rife_model);
                 } else if (it->index == W_SetupClose) {
                     setup_modal_ = false;
                 } else if (it->index == W_Probe) {
@@ -1521,6 +1521,27 @@ void App::ApplyDropdown(int id, int index) {
             stream_note_ = profile_.rife_output == 0
                                ? "RIFE pass-through: source frames only."
                                : "RIFE: one generated frame between each pair.";
+            break;
+        }
+        case W_RifeModel: {
+            const int model = index == 1 ? 1 : 0;
+            if (profile_.rife_model != model) {
+                profile_.rife_model = model;
+                SaveProfile();
+                const bool engine_ready = rife_setup_.ready(ExeDirPath(), model);
+                stream_note_ = model == 1
+                                   ? "RIFE Heavy 4.26 selected: about twice the GPU time, cleaner motion."
+                                   : "RIFE Lite 4.25 selected: the fast model.";
+                if (!engine_ready && screen_ != Screen::Stream) {
+                    // Build it now instead of failing at the next stream start.
+                    setup_modal_ = true;
+                    if (rife_setup_.state() != RifeSetup::State::Running) {
+                        rife_setup_.Start(ExeDirPath(), model);
+                    }
+                } else if (!engine_ready) {
+                    stream_note_ = "Model saved; its engine is built from Home before the next stream.";
+                }
+            }
             break;
         }
         case W_RifeBlend: {
@@ -2167,7 +2188,10 @@ void App::LogHealth() {
                   st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
                   profile_.neural_sr, profile_.dlss_mode, profile_.dlss_fg, profile_.neural_nr,
                   hdr_ ? 1 : 0, render_target_, stream_buffer_,
-                  profile_.fg_engine == 1 ? "RIFE" : "NVIDIA", rife_out_fps_, rife_ms_,
+                  profile_.fg_engine == 1
+                      ? (profile_.rife_model == 1 ? "RIFE-H" : "RIFE")
+                      : "NVIDIA",
+                  rife_out_fps_, rife_ms_,
                   rife_cadence_ms_, fg_worker_fps_,
                   dlss_sr_.last_ms(), presenter_.enhance_ms(), static_cast<double>(stat_p99_),
                   frame_work_ms_, stat_late_, stat_stalls_, src_fps, four_pct,
@@ -3182,8 +3206,10 @@ bool App::EnsureRife() {
         }
     }
     std::string engine = EnvString("BRP_RIFE_ENGINE");
+    const char* engine_name =
+        profile_.rife_model == 1 ? "rife426h_1080.engine" : "rife425_1080.engine";
     if (engine.empty()) {
-        const std::filesystem::path candidate = exe_dir / "rife" / "rife425_1080.engine";
+        const std::filesystem::path candidate = exe_dir / "rife" / engine_name;
         if (std::filesystem::exists(candidate)) {
             engine = candidate.string();
         }
@@ -3191,8 +3217,8 @@ bool App::EnsureRife() {
     std::fprintf(stderr, "[rife] runtime '%s' engine '%s'\n", runtime.c_str(),
                  engine.c_str());
     if (runtime.empty() || engine.empty()) {
-        rife_note_ = L"RIFE needs BRP_TENSORRT_DIR and an engine (rife\\rife425_1080.engine "
-                     L"next to the exe, or BRP_RIFE_ENGINE)";
+        rife_note_ = std::wstring(L"RIFE needs TensorRT and rife\\") + Widen(engine_name) +
+                     L" next to the exe (or BRP_RIFE_ENGINE). Press Set up RIFE.";
         std::fprintf(stderr, "[rife] missing paths; not loading\n");
         return false;
     }
@@ -3225,8 +3251,9 @@ bool App::EnsureRife() {
     rife_has_prev_ = false;
     rife_prev_.clear();
     rife_thread_ = std::thread(&App::RifeThreadMain, this);
-    rife_note_ = L"RIFE " + std::to_wstring(rife_->width()) + L"x" +
-                 std::to_wstring(rife_->height()) + L" ready";
+    rife_note_ = std::wstring(profile_.rife_model == 1 ? L"RIFE Heavy 4.26 " : L"RIFE Lite 4.25 ") +
+                 std::to_wstring(rife_->width()) + L"x" + std::to_wstring(rife_->height()) +
+                 L" ready";
     std::fprintf(stderr, "[rife] engine %dx%d ready\n", rife_->width(), rife_->height());
     return true;
 }
@@ -5931,7 +5958,7 @@ void App::RenderHome(double t) {
         const float button_y = borderless_ ? 28.0f : kTitleBarH + 12.0f;
         const D2D1_RECT_F gear{w - kCornerMargin - kCornerButton, button_y,
                                w - kCornerMargin, button_y + kCornerButton};
-        const bool ready = rife_setup_.ready(ExeDirPath());
+        const bool ready = rife_setup_.ready(ExeDirPath(), profile_.rife_model);
         const wchar_t* label = rife_setup_.state() == RifeSetup::State::Running
                                    ? L"Setting up RIFE..."
                                    : (ready ? L"RIFE ready" : L"Set up RIFE");
@@ -6345,9 +6372,14 @@ void App::RenderSettings(double t) {
                          profile_.dlss_fg >= 2 ? 1 : 0, y, W_DlssFg);
             y += kRowH;
             DrawDropdown(L"Interpolation engine",
-                         {L"NVIDIA DLSS FG (fast)", L"RIFE 4.25 lite (TensorRT)"},
+                         {L"NVIDIA DLSS FG (fast)", L"RIFE (TensorRT)"},
                          profile_.fg_engine == 1 ? 1 : 0, y, W_FgEngine,
                          profile_.dlss_fg >= 2);
+            y += kRowH;
+            DrawDropdown(L"RIFE model",
+                         {L"Lite 4.25 (fast)", L"Heavy 4.26 (quality)"},
+                         profile_.rife_model == 1 ? 1 : 0, y, W_RifeModel,
+                         profile_.dlss_fg >= 2 && profile_.fg_engine == 1);
             y += kRowH;
             DrawDropdown(L"RIFE output",
                          {L"60 fps (one frame between each pair)", L"Pass-through"},
@@ -6374,7 +6406,9 @@ void App::RenderSettings(double t) {
             y += kRowH;
             if (profile_.fg_engine == 1) {
                 ui_.Text(L"RIFE generates one frame per pair: a 30 fps game plays at 60. "
-                         L"90/120 need the NVIDIA engine. The model is fixed (4.25 lite). "
+                         L"90/120 need the NVIDIA engine. Lite 4.25 is the fast model; Heavy "
+                         L"4.26 is about twice the GPU time and cleaner on fast motion (its "
+                         L"engine is built on demand). "
                          L"DLSS SR is bypassed here; neural rendering, when on, runs on the 1080p "
                          L"stream before RIFE. Blend hides the vanishing head but can ghost "
                          L"objects that move independently; set it Off if bodies look frozen.",
@@ -6759,7 +6793,7 @@ void App::RenderSettings(double t) {
             break;
         }
         case Tab::About: {
-            ui_.Text(L"BetterRemotePlay 0.4.7", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
+            ui_.Text(L"BetterRemotePlay 0.4.8", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
                      th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 48.0f;
             ui_.Text(L"A PS5 to PC Remote Play client with a real post-process pipeline: "
@@ -7158,9 +7192,14 @@ void App::RenderStreamSettings(double t) {
                          profile_.dlss_fg >= 2 ? 1 : 0, y, W_DlssFg);
             y += row;
             DrawDropdown(L"Interpolation engine",
-                         {L"NVIDIA DLSS FG (fast)", L"RIFE 4.25 lite (TensorRT)"},
+                         {L"NVIDIA DLSS FG (fast)", L"RIFE (TensorRT)"},
                          profile_.fg_engine == 1 ? 1 : 0, y, W_FgEngine,
                          profile_.dlss_fg >= 2);
+            y += row;
+            DrawDropdown(L"RIFE model",
+                         {L"Lite 4.25 (fast)", L"Heavy 4.26 (quality)"},
+                         profile_.rife_model == 1 ? 1 : 0, y, W_RifeModel,
+                         profile_.dlss_fg >= 2 && profile_.fg_engine == 1);
             y += row;
             DrawDropdown(L"RIFE output",
                          {L"60 fps (one frame between each pair)", L"Pass-through"},

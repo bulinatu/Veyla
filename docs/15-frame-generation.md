@@ -562,3 +562,36 @@ Two independent causes, both fixed or reduced:
   bodies. Default is now 10 %, and the settings note says to set it Off if
   bodies look frozen. The trade-off is: blend Off -> head can flicker; blend
   20-40 % -> head stays but moving objects ghost.
+
+### 0.4.8 - selectable RIFE model (Lite 4.25 / Heavy 4.26)
+
+A search for newer VFI models (VFIMamba, LC-Mamba, EMA-VFI, GIMM-VFI, diffusion
+models such as SPEED/EDEN) found better benchmark scores but 50-700 ms per
+frame, so none are usable for a live stream. The useful upgrade is RIFE's own
+heavy variants.
+
+Measured with trtexec on a 4090 at 1088x1920, fp16:
+
+| Model | GPU compute | p99 | trtexec round trip |
+| --- | --- | --- | --- |
+| Lite 4.25 | 6.4 ms | 8.6 ms | 12.3 ms |
+| Heavy 4.26 | 12.4 ms | 13.6 ms | 18.1 ms |
+
+Through brp's own loader (`rife_probe`, 1080p) Heavy is 23-25 ms p50 total:
+about 3 ms conversion plus a 50 MB upload and 25 MB download around the
+12.4 ms GPU pass. Lite measures 17.7 ms with the same code. Heavy still fits
+the 33 ms budget for 30 -> 60.
+
+The probe builds a blobs pattern shifted 32 px and compares the generated
+frame with the true 16 px midpoint: Lite lands 0.23/255 away, Heavy 0.25/255,
+so both really interpolate. (A flat gradient or pure noise is degenerate for
+optical flow and gives misleading numbers.)
+
+Heavy has a different ONNX interface: one 6-channel input (`input`) with both
+frames concatenated, plus `timestep`, instead of `img0`/`img1`. The loader
+detects it from the engine and writes frame B into planes 3..5 of the same
+pinned buffer, so no extra conversion pass is needed.
+
+Settings > Upscaling > RIFE model selects Lite or Heavy. The heavy engine
+(`rife426h_1080.engine`) is built on demand by the same one-click setup; the
+heavy ONNX ships in the package. Health log shows `eng=RIFE-H` for Heavy.

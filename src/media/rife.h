@@ -58,6 +58,10 @@ private:
     void* d_timestep_ = nullptr;
     void* d_out_ = nullptr;
     size_t plane_bytes_ = 0;
+    bool combined_ = false;      // one 6-channel input (imgA + imgB) instead of img0/img1
+    int input_planes_ = 3;
+    std::string input_name_;
+    std::string output_name_;
 
     // Page-locked host buffers: with pageable memory the driver copies
     // through a staging buffer, which cost about 7 ms per frame at 1080p.

@@ -391,6 +391,7 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
 json << "  \"fg_target\": " << profile.fg_target << ",\n";
 json << "  \"fg_engine\": " << profile.fg_engine << ",\n";
 json << "  \"rife_output\": " << profile.rife_output << ",\n";
+json << "  \"rife_model\": " << profile.rife_model << ",\n";
     json << "  \"reflex\": " << profile.reflex << ",\n";
     json << "  \"hud_mask\": " << profile.hud_mask << ",\n";
     json << "  \"neural_nr\": " << profile.neural_nr << ",\n";
@@ -487,6 +488,7 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
 if (ExtractNumber(json, "fg_target", number)) p.fg_target = static_cast<int>(number);
 if (ExtractNumber(json, "fg_engine", number)) p.fg_engine = static_cast<int>(number);
 if (ExtractNumber(json, "rife_output", number)) p.rife_output = static_cast<int>(number);
+if (ExtractNumber(json, "rife_model", number)) p.rife_model = static_cast<int>(number);
     if (ExtractNumber(json, "reflex", number)) p.reflex = static_cast<int>(number);
     if (ExtractNumber(json, "hud_mask", number)) p.hud_mask = static_cast<int>(number);
     if (ExtractNumber(json, "nr_passes", number)) p.nr_passes = static_cast<int>(number);
@@ -508,6 +510,7 @@ if (ExtractNumber(json, "rife_output", number)) p.rife_output = static_cast<int>
 p.fg_target = p.fg_target == 60 || p.fg_target == 90 || p.fg_target == 120 ? p.fg_target : 0;
 p.fg_engine = p.fg_engine == 1 ? 1 : 0;
 p.rife_output = p.rife_output == 0 ? 0 : 60;
+p.rife_model = p.rife_model == 1 ? 1 : 0;
     p.reflex = std::clamp(p.reflex, 0, 2);
     p.haptic_intensity = std::clamp(p.haptic_intensity, 0, 5);
     p.testing_log = p.testing_log != 0 ? 1 : 0;

@@ -11,7 +11,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $release = Join-Path $root "build\Release"
 $distRoot = Join-Path $root "dist"
 $dest = Join-Path $distRoot "BetterRemotePlay"
-$version = "0.4.7"
+$version = "0.4.8"
 
 function Require-File([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -118,7 +118,7 @@ if (Test-Path $rife) {
     # downloaded zip, the extracted SDK and runtime.txt stay on this machine.
     $rifeDest = Join-Path $dest "rife"
     New-Item -ItemType Directory -Path $rifeDest -Force | Out-Null
-    foreach ($name in @("rife425_1080.engine", "rife425lite.onnx", "cudart64_13.dll")) {
+    foreach ($name in @("rife425_1080.engine", "rife425lite.onnx", "rife426h.onnx", "cudart64_13.dll")) {
         $source = Join-Path $rife $name
         if (Test-Path -LiteralPath $source) {
             Copy-Item -LiteralPath $source -Destination $rifeDest -Force
@@ -177,11 +177,12 @@ Features and runtimes
 - nvidia-vfx\runtime\ contains the optional legacy NVIDIA VFG runtime. RTX VSR
   has been removed from the client; DLSS SR/DLAA, DLSS NR and DLSS Frame
   Generation are the supported neural paths.
-- rife\ holds the RIFE model, the matching CUDA 13 runtime (cudart64_13.dll) and
-  an engine built for the GPU of the machine this package came from. Press
-  "Set up RIFE" on Home to fetch TensorRT 10.16 automatically (1.9 GB) and build
-  an engine for the local GPU. An engine built for another GPU will not load:
-  delete it and press the button again.
+- rife\ holds both RIFE models (Lite 4.25 and Heavy 4.26), the matching CUDA 13
+  runtime (cudart64_13.dll) and an engine built for the GPU of the machine this
+  package came from. Press "Set up RIFE" on Home to fetch TensorRT 10.16
+  automatically (1.9 GB) and build an engine for the local GPU. An engine built
+  for another GPU will not load: delete it and press the button again. The
+  Heavy model builds its own engine the first time it is selected.
 - The app is not affiliated with Sony Interactive Entertainment. No Sony
   artwork, code, keys or fonts are included.
 
@@ -216,9 +217,10 @@ Settings worth knowing
   RIFE stays unavailable and NVIDIA
   frame generation is used.
 - Settings > Upscaling > Interpolation engine: NVIDIA DLSS FG (fast) or RIFE
-  4.25 lite (TensorRT). RIFE output is 60 fps (one generated frame per pair, so
-  a 30 fps game plays at 60) or pass-through. Output frame rate (60/90/120) is
-  the NVIDIA control and only appears for that engine.
+  (TensorRT). RIFE model: Lite 4.25 (fast, default) or Heavy 4.26 (about twice
+  the GPU time, cleaner on fast motion). RIFE output is 60 fps (one generated
+  frame per pair, so a 30 fps game plays at 60) or pass-through. Output frame
+  rate (60/90/120) is the NVIDIA control and only appears for that engine.
 - Health log: %APPDATA%\BetterRemotePlay\health.log, one line every 30 seconds
   (worker fps, frame timing, source cadence, drops, decode, audio, handles,
   VRAM). Rotates at 2 MB.

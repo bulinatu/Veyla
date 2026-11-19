@@ -206,29 +206,44 @@ bool Rife::Load(const std::string& runtime_dir, const std::string& engine_path,
     for (int32_t i = 0; i < engine->getNbIOTensors(); ++i) {
         const char* name = engine->getIOTensorName(i);
         const nvinfer1::Dims dims = engine->getTensorShape(name);
-        if (engine->getTensorIOMode(name) == nvinfer1::TensorIOMode::kINPUT &&
-            std::strcmp(name, "img0") == 0) {
-            if (dims.nbDims != 4) {
-                detail = "img0 is not NCHW";
-                return false;
+        if (engine->getTensorIOMode(name) == nvinfer1::TensorIOMode::kINPUT) {
+            if (std::strcmp(name, "img0") == 0 && dims.nbDims == 4) {
+                engine_height_ = static_cast<int>(dims.d[2]);
+                engine_width_ = static_cast<int>(dims.d[3]);
+                input_name_ = name;
+                combined_ = false;
+                input_planes_ = 3;
+            } else if (std::strcmp(name, "input") == 0 && dims.nbDims == 4 &&
+                       dims.d[1] == 6) {
+                // RIFE 4.26 heavy: imgA and imgB concatenated on channels.
+                engine_height_ = static_cast<int>(dims.d[2]);
+                engine_width_ = static_cast<int>(dims.d[3]);
+                input_name_ = name;
+                combined_ = true;
+                input_planes_ = 6;
             }
-            engine_height_ = dims.d[2];
-            engine_width_ = dims.d[3];
+        } else if (output_name_.empty()) {
+            output_name_ = name;
         }
     }
-    if (engine_width_ <= 0 || engine_height_ <= 0) {
-        detail = "engine has no img0 input";
+    if (engine_width_ <= 0 || engine_height_ <= 0 || input_name_.empty()) {
+        detail = "engine has no img0 or 6-channel input";
+        return false;
+    }
+    if (output_name_.empty()) {
+        detail = "engine has no output tensor";
         return false;
     }
     width_ = width > 0 ? std::min(width, engine_width_) : engine_width_;
     height_ = height > 0 ? std::min(height, engine_height_) : engine_height_;
 
     plane_bytes_ = static_cast<size_t>(engine_width_) * engine_height_ * sizeof(float);
-    const size_t plane_count = 3;
-    if (g_cuda.malloc(&d_in0_, plane_bytes_ * plane_count) != 0 ||
-        g_cuda.malloc(&d_in1_, plane_bytes_ * plane_count) != 0 ||
+    const size_t in_planes = static_cast<size_t>(input_planes_);
+    const size_t out_planes = 3;
+    if (g_cuda.malloc(&d_in0_, plane_bytes_ * in_planes) != 0 ||
+        g_cuda.malloc(&d_in1_, plane_bytes_ * in_planes) != 0 ||
         g_cuda.malloc(&d_timestep_, sizeof(float)) != 0 ||
-        g_cuda.malloc(&d_out_, plane_bytes_ * plane_count) != 0) {
+        g_cuda.malloc(&d_out_, plane_bytes_ * out_planes) != 0) {
         detail = "cudaMalloc failed";
         return false;
     }
@@ -240,7 +255,7 @@ bool Rife::Load(const std::string& runtime_dir, const std::string& engine_path,
     stream_ = stream;
 
     const size_t host_bytes =
-        static_cast<size_t>(engine_width_) * engine_height_ * plane_count * sizeof(float);
+        static_cast<size_t>(engine_width_) * engine_height_ * in_planes * sizeof(float);
     if (g_cuda.host_alloc(reinterpret_cast<void**>(&host_in0_), host_bytes, 0) != 0 ||
         g_cuda.host_alloc(reinterpret_cast<void**>(&host_in1_), host_bytes, 0) != 0 ||
         g_cuda.host_alloc(reinterpret_cast<void**>(&host_out_), host_bytes, 0) != 0) {
@@ -248,10 +263,12 @@ bool Rife::Load(const std::string& runtime_dir, const std::string& engine_path,
         return false;
     }
 
-    context->setTensorAddress("img0", d_in0_);
-    context->setTensorAddress("img1", d_in1_);
+    context->setTensorAddress(input_name_.c_str(), d_in0_);
+    if (!combined_) {
+        context->setTensorAddress("img1", d_in1_);
+    }
     context->setTensorAddress("timestep", d_timestep_);
-    context->setTensorAddress("frame", d_out_);
+    context->setTensorAddress(output_name_.c_str(), d_out_);
 
     ready_ = true;
     detail = "engine " + std::to_string(engine_width_) + "x" +
@@ -276,6 +293,10 @@ bool Rife::Process(const uint8_t* rgba_a, const uint8_t* rgba_b, float timestep,
     // row, so an engine padded to a multiple of 64 sees no black band.
     const int w = engine_width_;
     const int h = engine_height_;
+    const size_t plane = static_cast<size_t>(w) * h;
+    // Combined engines (RIFE 4.26 heavy) read A and B from one 6-channel
+    // tensor, so the second frame goes into planes 3..5 of the same buffer.
+    float* host_b = combined_ ? host_in0_ + plane * 3 : host_in1_;
     for (int y = 0; y < h; ++y) {
         const int sy = std::min(y, height_ - 1);
         const uint8_t* row_a = rgba_a + static_cast<size_t>(sy) * width_ * 4;
@@ -285,25 +306,29 @@ bool Rife::Process(const uint8_t* rgba_a, const uint8_t* rgba_b, float timestep,
             const size_t src = static_cast<size_t>(x) * 4;
             const size_t dst = static_cast<size_t>(y) * w + x;
             host_in0_[dst] = row_a[src] * (1.0f / 255.0f);
-            host_in0_[dst + static_cast<size_t>(w) * h] =
-                row_a[src + 1] * (1.0f / 255.0f);
-            host_in0_[dst + static_cast<size_t>(w) * h * 2] =
-                row_a[src + 2] * (1.0f / 255.0f);
-            host_in1_[dst] = row_b[src] * (1.0f / 255.0f);
-            host_in1_[dst + static_cast<size_t>(w) * h] =
-                row_b[src + 1] * (1.0f / 255.0f);
-            host_in1_[dst + static_cast<size_t>(w) * h * 2] =
-                row_b[src + 2] * (1.0f / 255.0f);
+            host_in0_[dst + plane] = row_a[src + 1] * (1.0f / 255.0f);
+            host_in0_[dst + plane * 2] = row_a[src + 2] * (1.0f / 255.0f);
+            host_b[dst] = row_b[src] * (1.0f / 255.0f);
+            host_b[dst + plane] = row_b[src + 1] * (1.0f / 255.0f);
+            host_b[dst + plane * 2] = row_b[src + 2] * (1.0f / 255.0f);
         }
     }
     last_convert_ms_ = MsSince(convert_start);
 
     auto* context = static_cast<nvinfer1::IExecutionContext*>(context_);
     cudaStream_t stream = static_cast<cudaStream_t>(stream_);
-    const size_t bytes = plane_bytes_ * 3;
-    if (g_cuda.memcpy_async(d_in0_, host_in0_, bytes, CudaApi::kHostToDevice, stream) != 0 ||
-        g_cuda.memcpy_async(d_in1_, host_in1_, bytes, CudaApi::kHostToDevice, stream) != 0 ||
-        g_cuda.memcpy_async(d_timestep_, &timestep, sizeof(float), CudaApi::kHostToDevice,
+    const size_t out_bytes = plane_bytes_ * 3;
+    const size_t in_bytes = plane_bytes_ * static_cast<size_t>(input_planes_);
+    if (g_cuda.memcpy_async(d_in0_, host_in0_, in_bytes, CudaApi::kHostToDevice, stream) != 0) {
+        detail = "upload failed";
+        return false;
+    }
+    if (!combined_ &&
+        g_cuda.memcpy_async(d_in1_, host_in1_, out_bytes, CudaApi::kHostToDevice, stream) != 0) {
+        detail = "upload failed";
+        return false;
+    }
+    if (g_cuda.memcpy_async(d_timestep_, &timestep, sizeof(float), CudaApi::kHostToDevice,
                             stream) != 0) {
         detail = "upload failed";
         return false;
@@ -312,7 +337,7 @@ bool Rife::Process(const uint8_t* rgba_a, const uint8_t* rgba_b, float timestep,
         detail = "enqueueV3 failed";
         return false;
     }
-    if (g_cuda.memcpy_async(host_out_, d_out_, bytes, CudaApi::kDeviceToHost, stream) != 0) {
+    if (g_cuda.memcpy_async(host_out_, d_out_, out_bytes, CudaApi::kDeviceToHost, stream) != 0) {
         detail = "download failed";
         return false;
     }
@@ -322,7 +347,6 @@ bool Rife::Process(const uint8_t* rgba_a, const uint8_t* rgba_b, float timestep,
     }
 
     out.resize(static_cast<size_t>(width_) * height_ * 4);
-    const size_t plane = static_cast<size_t>(w) * h;
     for (int y = 0; y < height_; ++y) {
         uint8_t* dst = out.data() + static_cast<size_t>(y) * width_ * 4;
         for (int x = 0; x < width_; ++x) {

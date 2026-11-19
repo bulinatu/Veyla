@@ -41,7 +41,8 @@ int main(int argc, char** argv) {
     if (runtime.empty() || engine.empty()) {
         std::fprintf(stderr,
                      "usage: rife_probe --runtime=<dir with nvinfer_10.dll and cudart64_13.dll> "
-                     "--engine=<file.engine> [--iters=40]\n");
+                     "--engine=<file.engine> [--iters=40] [--ts=0.5] "
+                     "[--pattern=blobs|noise|gradient]\n");
         return 2;
     }
 
@@ -55,22 +56,70 @@ int main(int argc, char** argv) {
     const int h = rife.height();
     std::printf("engine %dx%d\n", w, h);
 
-    // Frame A: a moving gradient. Frame B: the same gradient shifted, so an
-    // interpolation between them should land in between the two.
+    // Frame A: blobs at grid positions. Frame B: the same scene shifted 32 px.
+    // C is the ideal midpoint (16 px) so the probe can report how far each
+    // model's generated frame is from the true answer. `noise` and `gradient`
+    // remain for quick sanity runs; both are degenerate for optical flow.
+    const std::string pattern = Arg(argc, argv, "--pattern", "blobs");
+    const bool noise_pattern = pattern == "noise";
+    const bool blob_pattern = pattern == "blobs";
     std::vector<uint8_t> a(static_cast<size_t>(w) * h * 4);
     std::vector<uint8_t> b(a.size());
+    std::vector<uint8_t> c(a.size());
+    const auto noise = [](int x, int y) {
+        uint32_t h = static_cast<uint32_t>(x) * 374761393u +
+                     static_cast<uint32_t>(y) * 668265263u;
+        h = (h ^ (h >> 13)) * 1274126177u;
+        return static_cast<uint8_t>((h ^ (h >> 16)) & 0xFF);
+    };
+    const auto blobs = [](int x, int y) {
+        const int cx = x % 160;
+        const int cy = y % 160;
+        const int dx = cx - 80;
+        const int dy = cy - 80;
+        const int d2 = dx * dx + dy * dy;
+        const int r = 44;
+        const int v = std::clamp(255 - d2 * 255 / (r * r), 0, 255);
+        return static_cast<uint8_t>(v);
+    };
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             const size_t i = (static_cast<size_t>(y) * w + x) * 4;
-            a[i + 0] = static_cast<uint8_t>(x * 255 / std::max(1, w - 1));
-            a[i + 1] = static_cast<uint8_t>(y * 255 / std::max(1, h - 1));
-            a[i + 2] = 96;
-            a[i + 3] = 255;
-            const int sx = std::min(w - 1, x + 32);
-            b[i + 0] = static_cast<uint8_t>(sx * 255 / std::max(1, w - 1));
-            b[i + 1] = static_cast<uint8_t>(y * 255 / std::max(1, h - 1));
-            b[i + 2] = 96;
-            b[i + 3] = 255;
+            const int sx16 = std::min(w - 1, x + 16);
+            const int sx32 = std::min(w - 1, x + 32);
+            if (blob_pattern) {
+                a[i + 0] = blobs(x, y);
+                a[i + 1] = blobs(x + 53, y + 31);
+                a[i + 2] = 96;
+                b[i + 0] = blobs(sx32, y);
+                b[i + 1] = blobs(sx32 + 53, y + 31);
+                b[i + 2] = 96;
+                c[i + 0] = blobs(sx16, y);
+                c[i + 1] = blobs(sx16 + 53, y + 31);
+                c[i + 2] = 96;
+            } else if (noise_pattern) {
+                a[i + 0] = noise(x, y);
+                a[i + 1] = noise(x + 7919, y + 104729);
+                a[i + 2] = noise(x + 15485863, y + 32452843);
+                const int sx = (x + 32) % w;
+                b[i + 0] = noise(sx, y);
+                b[i + 1] = noise(sx + 7919, y + 104729);
+                b[i + 2] = noise(sx + 15485863, y + 32452843);
+                c[i + 0] = noise(sx16, y);
+                c[i + 1] = noise(sx16 + 7919, y + 104729);
+                c[i + 2] = noise(sx16 + 15485863, y + 32452843);
+            } else {
+                a[i + 0] = static_cast<uint8_t>(x * 255 / std::max(1, w - 1));
+                a[i + 1] = static_cast<uint8_t>(y * 255 / std::max(1, h - 1));
+                a[i + 2] = 96;
+                b[i + 0] = static_cast<uint8_t>(sx32 * 255 / std::max(1, w - 1));
+                b[i + 1] = static_cast<uint8_t>(y * 255 / std::max(1, h - 1));
+                b[i + 2] = 96;
+                c[i + 0] = static_cast<uint8_t>(sx16 * 255 / std::max(1, w - 1));
+                c[i + 1] = static_cast<uint8_t>(y * 255 / std::max(1, h - 1));
+                c[i + 2] = 96;
+            }
+            a[i + 3] = b[i + 3] = c[i + 3] = 255;
         }
     }
 
@@ -83,15 +132,19 @@ int main(int argc, char** argv) {
     }
 
     // Sanity: the interpolated frame must differ from both inputs by a
-    // reasonable amount, and its red channel should sit between them.
+    // reasonable amount, and its red channel should sit between them. For the
+    // blobs pattern, |out-c| is the distance from the ideal midpoint.
     double diff_a = 0.0;
     double diff_b = 0.0;
+    double diff_c = 0.0;
     for (size_t i = 0; i < out.size(); i += 4) {
         diff_a += std::abs(static_cast<int>(out[i]) - static_cast<int>(a[i]));
         diff_b += std::abs(static_cast<int>(out[i]) - static_cast<int>(b[i]));
+        diff_c += std::abs(static_cast<int>(out[i]) - static_cast<int>(c[i]));
     }
     const double n = static_cast<double>(w) * h;
-    std::printf("mean |out-a| %.2f   mean |out-b| %.2f\n", diff_a / n, diff_b / n);
+    std::printf("mean |out-a| %.2f   mean |out-b| %.2f   mean |out-c| %.2f\n",
+                diff_a / n, diff_b / n, diff_c / n);
 
     std::vector<double> samples;
     samples.reserve(static_cast<size_t>(iterations));
