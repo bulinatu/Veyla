@@ -16,11 +16,11 @@ RTX 4090). The package contains no `session.json` or pairing data.
 
 | Area | State |
 | --- | --- |
-| Video | HEVC, 720p/1080p negotiated, D3D11VA/D3D12VA/Vulkan/DXVA2/NVDEC/software. 1080p60 on LAN: 0 lost, 0 drops. |
+| Video | HEVC, 720p/1080p negotiated, D3D11VA/D3D12VA/Vulkan/DXVA2/NVDEC/software. The 30/60 fps setting now reaches the console (it was hardcoded to 60): 30 requested gives src 28.6, 0 lost, 0 drops. |
 | Stream smoothness | Streams start borderless fullscreen (F11 returns to the window). With SR on, 60 fps source on 240 Hz: 4 refreshes on 100 % of frames, 0 late ticks, interval p99 4.4 ms. |
 | Audio | Opus 48 kHz stereo to WASAPI, device picker, 10-40 ms buffer, test tone. |
 | Upscalers | Bilinear, Catmull-Rom, Lanczos+RCAS, FSR1, DLSS SR (33-77 %) and DLAA with K/L/M presets. |
-| Frame generation | Two engines. NVIDIA DLSS FG through the worker: 120.0 fps displayed on 240 Hz. RIFE 4.25 lite through TensorRT: measured 60 fps shown from a 30 fps game at 1080p, 24 ms/frame, 0 underruns. Output targets 60/90/120 with duplicate-aware adaptive multiplier. |
+| Frame generation | Two engines. NVIDIA DLSS FG through the worker: 120.0 fps displayed on 240 Hz. RIFE 4.25 lite through TensorRT: a 30 fps stream plays at 60, cadence 16.69 ms average, 22 ms/frame, 0 underruns. Output targets 60/90/120 with duplicate-aware adaptive multiplier. |
 | Launch presets | Launch (SR UQ + FG 2x), SR only, Low latency. Saved while streaming; the chain applies at the next start. |
 | Colour | 11 controls and 4 presets, applied on the GPU before the FG worker. |
 | Controller | DualSense over USB and Bluetooth: buttons, sticks, touchpad, motion, lightbar, LEDs, rumble, adaptive triggers, console feedback. |
