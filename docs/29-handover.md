@@ -7,7 +7,7 @@ Build `0.3`. Run `git log -1` for the current commit.
 
 Version 0.4.8 (20 Nov 2026).
 
-- Standalone: `dist\BetterRemotePlay-0.4.8-standalone.zip`, 909.8 MB, SHA256
+- Standalone: `dist\BetterRemotePlay-0.4.8-standalone.zip`, 622.6 MB, SHA256
   `2E0C539CC8ADAA9EB2DF271D25CB7F2A657FD541452285BC317D0AF9B76DDD0F`.
 - Update from 0.4.7: `dist\BetterRemotePlay-0.4.8-update.exe`, **21.07 MB, one
   file**, SHA256
