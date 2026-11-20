@@ -72,7 +72,21 @@ bool DlssFg::Start(const std::wstring& runtime_dir, int width, int height, int m
     // proxy is only needed to ask for more than 2x.
     options.inject_fg_proxy = multiplier > 2;
     proxy_runtime_ = options.inject_fg_proxy;
-    if (!nr_->Start(worker.wstring(), dir.wstring(), width, height, options, detail)) {
+    // The worker reads this at queue creation. High priority keeps the motion
+    // and FG queues ahead of ordinary desktop GPU work without asking for the
+    // privileged realtime class.
+    wchar_t previous_priority[64] = {};
+    const DWORD previous_length = ::GetEnvironmentVariableW(
+        L"NS_GPU_QUEUE_PRIORITY", previous_priority, 64);
+    ::SetEnvironmentVariableW(L"NS_GPU_QUEUE_PRIORITY", L"high");
+    const bool started =
+        nr_->Start(worker.wstring(), dir.wstring(), width, height, options, detail);
+    if (previous_length > 0) {
+        ::SetEnvironmentVariableW(L"NS_GPU_QUEUE_PRIORITY", previous_priority);
+    } else {
+        ::SetEnvironmentVariableW(L"NS_GPU_QUEUE_PRIORITY", nullptr);
+    }
+    if (!started) {
         nr_.reset();
         return false;
     }

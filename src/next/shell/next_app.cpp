@@ -206,10 +206,15 @@ int NextApp::Run() {
         now_ = SecondsNow();
         if (watching_) {
             if (fg_covering_) {
-                // The DLSS-G worker owns presentation, so there is no parent
-                // vblank to wait on. A 1 ms timer keeps the source gate
-                // responsive without making DWM compose the hidden parent.
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                // The generator owns presentation. Wake on a decoded frame
+                // instead of polling: the wait returns immediately when the
+                // decoder queues one, and the timeout only keeps the overlay
+                // and window fit alive when the source is idle.
+                if (streaming_) {
+                    streaming_->WaitForFrame(4);
+                } else {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(4));
+                }
             } else if (presenter_->frame_waitable()) {
                 ::WaitForSingleObject(presenter_->frame_waitable(), 8);
             }

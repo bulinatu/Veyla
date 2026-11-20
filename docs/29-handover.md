@@ -8,14 +8,14 @@ Build `0.3`. Run `git log -1` for the current commit.
 Version 0.5.0 (20 Nov 2026).
 
 - Standalone: `dist\BetterRemotePlay-0.5.0-standalone.zip`, 623.2 MB, SHA256
-  `1A4C13B10E8654889F48E77CB61F6C733C1ECA700561CBC6987A42586DB3F3E4`.
+  `8C497B5F6C53CEF5BF24B3E3ECD15DD1BEFE4A521CB3D4655CBB2EAD4BC773B3`.
 - Update from 0.4.9: `dist\BetterRemotePlay-0.5.0-update.exe`, **1.29 MB, one
   file**, SHA256
-  `18ACB44507978283CFC0BAE2B1796F876BC7BB0A345939C6825479F625F3B058`.
+  `74A056AC161A7E215204F197DF2EBD37EC3572986D7AB87C3E6248D578B83005`.
 - `dist\BetterRemotePlay\brp.exe` SHA256
   `90AF1EBF8106E271A7BE44876FB321032BF9FDBDE74F6BC50F0EE6051FB246BD`.
 - `dist\BetterRemotePlay\brpnext.exe` SHA256
-  `918E49906456670A25424A6BCF8E387557EEDF83C6B6BE3B7CF88FC576CBD746`.
+  `8447F7BB166A67ED591CDF7B67F40A9E4FAE5DF3E4170844DDEBC7F27541E44F`.
 - The package includes both executables, `rife\rife425_1080.engine` (12.5 MB,
   built for the reference RTX 4090), both RIFE models, `cudart64_13.dll` and
   `update.exe`.
@@ -478,3 +478,22 @@ shows `generated shown 60 of 60 (late 0, superseded 0)`, so the remaining
 Tested 4x from a 30 fps source: it asks for 120, but the worker displayed
 ~94 fps with 48-53 late generated frames per 2 s, so 4x is not a smooth path.
 A 30 fps source tops out at a clean 60 with 2x; 120 needs a 60 fps source.
+
+### 0.5.0 remaining latency cuts
+
+- The DLSS-G loop no longer polls with a 1 ms sleep. `Streaming` exposes a
+  frame condition variable; while the worker covers the screen the loop wakes
+  on the decoded frame (4 ms timeout only for overlay/window upkeep). The
+  measured CPU dropped from ~2.0 % to ~1.8 % of a 32-thread machine, and the
+  wake-to-submit path lost its polling delay.
+- The worker's GPU queues are created at high priority
+  (`NS_GPU_QUEUE_PRIORITY=high`, confirmed by `[gpu] command queue priority
+  high`), so motion/FG work goes ahead of ordinary desktop GPU work. It does
+  not request the privileged realtime class.
+- Phase telemetry stays clean after both changes:
+  `generated shown 60 of 60 (late 0, superseded 0)`.
+
+What is left is not app-side queueing: the DLAA pass plus its 8 MB readback
+(~one GPU pass) before the generator, the generator's own one-frame compositor
+latency, and DWM composition for the worker window. Turning super resolution
+off removes the readback; it is the only remaining selectable cost.

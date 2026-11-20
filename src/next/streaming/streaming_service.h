@@ -56,6 +56,7 @@ public:
     void SetMotionEnabled(bool enabled);
     bool TakeFrame(media::DecodedFrame& out, int buffer, bool paced);
     bool TakeNewestFrame(media::DecodedFrame& out);
+    bool WaitForFrame(int timeout_ms);
     void SendController(const brp::PadState& state);
     brp::PadConsoleFeedback Feedback() const;
     bool TakeHaptics(std::uint16_t& left, std::uint16_t& right);

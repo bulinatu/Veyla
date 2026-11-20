@@ -58,6 +58,9 @@ public:
     // frame generator, where a stale queued frame is pure latency.
     bool TakeNewestFrame(media::DecodedFrame& out);
     bool TakeFrameNow(media::DecodedFrame& out);
+    // Blocks until a decoded frame is queued or the timeout expires. Used by
+    // the frame generator so it wakes on a frame instead of polling.
+    bool WaitForFrame(int timeout_ms);
     int buffer_target() const { return buffer_target_.load(); }
     int buffer_drops() const { return buffer_drops_.load(); }
     int video_queue_drops() const { return video_queue_drops_.load(); }
@@ -135,6 +138,7 @@ private:
     std::string message_;
 
     std::mutex frame_mutex_;
+    std::condition_variable frame_cv_;
     std::deque<media::DecodedFrame> frames_;
 
     // Decode pipeline: encoded units in, decoded frames out.

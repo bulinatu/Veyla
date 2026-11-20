@@ -397,6 +397,10 @@ bool StreamingService::TakeNewestFrame(media::DecodedFrame& out) {
     return streaming_.TakeNewestFrame(out);
 }
 
+bool StreamingService::WaitForFrame(int timeout_ms) {
+    return streaming_.WaitForFrame(timeout_ms);
+}
+
 void StreamingService::SendController(const brp::PadState& state) {
     streaming_.SendController(state);
 }

@@ -421,6 +421,7 @@ void Streaming::DecodeThreadMain() {
                     frames_.pop_front();
                 }
             }
+            frame_cv_.notify_one();
             ++decoded;
         }
 
@@ -704,6 +705,14 @@ std::string Streaming::message() const {
     return message_;
 }
 
+bool Streaming::WaitForFrame(int timeout_ms) {
+    std::unique_lock<std::mutex> lock(frame_mutex_);
+    if (!frames_.empty()) {
+        return true;
+    }
+    return frame_cv_.wait_for(lock, std::chrono::milliseconds(std::max(1, timeout_ms)),
+                              [this]() { return !frames_.empty(); });
+}
 bool Streaming::TakeNewestFrame(media::DecodedFrame& out) {
     std::lock_guard<std::mutex> lock(frame_mutex_);
     if (frames_.empty()) {
