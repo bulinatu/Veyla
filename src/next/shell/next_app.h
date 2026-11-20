@@ -148,8 +148,6 @@ private:
     bool watch_on_connect_ = false;
     bool watch_fullscreen_ = false;
     double esc_at_ = -1.0;
-    double video_phase_ = 0.0;
-    double last_phase_at_ = -1.0;
     std::wstring audio_note_;
     std::unique_ptr<brp::media::NvDlssSr> dlss_sr_;
     bool dlss_ready_ = false;

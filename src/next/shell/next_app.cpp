@@ -1407,7 +1407,7 @@ void NextApp::RenderProfiles(Widgets& widgets) {
         p.video.render_target = 0;
         p.ai.super_resolution = false;
         p.ai.frame_generation = false;
-        presets.push_back({L"Native", L"1080p stream, no AI processing", p});
+        presets.push_back({L"Native", L"No AI processing; lowest input latency", p});
     }
     {
         AppSettings p = base;
@@ -2516,24 +2516,8 @@ void NextApp::PresentVideo() {
     if (!streaming_) {
         return;
     }
-    // The source gate is wall-clock based: a frame is due every 1/content
-    // seconds regardless of how often the loop runs. That keeps the cadence
-    // correct when the DLSS-G worker owns the screen and the parent swapchain
-    // is not presented (no vblank clock to count), and it is still exactly
-    // 60/30 fps on a 240 Hz panel.
     const double content =
         std::clamp(static_cast<double>(settings_.streaming.fps), 24.0, 240.0);
-    const int refresh = std::max(24, window_->refresh_hz());
-    double dt = last_phase_at_ >= 0.0 ? now_ - last_phase_at_ : 1.0 / refresh;
-    last_phase_at_ = now_;
-    dt = std::clamp(dt, 0.0, 0.25);
-    video_phase_ += dt * content;
-    bool due = video_phase_ >= 1.0 - 1e-9;
-    if (due) {
-        video_phase_ -= std::floor(video_phase_);
-    }
-    video_phase_ = std::max(0.0, video_phase_);
-
     const bool fg_mode = settings_.ai.frame_generation &&
                          settings_.ai.fg_backend == AiBackend::DlssFg &&
                          !dlss_fg_failed_;
@@ -2660,13 +2644,11 @@ void NextApp::PresentVideo() {
     if (rife_mode) {
         rife_interval_ = 1.0 / std::clamp(content, 24.0, 60.0);
         bool new_frame = false;
-        if (due) {
-            media::DecodedFrame frame;
-            if (streaming_->TakeFrame(frame, settings_.streaming.frame_buffer, true)) {
-                video_frame_ = std::move(frame);
-                have_frame_ = true;
-                new_frame = true;
-            }
+        media::DecodedFrame frame;
+        if (streaming_->TakeNewestFrame(frame)) {
+            video_frame_ = std::move(frame);
+            have_frame_ = true;
+            new_frame = true;
         }
         if (new_frame) {
             ScheduleRifeFrame(video_frame_);
@@ -2686,6 +2668,9 @@ void NextApp::PresentVideo() {
             rife_have_shown_ = true;
             RecordVideoShown();
         }
+        if (!have_shown && rife_have_shown_) {
+            return;
+        }
         if (rife_have_shown_ && !rife_last_shown_.rgba.empty()) {
             presenter_->SetSourceFrame(rife_last_shown_.rgba.data(),
                                        rife_last_shown_.width, rife_last_shown_.height,
@@ -2700,13 +2685,14 @@ void NextApp::PresentVideo() {
     }
 
     bool new_frame = false;
-    if (due) {
-        media::DecodedFrame frame;
-        if (streaming_->TakeFrame(frame, settings_.streaming.frame_buffer, true)) {
-            video_frame_ = std::move(frame);
-            have_frame_ = true;
-            new_frame = true;
-        }
+    media::DecodedFrame frame;
+    if (streaming_->TakeNewestFrame(frame)) {
+        video_frame_ = std::move(frame);
+        have_frame_ = true;
+        new_frame = true;
+    }
+    if (!new_frame) {
+        return;
     }
     if (have_frame_ && !video_frame_.rgba.empty()) {
         const int width = video_frame_.width;
@@ -2973,8 +2959,6 @@ void NextApp::ToggleWatch(bool watching) {
         }
         watching_ = true;
         have_frame_ = false;
-        video_phase_ = 0.0;
-        last_phase_at_ = -1.0;
         video_intervals_.Reset();
         last_video_shown_at_ = -1.0;
         StopRifeThread();

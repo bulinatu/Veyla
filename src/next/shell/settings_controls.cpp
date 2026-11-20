@@ -168,13 +168,6 @@ float SettingsControls::Streaming(float x, float y, float width) {
     }
     y += kRow + kGap;
 
-    int buffer = settings_.streaming.frame_buffer;
-    if (widgets_.Choice(Next(), Row(x, y, width), L"Frame buffer",
-                        {L"0  (lowest latency)", L"1", L"2"}, buffer)) {
-        settings_.streaming.frame_buffer = std::clamp(buffer, 0, 2);
-        Touch();
-    }
-    y += kRow + kGap;
 
     int decoder = DecoderIndex(settings_.streaming.decoder);
     if (widgets_.Choice(Next(), Row(x, y, width), L"Decoder",
@@ -368,6 +361,13 @@ float SettingsControls::FrameGeneration(float x, float y, float width) {
         y += kRow + kGap;
     }
 
+    if (settings_.ai.frame_generation) {
+        widgets_.Label(Rect(x, y, x + width, y + 36),
+                       L"Frame generation adds at least one source interval of latency. "
+                       L"Disable it for the lowest input-to-camera delay.",
+                       widgets_.Tokens().warning, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+        y += 38.0f;
+    }
     if (settings_.ai.frame_generation &&
         settings_.ai.fg_backend == AiBackend::DlssFg) {
         const int source = std::clamp(settings_.streaming.fps, 24, 240);
@@ -397,15 +397,7 @@ float SettingsControls::FrameGeneration(float x, float y, float width) {
                            DWRITE_FONT_WEIGHT_MEDIUM);
             y += 38.0f;
         }
-        if (source <= 30 && out < 100) {
-            widgets_.Label(
-                Rect(x, y, x + width, y + 40),
-                L"30 fps source: 2x gives 60 fps. 120 needs a 60 fps source; 4x "
-                L"measured 94 fps with late generated frames, so it is not offered "
-                L"as the smooth path.",
-                widgets_.Tokens().text_faint, 11.5f, DWRITE_FONT_WEIGHT_MEDIUM);
-            y += 42.0f;
-        }
+
     }
     return y;
 }

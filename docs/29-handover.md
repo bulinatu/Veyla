@@ -529,11 +529,26 @@ off removes the readback; it is the only remaining selectable cost.
 ### 1.0.0 package
 
 - Standalone: `dist/BetterRemotePlay-1.0.0-standalone.zip`
-  SHA256 `B01E5435037FD86A4DBCEC473A7B50EA402EF5F6AEF328FE4C53740D35D79D92`
+  SHA256 `85B57CBE13666C16E147109F740A096E037AD6F122BB1223638E9E89D714D828`
 - Update from 0.4.9: `dist/BetterRemotePlay-1.0.0-update.exe` (1.34 MB)
-  SHA256 `0370FB1250F284278523CA1F335DCECF7B39408610EE752E39DF59FD3C2181CA`
+  SHA256 `A98396748531C592D47CE490021562BE478B0FFB5B03496C0B409D115DD45343`
 - `brpnext.exe` SHA256
-  `55258064104A354455E7B04BC6CDE15F02D77EDB85BD4A8DE2E65EF834DEBF26`
+  `2E24971691A60F53B25573E37CE5A682AFA124A2ECC8C9FDFB61273956DB65BD`
 - `brp.exe` SHA256
   `7256F12F553A7F76E99CEED378B4C839FA8EEFCEF337AE9785132A32F9D8B3E8`
 - Patch verification: `version=1.0.0`, 0 markers, `files_differ=0`.
+
+### 1.0.0 input-to-camera latency pass
+
+Watch no longer uses a source phase gate or a presentation buffer. Every decoded
+frame is taken as the newest available on the next shell tick and rendered
+immediately; if no new frame exists, the last surface is presented without
+re-uploading pixels. This removes up to two source intervals of app-side queue
+at 30/60 fps. The frame-buffer control was removed from the UI because it no
+longer describes a real presentation queue.
+
+What remains is not app-side queueing: console encode + network, the console's
+input processing, one source interval for any frame generator, and DWM
+composition for the worker/window. The AI page now states that frame generation
+adds at least one source interval and that disabling it gives the lowest
+input-to-camera delay.
