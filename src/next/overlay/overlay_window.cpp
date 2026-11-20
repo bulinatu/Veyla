@@ -50,8 +50,8 @@ bool OverlayWindow::Create() {
     if (!hwnd_) {
         return false;
     }
-    ::SetLayeredWindowAttributes(hwnd_, RGB(0, 0, 0),
-                                 static_cast<BYTE>(std::clamp(opacity_, 0.1f, 1.0f) * 255),
+    last_alpha_ = static_cast<BYTE>(std::clamp(opacity_, 0.1f, 1.0f) * 255);
+    ::SetLayeredWindowAttributes(hwnd_, RGB(0, 0, 0), last_alpha_,
                                  LWA_ALPHA | LWA_COLORKEY);
     return true;
 }
@@ -79,16 +79,18 @@ void OverlayWindow::Update(const std::vector<std::wstring>& lines, float opacity
     lines_ = lines;
     opacity_ = std::clamp(opacity, 0.1f, 1.0f);
     position_ = std::clamp(position, 0, 3);
-    ::SetLayeredWindowAttributes(hwnd_, RGB(0, 0, 0),
-                                 static_cast<BYTE>(opacity_ * 255),
-                                 LWA_ALPHA | LWA_COLORKEY);
+    const BYTE alpha = static_cast<BYTE>(opacity_ * 255);
+    if (alpha != last_alpha_) {
+        last_alpha_ = alpha;
+        ::SetLayeredWindowAttributes(hwnd_, RGB(0, 0, 0), alpha,
+                                     LWA_ALPHA | LWA_COLORKEY);
+    }
     Reposition(position_);
     if (!visible_) {
         ::ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
         visible_ = true;
     }
     ::InvalidateRect(hwnd_, nullptr, FALSE);
-    ::UpdateWindow(hwnd_);
 }
 
 void OverlayWindow::Reposition(int position) {
@@ -104,8 +106,13 @@ void OverlayWindow::Reposition(int position) {
     if (position >= 2) {
         y = work.top + height - kHeight - kMargin;
     }
+    if (x == last_x_ && y == last_y_) {
+        return;
+    }
+    last_x_ = x;
+    last_y_ = y;
     ::SetWindowPos(hwnd_, HWND_TOPMOST, x, y, kWidth, kHeight,
-                   SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                   SWP_NOACTIVATE);
 }
 
 LRESULT CALLBACK OverlayWindow::WndProcThunk(HWND hwnd, UINT msg, WPARAM wparam,

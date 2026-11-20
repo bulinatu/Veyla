@@ -74,6 +74,7 @@ private:
     void RifeWorkerMain();
     void ScheduleRifeFrame(const media::DecodedFrame& frame);
     void PushDisplayFrame(media::DecodedFrame frame, double due);
+    void RecordVideoShown();
     void ConnectStream();
     void ApplyPresenterTarget();
     void StartBenchmark();
@@ -176,6 +177,10 @@ private:
     int rife_generated_rate_ = 0;
     double rife_generated_at_ = -1.0;
     std::atomic<int> display_shown_{0};
+    RollingStats video_intervals_{512};
+    double last_video_shown_at_ = -1.0;
+    double cadence_p50_ = 0.0;
+    double cadence_p99_ = 0.0;
     int display_shown_last_ = 0;
     int display_rate_ = 0;
     bool user_disconnect_ = false;

@@ -353,9 +353,10 @@ void NextApp::Frame() {
             std::swprintf(buffer, 160, L"%dx%d  |  %.1f fps", snapshot.source_width,
                           snapshot.source_height, snapshot.source_fps);
             lines.emplace_back(buffer);
-            std::swprintf(buffer, 160, L"decode %.2f ms  |  %.0f kbps  |  loss %.2f%%",
-                          snapshot.decode_ms, snapshot.bitrate_kbps,
-                          snapshot.loss_percent);
+            std::swprintf(buffer, 160,
+                          L"decode %.2f ms  |  cad %.1f/%.1f ms  |  %.0f kbps",
+                          snapshot.decode_ms, cadence_p50_, cadence_p99_,
+                          snapshot.bitrate_kbps);
             lines.emplace_back(buffer);
             if (rife_ready_ && !rife_failed_) {
                 wchar_t rife_line[96] = {};
@@ -382,6 +383,8 @@ void NextApp::Frame() {
         const int shown = display_shown_.load();
         display_rate_ = shown - display_shown_last_;
         display_shown_last_ = shown;
+        cadence_p50_ = video_intervals_.Percentile(0.50);
+        cadence_p99_ = video_intervals_.Percentile(0.99);
     }
     Render();
     const double delta = std::max(0.0, now_ - last_frame_);
@@ -1655,9 +1658,13 @@ void NextApp::PresentVideo() {
     if (!streaming_) {
         return;
     }
-    const auto snapshot = streaming_->Snapshot();
+    // Use the requested source cadence, not the instantaneous measured rate.
+    // The measured fps jitters with decode/queue timing; feeding it into the
+    // phase accumulator made one slot drift every ~1 s and read as a small
+    // "teleport". The requested rate is the cadence the console is asked for
+    // and divides the refresh exactly at 30/60 on a 240 Hz panel.
     const double content =
-        snapshot.source_fps > 1.0 ? snapshot.source_fps : settings_.streaming.fps;
+        std::clamp(static_cast<double>(settings_.streaming.fps), 24.0, 240.0);
     const int refresh = std::max(24, window_->refresh_hz());
     video_phase_ += content / static_cast<double>(refresh);
     bool due = video_phase_ >= 1.0 - 1e-9;
@@ -1697,7 +1704,7 @@ void NextApp::PresentVideo() {
         if (have_shown) {
             rife_last_shown_ = std::move(shown.frame);
             rife_have_shown_ = true;
-            display_shown_.fetch_add(1);
+            RecordVideoShown();
         }
         if (rife_have_shown_ && !rife_last_shown_.rgba.empty()) {
             presenter_->SetSourceFrame(rife_last_shown_.rgba.data(),
@@ -1734,7 +1741,7 @@ void NextApp::PresentVideo() {
                 presenter_->SetSourceFinal(false);
                 presenter_->Render(now_);
                 if (new_frame) {
-                    display_shown_.fetch_add(1);
+                    RecordVideoShown();
                 }
                 return;
             }
@@ -1746,7 +1753,7 @@ void NextApp::PresentVideo() {
         presenter_->SetSourceFinal(false);
         presenter_->Render(now_);
         if (new_frame) {
-            display_shown_.fetch_add(1);
+            RecordVideoShown();
         }
     } else {
         const float background[4] = {0.015f, 0.017f, 0.022f, 1.0f};
@@ -1965,9 +1972,10 @@ void NextApp::RenderWatchOverlay() {
         stats_left = 126.0f;
     }
     wchar_t stats[256] = {};
-    std::swprintf(stats, 256, L"%dx%d  |  %.1f fps  |  decode %.2f ms  |  %.0f kbps  |  loss %.2f%%",
+    std::swprintf(stats, 256,
+                  L"%dx%d  |  %.1f fps  |  cad %.1f/%.1f ms  |  decode %.2f ms  |  %.0f kbps",
                   snapshot.source_width, snapshot.source_height, snapshot.source_fps,
-                  snapshot.decode_ms, snapshot.bitrate_kbps, snapshot.loss_percent);
+                  cadence_p50_, cadence_p99_, snapshot.decode_ms, snapshot.bitrate_kbps);
     renderer_->Text(stats, Rect(stats_left, 0, logical_width_ - 250, 42), 11.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_MEDIUM);
     renderer_->Text(L"ESC  Back to console", Rect(logical_width_ - 230, 0,
@@ -1989,6 +1997,8 @@ void NextApp::ToggleWatch(bool watching) {
         watching_ = true;
         have_frame_ = false;
         video_phase_ = 0.0;
+        video_intervals_.Reset();
+        last_video_shown_at_ = -1.0;
         StopRifeThread();
         window_->SetCursorHidden(true);
         presenter_->SetUpscaleMode(2);
@@ -2384,6 +2394,16 @@ void NextApp::WriteBenchReport() {
     file << "  \"note\": \"2160p targets are rendered and fitted to the desktop display\"\n";
     file << "}\n";
     Toast(L"Benchmark report: " + path.wstring());
+}
+void NextApp::RecordVideoShown() {
+    display_shown_.fetch_add(1);
+    if (last_video_shown_at_ >= 0.0) {
+        const double interval_ms = (now_ - last_video_shown_at_) * 1000.0;
+        if (interval_ms > 0.0 && interval_ms < 1000.0) {
+            video_intervals_.Add(interval_ms);
+        }
+    }
+    last_video_shown_at_ = now_;
 }
 }  // namespace brp::next
 

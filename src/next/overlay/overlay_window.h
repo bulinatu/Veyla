@@ -36,6 +36,9 @@ private:
     bool visible_ = false;
     float opacity_ = 0.85f;
     int position_ = 1;
+    int last_x_ = -1;
+    int last_y_ = -1;
+    BYTE last_alpha_ = 0;
 };
 
 }  // namespace brp::next
