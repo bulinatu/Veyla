@@ -704,6 +704,24 @@ std::string Streaming::message() const {
     return message_;
 }
 
+bool Streaming::TakeNewestFrame(media::DecodedFrame& out) {
+    std::lock_guard<std::mutex> lock(frame_mutex_);
+    if (frames_.empty()) {
+        last_queue_ = 0;
+        return false;
+    }
+    if (frames_.size() > 1) {
+        const size_t dropped = frames_.size() - 1;
+        frames_.erase(frames_.begin(), frames_.begin() + dropped);
+        buffer_drops_.fetch_add(static_cast<int>(dropped));
+        primed_ = false;
+    }
+    out = std::move(frames_.front());
+    frames_.pop_front();
+    last_queue_ = static_cast<int>(frames_.size());
+    return true;
+}
+
 bool Streaming::TakeFrameNow(media::DecodedFrame& out) {
     std::lock_guard<std::mutex> lock(frame_mutex_);
     if (frames_.empty()) {

@@ -85,7 +85,8 @@ bool Win32Window::Create(const wchar_t* title, int width, int height) {
     // Force the first WM_NCCALCSIZE before reading the client size; without
     // this, Windows reports the framed client (1584x861) for one frame.
     ::SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
-                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED |
+                       SWP_NOCOPYBITS);
     UpdateRefreshRate();
     monitor_ = ::MonitorFromWindow(hwnd_, MONITOR_DEFAULTTOPRIMARY);
 
@@ -156,9 +157,11 @@ void Win32Window::EnterFullscreen() {
     ::SetWindowPos(hwnd_, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
                    monitor.rcMonitor.right - monitor.rcMonitor.left,
                    monitor.rcMonitor.bottom - monitor.rcMonitor.top,
-                   SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+                   SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOCOPYBITS);
     ApplyWindowAppearance();
-    ::SetForegroundWindow(hwnd_);
+    if (::GetForegroundWindow() != hwnd_) {
+        ::SetForegroundWindow(hwnd_);
+    }
 
     RECT client{};
     ::GetClientRect(hwnd_, &client);
@@ -179,7 +182,8 @@ void Win32Window::ExitFullscreen() {
         ::SetWindowPlacement(hwnd_, &saved_placement_);
     }
     ::SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
-                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED |
+                       SWP_NOCOPYBITS);
     ApplyWindowAppearance();
 
     RECT client{};

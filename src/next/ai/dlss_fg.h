@@ -46,8 +46,9 @@ public:
     // Applies on the worker thread, never from the UI thread.
     void SetMultiplier(int multiplier);
 
-    // Copies the frame into the one-slot queue; the newest frame wins.
-    void Submit(const std::uint8_t* rgba, int width, int height);
+    // Moves the frame into the one-slot queue; the newest frame wins. Moving
+    // avoids a second 8 MB copy on the presentation thread.
+    void Submit(std::vector<std::uint8_t> rgba, int width, int height);
 
     // Positions/fits the worker's window over the app client. Returns true when
     // the worker window is visible and therefore covers the app's picture.

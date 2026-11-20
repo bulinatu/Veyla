@@ -134,12 +134,12 @@ void DlssFg::SetMultiplier(int multiplier) {
     multiplier_.store(std::clamp(multiplier, 2, 6));
 }
 
-void DlssFg::Submit(const std::uint8_t* rgba, int width, int height) {
-    if (!ready_ || !rgba || width != width_ || height != height_) {
+void DlssFg::Submit(std::vector<std::uint8_t> rgba, int width, int height) {
+    if (!ready_ || rgba.empty() || width != width_ || height != height_) {
         return;
     }
     Job job;
-    job.rgba.assign(rgba, rgba + static_cast<std::size_t>(width) * height * 4);
+    job.rgba = std::move(rgba);
     job.width = width;
     job.height = height;
     {

@@ -8,14 +8,14 @@ Build `0.3`. Run `git log -1` for the current commit.
 Version 0.5.0 (20 Nov 2026).
 
 - Standalone: `dist\BetterRemotePlay-0.5.0-standalone.zip`, 623.2 MB, SHA256
-  `9BD3F8FC47CBDA036DBF6158F819E99BF0CAFC005663C07D77838EC93DF14513`.
+  `B779EE5893EAC8612990095DD6E9C0B347B43434EFA61700FBF9274357151662`.
 - Update from 0.4.9: `dist\BetterRemotePlay-0.5.0-update.exe`, **1.29 MB, one
   file**, SHA256
-  `C96179EB5A1C111B286C93AAB5B2FC432695CF62A82A05F261F8DFDA84EDE660`.
+  `55F343B0B3401585885F7E6B56A4A4F3449E0A6F710EFDF2989B1575B528DE20`.
 - `dist\BetterRemotePlay\brp.exe` SHA256
   `90AF1EBF8106E271A7BE44876FB321032BF9FDBDE74F6BC50F0EE6051FB246BD`.
 - `dist\BetterRemotePlay\brpnext.exe` SHA256
-  `0BA43CB8589B41F9A3E3432E3345D75DDDDD3B51EB398D6FFD607300944ACF98`.
+  `D64BAC7EF32A4F9E007510D1FBEC69E0399BED33CE34601DAFE02AA2A536D80A`.
 - The package includes both executables, `rife\rife425_1080.engine` (12.5 MB,
   built for the reference RTX 4090), both RIFE models, `cudart64_13.dll` and
   `update.exe`.
@@ -418,3 +418,32 @@ multiplier, honest limits).
   `Session has quit`), stops RIFE/DLSS-G, closes audio and cancels reconnect.
 - The Console page uses the same `DisconnectStream()` path, so the button and
   the shortcut cannot drift apart.
+
+### 0.5.0 DLAA + DLSS-G latency pass
+
+The DLAA selection had been mapped to a 1440p upscale: `EnsureDlssSr` always
+returned 2560x1440, so "DLAA + DLSS-G 2x" fed the worker a 1440p frame, paid a
+1440p readback and capped the generator near 100 fps. DLAA now means
+input == output: 1920x1080 -> 1920x1080, NGX quality 5. The worker runs at its
+clean 1080p case. Log: `[dlss] SR initialized 1920x1080 -> 1920x1080, quality 5`.
+
+Three latency cuts on the same path:
+
+- **Every decoded frame, newest first.** `Streaming::TakeNewestFrame` drops
+  older queued frames and the DLSS-G path feeds each new frame as soon as it is
+  decoded, without waiting for the 60 Hz source gate. The generator owns its
+  output cadence, so the gate only added up to one source interval of delay.
+- **No parent composition.** While the worker window covers the client the app
+  no longer presents its own swapchain. DWM was composing a second full-size
+  surface every vblank for nothing.
+- **Wall-clock source gate.** Frames are due every `1/settings.streaming.fps`
+  seconds rather than counting loop ticks, so the loop can be paced by a 1 ms
+  timer when there is no parent vblank. Cadence is unchanged at 30/60.
+
+Borderless fullscreen also got the small wins: `SWP_NOCOPYBITS` on the monitor
+switch, no redundant foreground call, and the display card does not overlap
+the mode note on multi-monitor machines.
+
+Measured with the game in its 30 fps mode: `source 28.0 fps`, overlay
+`DLSS-G 2x | 60.0 fps`, worker `2x enabled at 1920x1080`, no parent presents.
+The same path on a 60 fps source is the earlier 120 fps case.

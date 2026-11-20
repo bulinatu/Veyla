@@ -30,7 +30,7 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 | NVIDIA VFG legacy | Optional, working | Keep or drop | R | 6 | only if it beats DLSS-G |
 | NVOF/NvOFFRUC backend | Not implemented | Evaluate | N | 6 | quality win required |
 | Hybrid OF + refinement | Not implemented | Evaluate | N | 6 | no fake backend |
-| SR + FG simultaneous | Working (DLAA + 120 verified) | **Working in brpnext** | R | 6c | 1080p SR -> 1440p readback -> worker, ~101 generated fps at 1440p |
+| SR + FG simultaneous | Working (DLAA + 120 verified) | **Working in brpnext** | R | 6c | DLAA at 1080p feeds the worker at 1080p (low-latency path); 1440p SR -> worker reaches ~101 generated fps |
 | Colour grading | Working | Same | R behind `IColorPipeline` | 5 | 10 controls |
 | Sharpening | Working | Same | R | 5 | |
 | Main UI | PS5 purple, immediate mode | New NVIDIA-style design system | N | 3 | dark default + light |

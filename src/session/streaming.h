@@ -54,6 +54,9 @@ public:
     // Pops the oldest decoded frame immediately, keeping every frame in order.
     // Used for frame generation, where a skipped input slot starves the
     // generator and shows up as a dropped output frame.
+    // Pops the newest decoded frame and discards older ones. Used by the
+    // frame generator, where a stale queued frame is pure latency.
+    bool TakeNewestFrame(media::DecodedFrame& out);
     bool TakeFrameNow(media::DecodedFrame& out);
     int buffer_target() const { return buffer_target_.load(); }
     int buffer_drops() const { return buffer_drops_.load(); }

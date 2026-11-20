@@ -436,15 +436,21 @@ float SettingsControls::Ai(float x, float y, float width) {
                        DWRITE_FONT_WEIGHT_MEDIUM);
         y += 42.0f;
         if (settings_.ai.super_resolution) {
-            widgets_.Label(Rect(x, y, x + width, y + 36),
-                           settings_.ai.sr_output == Resolution::R2160
-                               ? L"DLSS-G is capped at 1440p. Use 1440p SR or turn SR off."
-                               : L"SR feeds the worker through a CPU readback; at "
-                                 L"1440p expect about 100 generated fps.",
-                           settings_.ai.sr_output == Resolution::R2160
-                               ? widgets_.Tokens().warning
-                               : widgets_.Tokens().text_faint,
-                           11.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+            const bool dlaa = settings_.ai.sr_quality >= 5 ||
+                              settings_.ai.sr_output == Resolution::R1080;
+            const bool too_large = !dlaa &&
+                                   settings_.ai.sr_output == Resolution::R2160;
+            widgets_.Label(
+                Rect(x, y, x + width, y + 36),
+                dlaa ? L"DLAA stays at the stream resolution (1080p) and feeds the "
+                       L"worker at 1080p: the lowest-latency DLSS-G path."
+                     : (too_large
+                            ? L"DLSS-G is capped at 1440p. Use 1440p SR or turn SR off."
+                            : L"SR feeds the worker through a CPU readback; at "
+                              L"1440p expect about 100 generated fps."),
+                (dlaa || !too_large) ? widgets_.Tokens().text_faint
+                                     : widgets_.Tokens().warning,
+                11.5f, DWRITE_FONT_WEIGHT_MEDIUM);
             y += 38.0f;
         }
         if (!system_.dlss_fg_multi && settings_.ai.fg_multiplier > 2) {

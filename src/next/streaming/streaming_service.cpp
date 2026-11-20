@@ -393,6 +393,10 @@ bool StreamingService::TakeFrame(media::DecodedFrame& out, int buffer, bool pace
     return streaming_.TakeFrame(out, buffer, paced);
 }
 
+bool StreamingService::TakeNewestFrame(media::DecodedFrame& out) {
+    return streaming_.TakeNewestFrame(out);
+}
+
 void StreamingService::SendController(const brp::PadState& state) {
     streaming_.SendController(state);
 }

@@ -192,8 +192,15 @@ int NextApp::Run() {
             Resize();
         }
         now_ = SecondsNow();
-        if (watching_ && presenter_->frame_waitable()) {
-            ::WaitForSingleObject(presenter_->frame_waitable(), 8);
+        if (watching_) {
+            if (fg_covering_) {
+                // The DLSS-G worker owns presentation, so there is no parent
+                // vblank to wait on. A 1 ms timer keeps the source gate
+                // responsive without making DWM compose the hidden parent.
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            } else if (presenter_->frame_waitable()) {
+                ::WaitForSingleObject(presenter_->frame_waitable(), 8);
+            }
         }
         Frame();
         if (!watching_) {
@@ -428,12 +435,8 @@ void NextApp::Render() {
     if (watching_) {
         PresentVideo();
         if (fg_covering_) {
-            // The worker's window owns the visible picture. The parent still
-            // presents an empty frame so the waitable keeps the 240 Hz loop
-            // cadence that gates the source frames.
-            renderer_->BeginFrame();
-            renderer_->EndFrame();
-            presenter_->PresentNow(true);
+            // The worker's window is the only visible surface. Presenting the
+            // parent here would cost a full-size DWM composition per vblank.
             window_->set_hand_cursor(false);
             return;
         }
@@ -1721,21 +1724,23 @@ void NextApp::PresentVideo() {
     if (!streaming_) {
         return;
     }
-    // Use the requested source cadence, not the instantaneous measured rate.
-    // The measured fps jitters with decode/queue timing; feeding it into the
-    // phase accumulator made one slot drift every ~1 s and read as a small
-    // "teleport". The requested rate is the cadence the console is asked for
-    // and divides the refresh exactly at 30/60 on a 240 Hz panel.
+    // The source gate is wall-clock based: a frame is due every 1/content
+    // seconds regardless of how often the loop runs. That keeps the cadence
+    // correct when the DLSS-G worker owns the screen and the parent swapchain
+    // is not presented (no vblank clock to count), and it is still exactly
+    // 60/30 fps on a 240 Hz panel.
     const double content =
         std::clamp(static_cast<double>(settings_.streaming.fps), 24.0, 240.0);
     const int refresh = std::max(24, window_->refresh_hz());
-    video_phase_ += content / static_cast<double>(refresh);
+    double dt = last_phase_at_ >= 0.0 ? now_ - last_phase_at_ : 1.0 / refresh;
+    last_phase_at_ = now_;
+    dt = std::clamp(dt, 0.0, 0.25);
+    video_phase_ += dt * content;
     bool due = video_phase_ >= 1.0 - 1e-9;
     if (due) {
-        video_phase_ -= 1.0;
-    } else {
-        video_phase_ = std::max(0.0, video_phase_);
+        video_phase_ -= std::floor(video_phase_);
     }
+    video_phase_ = std::max(0.0, video_phase_);
 
     const bool fg_mode = settings_.ai.frame_generation &&
                          settings_.ai.fg_backend == AiBackend::DlssFg &&
@@ -1743,16 +1748,30 @@ void NextApp::PresentVideo() {
     if (fg_mode) {
         const float background[4] = {0.01f, 0.008f, 0.016f, 1.0f};
         bool new_frame = false;
-        if (due) {
-            media::DecodedFrame frame;
-            if (streaming_->TakeFrame(frame, settings_.streaming.frame_buffer, true)) {
-                video_frame_ = std::move(frame);
-                have_frame_ = true;
-                new_frame = true;
-            }
+        // The generator owns its output cadence: feed every decoded frame as
+        // soon as it exists instead of waiting for the 60 Hz source slot. The
+        // worker queues/generates, and a gate here would add up to one source
+        // interval of pure latency.
+        media::DecodedFrame frame;
+        if (streaming_->TakeNewestFrame(frame)) {
+            video_frame_ = std::move(frame);
+            have_frame_ = true;
+            new_frame = true;
         }
 
-        bool fed = false;
+        auto publish = [&](std::vector<std::uint8_t>&& rgba, int width, int height) {
+            if (!EnsureDlssFg(width, height)) {
+                return false;
+            }
+            // The worker creates its presenter on the first Process(); submit
+            // before looking for the window or the first frame never arrives
+            // and the window never becomes visible.
+            dlss_fg_->Submit(std::move(rgba), width, height);
+            dlss_fg_->FrameWindow(window_->hwnd(), now_);
+            RecordVideoShown();
+            return true;
+        };
+
         if (new_frame && have_frame_ && !video_frame_.rgba.empty()) {
             int feed_w = video_frame_.width;
             int feed_h = video_frame_.height;
@@ -1774,22 +1793,17 @@ void NextApp::PresentVideo() {
                     }
                 }
             }
-            if (EnsureDlssFg(feed_w, feed_h)) {
-                dlss_fg_->Submit(have_rgba ? rgba.data() : video_frame_.rgba.data(),
-                                 feed_w, feed_h);
-                fed = true;
-                RecordVideoShown();
-            } else if (have_rgba &&
-                       EnsureDlssFg(video_frame_.width, video_frame_.height)) {
-                // SR output is too large for the worker (2160p); feed the
-                // stream frame at its own size rather than inventing a scale.
-                dlss_fg_->Submit(video_frame_.rgba.data(), video_frame_.width,
-                                 video_frame_.height);
-                fed = true;
-                RecordVideoShown();
+            bool fed = false;
+            if (have_rgba) {
+                fed = publish(std::move(rgba), feed_w, feed_h);
+            }
+            if (!fed) {
+                // No SR, or the worker cannot take the SR size: the stream
+                // frame itself is the generator input.
+                publish(std::move(video_frame_.rgba), video_frame_.width,
+                        video_frame_.height);
             }
         }
-        (void)fed;
 
         if (!dlss_fg_ || !dlss_fg_->ready()) {
             if (new_frame) {
@@ -1829,7 +1843,6 @@ void NextApp::PresentVideo() {
         }
         if (!dlss_fg_->attached()) {
             // The worker is running but its presenter window is not up yet.
-            // Keep showing the source so the first seconds are not black.
             if (have_frame_ && !video_frame_.rgba.empty()) {
                 presenter_->SetSourceFrame(video_frame_.rgba.data(), video_frame_.width,
                                            video_frame_.height, video_frame_.pq);
@@ -1840,7 +1853,10 @@ void NextApp::PresentVideo() {
             }
             return;
         }
-        presenter_->Clear(background);
+        // The worker's topmost window is the picture. Do not present the
+        // parent swapchain while it covers the screen: that makes DWM compose
+        // a second full-size surface every vblank and adds a frame of latency
+        // for no visible gain.
         return;
     }
     const bool rife_mode =
@@ -2180,6 +2196,7 @@ void NextApp::ToggleWatch(bool watching) {
         watching_ = true;
         have_frame_ = false;
         video_phase_ = 0.0;
+        last_phase_at_ = -1.0;
         video_intervals_.Reset();
         last_video_shown_at_ = -1.0;
         StopRifeThread();
@@ -2300,18 +2317,32 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
     if (dlss_ready_ && dlss_in_w_ == input_width && dlss_in_h_ == input_height) {
         return true;
     }
-    int out_w = 2560;
-    int out_h = 1440;
-    if (settings_.ai.sr_output == Resolution::R2160) {
-        out_w = 3840;
-        out_h = 2160;
-    } else if (settings_.ai.sr_output == Resolution::R1080) {
-        out_w = 1920;
-        out_h = 1080;
-    }
-    if (out_w <= input_width || out_h <= input_height) {
+    // DLAA and an explicit 1080p SR output stay at the stream resolution:
+    // there is no upscale to pay for, and the DLSS-G worker can run at 1080p
+    // (its clean 120 fps case) instead of 1440p.
+    const bool dlaa = settings_.ai.sr_quality >= 5 ||
+                      settings_.ai.sr_output == Resolution::R1080;
+    int out_w = input_width;
+    int out_h = input_height;
+    int quality = 5;
+    if (!dlaa) {
         out_w = 2560;
         out_h = 1440;
+        if (settings_.ai.sr_output == Resolution::R2160) {
+            out_w = 3840;
+            out_h = 2160;
+        }
+        if (out_w <= input_width || out_h <= input_height) {
+            out_w = 2560;
+            out_h = 1440;
+        }
+        switch (settings_.ai.sr_quality) {
+            case 0:
+            case 1: quality = 0; break;
+            case 2: quality = 1; break;
+            case 3: quality = 2; break;
+            default: quality = 4; break;
+        }
     }
     if (!dlss_sr_) {
         dlss_sr_ = std::make_unique<brp::media::NvDlssSr>();
@@ -2331,13 +2362,6 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
             Toast(L"DLSS runtime: " + Widen(detail), true);
             return false;
         }
-    }
-    int quality = 2;
-    switch (settings_.ai.sr_quality) {
-        case 0:
-        case 1: quality = 0; break;
-        case 2: quality = 1; break;
-        default: quality = 2; break;
     }
     std::string detail;
     if (!dlss_sr_->Initialize(presenter_->device(), presenter_->context(), input_width,

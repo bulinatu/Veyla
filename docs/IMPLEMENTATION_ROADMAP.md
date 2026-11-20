@@ -132,9 +132,12 @@ Working:
   worker's topmost window over the client. Verified in `brpnext`:
   `[fg] displayed 120.0 FPS (real + generated, 2x)` at 1080p, with the source
   at 57-58 fps. `Esc` stops the worker and returns to the console page.
-- DLSS SR + DLSS-G: the SR output is read back to RGBA at 1440p and fed to the
-  worker at 2560x1440. Verified at about **101 generated fps** (worker limit at
-  1440p, not a claimed 120).
+- DLSS SR + DLSS-G: the SR output is read back to RGBA and fed to the worker.
+  DLAA (input == output, 1080p) is the low-latency path; a 1440p SR output
+  feeds a 2560x1440 worker and reaches about **101 generated fps** (worker
+  limit at 1440p, not a claimed 120). The generator consumes the newest
+  decoded frame and the parent swapchain is not presented while it covers the
+  screen.
 - The multiplier is selectable 2x-6x when `fg/winmm.dll` (SM86 proxy) is
   installed; without it only 2x is enabled. The UI says 3x-6x land near
   150-165 generated fps and the overlay reads the worker's own log, so the real
