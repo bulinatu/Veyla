@@ -327,3 +327,20 @@ matrix, not a 4K/120 game validation.
 - Profiles has a Quick Presets row: Native, 1440p Sharp, 1440p RIFE and Low
   latency, using the same primary/secondary buttons as the rest of the app.
 - Title pill reads 0.5.0; sidebar footer reads Next 0.5.0.
+
+### 0.5.0 frame-timing fix
+
+Two causes of the "frame teleports once a second" report:
+
+- `PresentVideo` advanced `video_phase_` with the *instantaneous measured*
+  source fps (which jitters with decode/queue timing) instead of the requested
+  source cadence. The phase slowly gained a slot and then skipped one, about
+  once per second. It now uses `settings.streaming.fps`, which divides 240 Hz
+  exactly at 30/60.
+- The independent overlay was forcing `SetWindowPos(HWND_TOPMOST)` and
+  `UpdateWindow` every 250 ms. It now only repositions when the corner/size
+  changes and paints asynchronously.
+
+Measured after the fix, native presentation, no SR/FG: `cad p50 16.7 ms,
+p99 16.9 ms` at 57 fps source. The overlay now shows cadence live as
+`cad p50/p99`.
