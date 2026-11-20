@@ -1,5 +1,7 @@
 #include "app/runtime_settings.h"
 
+#include <algorithm>
+
 namespace brp::next {
 
 const wchar_t* ApplyScopeLabel(ApplyScope scope) {
@@ -21,6 +23,10 @@ bool ScopeAppliesLive(ApplyScope scope) {
 ApplyScope ClassifySettingsChange(const AppSettings& before, const AppSettings& after) {
     const auto& a = before;
     const auto& b = after;
+    int severity = static_cast<int>(ApplyScope::Immediate);
+    auto bump = [&severity](ApplyScope scope) {
+        severity = std::max(severity, static_cast<int>(scope));
+    };
 
     // Console/session and stream transport are negotiated when the session
     // starts. Changing them during a stream cannot take effect live.
@@ -29,14 +35,14 @@ ApplyScope ClassifySettingsChange(const AppSettings& before, const AppSettings& 
         a.console.auto_discover != b.console.auto_discover ||
         a.console.auto_reconnect != b.console.auto_reconnect ||
         a.console.reconnect_delay_ms != b.console.reconnect_delay_ms) {
-        return ApplyScope::StreamRestart;
+        bump(ApplyScope::StreamRestart);
     }
     if (a.streaming.input != b.streaming.input || a.streaming.fps != b.streaming.fps ||
         a.streaming.codec != b.streaming.codec ||
         a.streaming.decoder != b.streaming.decoder ||
         a.streaming.bitrate_kbps != b.streaming.bitrate_kbps ||
         a.streaming.hdr != b.streaming.hdr) {
-        return ApplyScope::StreamRestart;
+        bump(ApplyScope::StreamRestart);
     }
 
     // AI stages are rebuilt in place without touching the session.
@@ -48,7 +54,7 @@ ApplyScope ClassifySettingsChange(const AppSettings& before, const AppSettings& 
         a.ai.fg_multiplier != b.ai.fg_multiplier ||
         a.ai.rife_model != b.ai.rife_model || a.ai.blend != b.ai.blend ||
         a.ai.motion_safety != b.ai.motion_safety) {
-        return ApplyScope::PipelineReconfiguration;
+        bump(ApplyScope::PipelineReconfiguration);
     }
 
     // Presenter target and colour path are rebuilt on the current session.
@@ -58,7 +64,7 @@ ApplyScope ClassifySettingsChange(const AppSettings& before, const AppSettings& 
         a.video.hdr != b.video.hdr ||
         a.video.sharpening != b.video.sharpening ||
         a.video.color_space != b.video.color_space) {
-        return ApplyScope::PipelineReconfiguration;
+        bump(ApplyScope::PipelineReconfiguration);
     }
 
     if (a.display.monitor != b.display.monitor ||
@@ -66,21 +72,21 @@ ApplyScope ClassifySettingsChange(const AppSettings& before, const AppSettings& 
         a.display.vsync != b.display.vsync || a.display.vrr != b.display.vrr ||
         a.display.output_format != b.display.output_format ||
         a.display.bit_depth != b.display.bit_depth) {
-        return ApplyScope::PipelineReconfiguration;
+        bump(ApplyScope::PipelineReconfiguration);
     }
     if (a.display.fullscreen_on_play != b.display.fullscreen_on_play) {
-        return ApplyScope::Immediate;
+        bump(ApplyScope::Immediate);
     }
 
     if (a.gpu.device != b.gpu.device || a.gpu.fp16 != b.gpu.fp16 ||
         a.gpu.int8 != b.gpu.int8 || a.gpu.frame_buffers != b.gpu.frame_buffers ||
         a.gpu.memory_limit_mb != b.gpu.memory_limit_mb ||
         a.gpu.priority != b.gpu.priority) {
-        return ApplyScope::ApplicationRestart;
+        bump(ApplyScope::ApplicationRestart);
     }
 
     if (a.audio.buffer_ms != b.audio.buffer_ms || a.audio.device != b.audio.device) {
-        return ApplyScope::StreamRestart;
+        bump(ApplyScope::StreamRestart);
     }
 
     // Overlay, theme, notifications and controller feedback are live.
@@ -101,17 +107,20 @@ ApplyScope ClassifySettingsChange(const AppSettings& before, const AppSettings& 
         a.controller.rumble_strength != b.controller.rumble_strength ||
         a.controller.lightbar != b.controller.lightbar ||
         a.audio.volume != b.audio.volume || a.audio.mute != b.audio.mute) {
-        return ApplyScope::Immediate;
+        bump(ApplyScope::Immediate);
     }
 
+    if (a.advanced.log_level != b.advanced.log_level) {
+        bump(ApplyScope::Immediate);
+    }
     if (a.advanced.experimental != b.advanced.experimental ||
         a.advanced.debug_log != b.advanced.debug_log ||
-        a.advanced.log_level != b.advanced.log_level ||
         a.advanced.prefer_gpu_present != b.advanced.prefer_gpu_present) {
-        return ApplyScope::ApplicationRestart;
+        bump(ApplyScope::ApplicationRestart);
     }
 
-    return ApplyScope::Immediate;
+    bump(ApplyScope::Immediate);
+    return static_cast<ApplyScope>(severity);
 }
 
 }  // namespace brp::next

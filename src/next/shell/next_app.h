@@ -67,7 +67,6 @@ private:
     float PageHeader(Widgets& widgets, const wchar_t* eyebrow, const wchar_t* title,
                       const wchar_t* subtitle, const wchar_t* status = nullptr,
                       bool good = true);
-    void RenderWatchOverlay();
     void PresentVideo();
     void StartPadThread();
     void StopPadThread();

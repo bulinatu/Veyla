@@ -501,7 +501,7 @@ off removes the readback; it is the only remaining selectable cost.
 ## 1.0.0 - First stable release
 
 - Version bumped to 1.0.0 in the application, CMake project and package.
-- Visual redesign: new title bar, grouped sidebar with session card, page header
+- Visual redesign: flat caption/toolbar icon buttons, a new title bar, grouped sidebar with session card, page header
   system, pipeline flow on Home, AI sub-tabs (Super Resolution / Frame
   Generation / GPU), preset cards in Profiles and a first-class About page.
 - Interactive overlay control center (F10): Overview, Super Resolution, Frame
@@ -529,11 +529,11 @@ off removes the readback; it is the only remaining selectable cost.
 ### 1.0.0 package
 
 - Standalone: `dist/BetterRemotePlay-1.0.0-standalone.zip`
-  SHA256 `FA41736751B2588BD530BBD25930181040210CB443FE2C470474F5F43CC2DA7F`
+  SHA256 `B01E5435037FD86A4DBCEC473A7B50EA402EF5F6AEF328FE4C53740D35D79D92`
 - Update from 0.4.9: `dist/BetterRemotePlay-1.0.0-update.exe` (1.34 MB)
-  SHA256 `14386225628B0BC58F0A58AAC20387B4602B1212D5C57C7738A6DC280F024C54`
+  SHA256 `0370FB1250F284278523CA1F335DCECF7B39408610EE752E39DF59FD3C2181CA`
 - `brpnext.exe` SHA256
-  `74B97A0020E40E7843C0EEFEEE3CD3371CC75651E46DC1D786F203F96AB66D01`
+  `55258064104A354455E7B04BC6CDE15F02D77EDB85BD4A8DE2E65EF834DEBF26`
 - `brp.exe` SHA256
   `7256F12F553A7F76E99CEED378B4C839FA8EEFCEF337AE9785132A32F9D8B3E8`
 - Patch verification: `version=1.0.0`, 0 markers, `files_differ=0`.

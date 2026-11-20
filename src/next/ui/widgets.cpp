@@ -101,6 +101,27 @@ bool Widgets::Button(int id, const D2D1_RECT_F& rect, const wchar_t* label, bool
     return clicked;
 }
 
+bool Widgets::IconButton(int id, const D2D1_RECT_F& rect, const wchar_t* glyph,
+                         bool danger, float glyph_size) {
+    const bool hover = Hover(rect);
+    hovered_ = hovered_ || hover;
+    interactable_hovered_ = interactable_hovered_ || hover;
+    const bool clicked = Pressed(id, rect, true);
+    if (hover || clicked) {
+        const D2D1_RECT_F bg = Rect(rect.left + 2, rect.top + 3, rect.right - 2,
+                                    rect.bottom - 3);
+        const Color fill = clicked ? theme_.surface_hover
+                                   : WithAlpha(danger ? theme_.error : theme_.surface_hover,
+                                               danger ? 0.35f : 0.55f);
+        renderer_.FillRounded(bg, 6.0f, ToD2D(fill));
+    }
+    const Color color = danger && (hover || clicked)
+                            ? theme_.text
+                            : (hover || clicked ? theme_.text : theme_.text_dim);
+    renderer_.Text(glyph, rect, glyph_size, ToD2D(color),
+                   DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER);
+    return clicked;
+}
 bool Widgets::Choice(int id, const D2D1_RECT_F& rect, const wchar_t* label,
                      const std::vector<std::wstring>& items, int& index, bool enabled,
                      const std::vector<bool>* item_enabled) {

@@ -368,7 +368,7 @@ void NextApp::Resize() {
     logical_height_ = static_cast<float>(height) / scale_;
     renderer_->SetScale(scale_);
     window_->SetFrameMetrics(watching_ ? 0 : static_cast<int>(kTitleHeight * scale_),
-                             watching_ ? 0 : static_cast<int>(150.0f * scale_));
+                             watching_ ? 0 : static_cast<int>(370.0f * scale_));
     std::fprintf(stderr, "[next] window %dx%d scale %.3f logical %.1fx%.1f\n",
                  width, height, scale_, logical_width_, logical_height_);
 }
@@ -559,33 +559,31 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                         10.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
     }
 
-    const float button = 32.0f;
+    const float button = 36.0f;
     const float close_x = logical_width_ - 8.0f - button;
     const float max_x = close_x - button - 2.0f;
     const float min_x = max_x - button - 2.0f;
-    if (widgets.Button(9001, Rect(min_x, 4, min_x + button, kTitleHeight - 4), L"-",
-                       false)) {
+    const float theme_x = min_x - button - 8.0f;
+    if (widgets.IconButton(9001, Rect(min_x, 4, min_x + button, kTitleHeight - 4),
+                           L"\u2013")) {
         window_->Minimize();
     }
-    if (widgets.Button(9002, Rect(max_x, 4, max_x + button, kTitleHeight - 4), L"[]",
-                       false)) {
+    if (widgets.IconButton(9002, Rect(max_x, 4, max_x + button, kTitleHeight - 4),
+                           L"\u25A1", false, 13.0f)) {
         window_->ToggleMaximize();
     }
-    if (widgets.Button(9003, Rect(close_x, 4, close_x + button, kTitleHeight - 4), L"X",
-                       false)) {
+    if (widgets.IconButton(9003, Rect(close_x, 4, close_x + button, kTitleHeight - 4),
+                           L"\u2715", true, 14.0f)) {
         window_->Close();
     }
-
-    const D2D1_RECT_F theme_rect = Rect(min_x - 78.0f, 6, min_x - 8.0f,
-                                        kTitleHeight - 6);
-    if (widgets.Button(9004, theme_rect,
-                       settings_.general.theme == Theme::Dark ? L"Light" : L"Dark",
-                       false)) {
+    if (widgets.IconButton(9004, Rect(theme_x, 4, theme_x + button, kTitleHeight - 4),
+                           settings_.general.theme == Theme::Dark ? L"\u263C"
+                                                                  : L"\u263E",
+                           false, 15.0f)) {
         settings_.general.theme =
             settings_.general.theme == Theme::Dark ? Theme::Light : Theme::Dark;
         Apply();
     }
-
     const StreamSnapshot snapshot =
         streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
     const bool connected = snapshot.connected;
@@ -594,9 +592,11 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                                                                   : L"OFFLINE");
     const Color status_color = connected ? theme.success
                                : (connecting ? theme.warning : theme.text_faint);
-    widgets.StatusPill(Rect(min_x - 78.0f - 126.0f, 11, min_x - 86.0f,
-                            kTitleHeight - 11),
-                       status, status_color, connected || connecting);
+    const float status_x = theme_x - 176.0f;
+    renderer_->FillCircle(status_x + 5.0f, kTitleHeight * 0.5f, 3.5f,
+                          ToD2D(status_color));
+    renderer_->Text(status, Rect(status_x + 15.0f, 0, theme_x - 10.0f, kTitleHeight),
+                    9.0f, ToD2D(status_color), DWRITE_FONT_WEIGHT_SEMI_BOLD);
 }
 
 void NextApp::RenderSidebar(Widgets& widgets) {
@@ -2873,6 +2873,7 @@ void NextApp::RifeWorkerMain() {
         if (!rife_ || !rife_->Process(job.a.data(), job.b.data(), 0.5f, mid, detail)) {
             std::fprintf(stderr, "[next] RIFE process failed: %s\n", detail.c_str());
             rife_failed_ = true;
+            rife_run_.store(false);
             return;
         }
         if (job.blend > 0.0f && mid.size() == job.a.size()) {
@@ -2960,55 +2961,6 @@ void NextApp::ScheduleRifeFrame(const media::DecodedFrame& frame) {
     rife_prev_pq_ = frame.pq;
     rife_prev_pushed_ = true;
 }
-void NextApp::RenderWatchOverlay() {
-    const ThemeTokens& theme = ThemeFor(settings_.general.theme);
-    const StreamSnapshot snapshot = streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
-    if (settings_.overlay.enabled) {
-        renderer_->Text(L"ESC  Back to console",
-                        Rect(logical_width_ - 240, logical_height_ - 34,
-                             logical_width_ - 16, logical_height_ - 10),
-                        10.5f, ToD2D(theme.text_dim), DWRITE_FONT_WEIGHT_MEDIUM,
-                        DWRITE_TEXT_ALIGNMENT_TRAILING);
-        return;
-    }
-    renderer_->FillRect(Rect(0, 0, logical_width_, 42.0f),
-                        ToD2D(Color{theme.surface.r, theme.surface.g, theme.surface.b, 225}));
-    renderer_->FillRect(Rect(0, 41.0f, logical_width_, 42.0f), ToD2D(theme.accent));
-    renderer_->Text(L"LIVE", Rect(16, 0, 66, 42), 11.0f, ToD2D(theme.accent),
-                    DWRITE_FONT_WEIGHT_BOLD);
-    float stats_left = 72.0f;
-    const bool fg_running = dlss_fg_ && dlss_fg_->ready();
-    if (fg_running) {
-        renderer_->Text(L"DLSS-G", Rect(70, 0, 140, 42), 10.5f, ToD2D(theme.success),
-                        DWRITE_FONT_WEIGHT_BOLD);
-        stats_left = 142.0f;
-    } else if (dlss_ready_) {
-        renderer_->Text(L"DLSS", Rect(70, 0, 122, 42), 10.5f, ToD2D(theme.success),
-                        DWRITE_FONT_WEIGHT_BOLD);
-        stats_left = 126.0f;
-    }
-    wchar_t stats[256] = {};
-    if (fg_running) {
-        std::swprintf(stats, 256,
-                      L"%dx%d  |  %.1f generated fps  |  %dx  |  %.0f kbps",
-                      snapshot.source_width, snapshot.source_height, fg_fps_,
-                      fg_actual_mult_ > 1 ? fg_actual_mult_
-                                          : settings_.ai.fg_multiplier,
-                      snapshot.bitrate_kbps);
-    } else {
-        std::swprintf(stats, 256,
-                      L"%dx%d  |  %.1f fps  |  cad %.1f/%.1f ms  |  decode %.2f ms  |  %.0f kbps",
-                      snapshot.source_width, snapshot.source_height, snapshot.source_fps,
-                      cadence_p50_, cadence_p99_, snapshot.decode_ms, snapshot.bitrate_kbps);
-    }
-    renderer_->Text(stats, Rect(stats_left, 0, logical_width_ - 250, 42), 11.5f,
-                    ToD2D(theme.text), DWRITE_FONT_WEIGHT_MEDIUM);
-    renderer_->Text(L"ESC  Back to console", Rect(logical_width_ - 230, 0,
-                                                 logical_width_ - 16, 42),
-                    11.0f, ToD2D(theme.text_dim), DWRITE_FONT_WEIGHT_MEDIUM,
-                    DWRITE_TEXT_ALIGNMENT_TRAILING);
-}
-
 void NextApp::ToggleWatch(bool watching) {
     if (watching) {
         if (!streaming_ || !streaming_->Connected()) {
