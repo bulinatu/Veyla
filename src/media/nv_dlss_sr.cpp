@@ -175,11 +175,15 @@ bool NvDlssSr::EnsureDevice(std::string& detail) {
 
     D3D12_COMMAND_QUEUE_DESC queue_desc{};
     queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-    device12_->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&queue_));
-    device12_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                      IID_PPV_ARGS(&allocator_));
-    device12_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator_.Get(), nullptr,
-                                 IID_PPV_ARGS(&list_));
+    if (FAILED(device12_->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&queue_))) ||
+        FAILED(device12_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                 IID_PPV_ARGS(&allocator_))) ||
+        FAILED(device12_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                            allocator_.Get(), nullptr,
+                                            IID_PPV_ARGS(&list_)))) {
+        detail = "D3D12 command queue/allocation failed";
+        return false;
+    }
 
     HANDLE handle = nullptr;
     if (!device5_ || !context4_ ||
@@ -401,11 +405,28 @@ bool NvDlssSr::CreateFeature(int preset, int quality, std::string& detail) {
 }
 
 bool NvDlssSr::Submit() {
-    list_->Close();
+    if (!list_ || !queue_ || !fence12_ || !allocator_) {
+        return false;
+    }
+    auto abort = [this]() {
+        if (allocator_ && list_) {
+            allocator_->Reset();
+            list_->Reset(allocator_.Get(), nullptr);
+        }
+        have_pending_ = false;
+        status_ = "DLSS command submission failed";
+    };
+    if (FAILED(list_->Close())) {
+        abort();
+        return false;
+    }
     ID3D12CommandList* lists[] = {list_.Get()};
     queue_->ExecuteCommandLists(1, lists);
     const UINT64 value = ++fence_value_;
-    queue_->Signal(fence12_.Get(), value);
+    if (FAILED(queue_->Signal(fence12_.Get(), value))) {
+        abort();
+        return false;
+    }
     pending_value_ = value;
     have_pending_ = true;
     return true;
@@ -511,6 +532,13 @@ bool NvDlssSr::Process(const uint8_t* rgba, int width, int height, Frame& out,
     const int result = api_->evaluate(list_.Get(), static_cast<NVSDK_NGX_Handle*>(feature_),
                                       params, nullptr);
     if (!NVSDK_NGX_SUCCEED(static_cast<NVSDK_NGX_Result>(result))) {
+        // The command list now contains the failed evaluation. Reset it so the
+        // next Process() starts from a clean allocator instead of appending to
+        // a list that Submit() will close a second time.
+        if (allocator_ && list_) {
+            allocator_->Reset();
+            list_->Reset(allocator_.Get(), nullptr);
+        }
         detail = "EvaluateFeature(SR) failed " + ErrorText(result);
         return false;
     }

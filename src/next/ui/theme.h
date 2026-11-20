@@ -41,9 +41,9 @@ struct ThemeTokens {
     int space_xl = 28;
     int space_2xl = 40;
 
-    int radius_sm = 6;
-    int radius_md = 10;
-    int radius_lg = 14;
+    int radius_sm = 7;
+    int radius_md = 11;
+    int radius_lg = 16;
     int radius_pill = 999;
 
     int font_caption = 11;
@@ -53,8 +53,8 @@ struct ThemeTokens {
     int font_title = 20;
     int font_display = 28;
 
-    int sidebar_width = 236;
-    int sidebar_collapsed = 72;
+    int sidebar_width = 224;
+    int sidebar_collapsed = 68;
 };
 
 const ThemeTokens& ThemeFor(Theme theme);

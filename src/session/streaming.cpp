@@ -639,7 +639,8 @@ bool Streaming::TakeHaptics(uint16_t& left, uint16_t& right) {
 }
 
 void Streaming::OnAudio(uint8_t* buf, size_t size) {
-    if (!opus_ctx_ || !audio_ || size == 0) {
+    audio::Engine* engine = audio_.load();
+    if (!opus_ctx_ || !engine || size == 0) {
         return;
     }
 
@@ -691,7 +692,7 @@ void Streaming::OnAudio(uint8_t* buf, size_t size) {
                                 const_cast<const uint8_t**>(frame->extended_data),
                                 frame->nb_samples);
                 if (converted > 0) {
-                    audio_->Push(pcm_scratch_.data(), converted);
+                    engine->Push(pcm_scratch_.data(), converted);
                     audio_frames_.fetch_add(converted);
                 }
             }

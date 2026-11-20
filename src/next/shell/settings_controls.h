@@ -20,6 +20,8 @@ public:
     float Streaming(float x, float y, float width);
     float Video(float x, float y, float width);
     float Ai(float x, float y, float width);
+    float SuperResolution(float x, float y, float width);
+    float FrameGeneration(float x, float y, float width);
     float Gpu(float x, float y, float width);
     float Display(float x, float y, float width);
     float Overlay(float x, float y, float width);

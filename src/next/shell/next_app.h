@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/app_host.h"
+#include "app/runtime_settings.h"
 #include "app/navigation.h"
 #include "audio/audio_engine.h"
 #include "core/models.h"
@@ -34,6 +35,7 @@ class Rife;
 
 namespace brp::next {
 
+enum class OverlayAction;
 class SettingsControls;
 class StreamingService;
 class DlssFg;
@@ -61,7 +63,10 @@ private:
     void RenderProfiles(Widgets& widgets);
     void RenderDiagnostics(Widgets& widgets);
     void RenderSettings(Widgets& widgets);
-    void RenderAbout(Widgets& widgets, float x, float y, float width);
+    void RenderAboutPage(Widgets& widgets);
+    float PageHeader(Widgets& widgets, const wchar_t* eyebrow, const wchar_t* title,
+                      const wchar_t* subtitle, const wchar_t* status = nullptr,
+                      bool good = true);
     void RenderWatchOverlay();
     void PresentVideo();
     void StartPadThread();
@@ -82,6 +87,10 @@ private:
     void DisconnectStream();
     void ToggleBorderlessFullscreen();
     void ApplyPresenterTarget();
+    void BuildOverlayView();
+    void HandleOverlayAction(OverlayAction action);
+    void SetOverlayControl(bool open);
+    void ApplySelectedProfile();
     void StartBenchmark();
     void TickBenchmark();
     void WriteBenchReport();
@@ -90,7 +99,7 @@ private:
     float ContentX() const;
     float ContentWidth() const;
     float SidebarWidth() const;
-    void Apply();
+    bool Apply();
     void RefreshProfiles();
     void Toast(const std::wstring& text, bool error = false);
     void ProbeIfNeeded(double now);
@@ -112,6 +121,7 @@ private:
     std::vector<Profile> profiles_;
 
     int settings_category_ = 0;
+    int ai_tab_ = 0;
     int selected_profile_ = -1;
     bool collapsed_ = false;
     std::string pin_;
@@ -155,6 +165,12 @@ private:
     unsigned long long fg_dropped_ = 0;
     OverlayWindow overlay_;
     double last_overlay_update_ = -1.0;
+    bool overlay_control_ = false;
+    int overlay_tab_ = 0;
+    std::wstring overlay_status_;
+    bool overlay_status_error_ = false;
+    ApplyScope last_apply_scope_ = ApplyScope::Immediate;
+    bool stream_restart_pending_ = false;
 
     struct DisplayFrame {
         media::DecodedFrame frame;
@@ -166,6 +182,8 @@ private:
         std::vector<uint8_t> b;
         double mid_due = 0.0;
         bool pq = false;
+        float blend = 0.0f;
+        bool motion_safety = true;
     };
     std::unique_ptr<brp::media::Rife> rife_;
     std::thread rife_thread_;

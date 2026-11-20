@@ -37,7 +37,7 @@ public:
     Streaming& operator=(const Streaming&) = delete;
 
     // Audio sink target (optional).
-    void SetAudio(audio::Engine* engine) { audio_ = engine; }
+    void SetAudio(audio::Engine* engine) { audio_.store(engine); }
 
     bool Start(const Profile& profile, int width, int height, int bitrate, std::string& error);
     void Stop();
@@ -202,7 +202,7 @@ private:
     uint32_t haptics_seen_ = 0;
 
     // audio
-    audio::Engine* audio_ = nullptr;
+    std::atomic<audio::Engine*> audio_{nullptr};
     void* opus_ctx_ = nullptr;    // AVCodecContext*
     void* opus_frame_ = nullptr;  // AVFrame*
     void* swr_ = nullptr;         // SwrContext*

@@ -19,6 +19,7 @@ enum class Page {
     Profiles,
     Diagnostics,
     Settings,
+    About,
 };
 
 enum class Theme { Dark, Light };
@@ -82,6 +83,7 @@ inline std::string_view ToString(Page page) {
         case Page::Profiles: return "profiles";
         case Page::Diagnostics: return "diagnostics";
         case Page::Settings: return "settings";
+        case Page::About: return "about";
     }
     return "home";
 }

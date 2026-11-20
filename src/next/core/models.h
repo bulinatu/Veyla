@@ -92,6 +92,7 @@ struct OverlaySettings {
     bool compact = false;
     float opacity = 0.85f;
     int position = 1;     // 0 top-left .. 3 bottom-right
+    int scale = 125;      // 75..200 percent
     int interval_ms = 250;
     bool show_performance = true;
     bool show_gpu = true;

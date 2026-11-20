@@ -111,6 +111,19 @@ Status StreamingService::Load() {
     return Status::Ok();
 }
 
+void StreamingService::SetStreamSettings(const StreamingSettings& settings) {
+    stream_options_ = settings;
+}
+
+static int DecoderFromName(const std::string& name) {
+    if (name == "d3d11va") return 1;
+    if (name == "d3d12va") return 2;
+    if (name == "vulkan") return 3;
+    if (name == "dxva2") return 4;
+    if (name == "cuda") return 5;
+    if (name == "software") return 6;
+    return 0;
+}
 Status StreamingService::Connect(const ConsoleSettings& console) {
     // A second request while the first session is still being established is
     // exactly what makes the console answer "Remote is already in use".
@@ -132,6 +145,11 @@ Status StreamingService::Connect(const ConsoleSettings& console) {
         return Status::Error("console address is empty");
     }
     profile.fps = console.fps == 30 ? 30 : 60;
+    profile.width = 1920;
+    profile.height = 1080;
+    profile.bitrate_kbps = std::clamp(stream_options_.bitrate_kbps, 1000, 200000);
+    profile.decoder = DecoderFromName(stream_options_.decoder);
+    profile.frame_buffer = std::clamp(stream_options_.frame_buffer, 0, 2);
     JoinConnect();
     streaming_.Stop();
     {
@@ -170,7 +188,8 @@ Status StreamingService::Connect(const ConsoleSettings& console) {
         }
         std::string error;
         const bool ok =
-            streaming_.Start(profile, 1920, 1080, profile.bitrate_kbps, error);
+            streaming_.Start(profile, profile.width, profile.height,
+                            profile.bitrate_kbps, error);
         std::lock_guard<std::mutex> lock(mutex_);
         connecting_.store(false);
         if (!ok) {

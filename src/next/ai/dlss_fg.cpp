@@ -70,7 +70,8 @@ bool DlssFg::Start(const std::wstring& runtime_dir, int width, int height, int m
     options.work_scale = 1.0f;
     // 2x is the clean cadence; keep the official NVIDIA runtime. The SM86
     // proxy is only needed to ask for more than 2x.
-    options.inject_fg_proxy = multiplier > 2;
+    options.inject_fg_proxy =
+        multiplier > 2 && std::filesystem::exists(dir / "fg" / "winmm.dll");
     proxy_runtime_ = options.inject_fg_proxy;
     // The worker reads this at queue creation. High priority keeps the motion
     // and FG queues ahead of ordinary desktop GPU work without asking for the

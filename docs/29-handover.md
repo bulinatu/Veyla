@@ -497,3 +497,43 @@ What is left is not app-side queueing: the DLAA pass plus its 8 MB readback
 (~one GPU pass) before the generator, the generator's own one-frame compositor
 latency, and DWM composition for the worker window. Turning super resolution
 off removes the readback; it is the only remaining selectable cost.
+
+## 1.0.0 - First stable release
+
+- Version bumped to 1.0.0 in the application, CMake project and package.
+- Visual redesign: new title bar, grouped sidebar with session card, page header
+  system, pipeline flow on Home, AI sub-tabs (Super Resolution / Frame
+  Generation / GPU), preset cards in Profiles and a first-class About page.
+- Interactive overlay control center (F10): Overview, Super Resolution, Frame
+  Generation, Display, Performance and Profile tabs. Mouse and forwarded
+  keyboard input; every action goes through `NextApp::Apply` and reports the
+  scope that actually applied. Compact mode remains click-through.
+- Central runtime classification (`app/runtime_settings.*`) for immediate,
+  frame-boundary, pipeline, stream-restart and application-restart changes.
+  Transport changes show `RECONNECT REQUIRED`; they do not claim to apply live.
+- Fixed: RIFE thread lifetime on exit/leave Watch/device loss; DLSS SR command
+  list recovery after a failed evaluation; unchecked D3D12 queue creation;
+  RIFE failure loop and blend/motion safety; audio pointer race and shutdown
+  order; settings/profile restore on failed replacement.
+- Removed inert UI controls (codec/HDR/source resolution, VRR, audio volume,
+  controller toggles, GPU tuning, monitor/mode controls, start-minimized/tray).
+  Streaming bitrate/decoder/buffer/fps, V-Sync and sharpening are now wired.
+- DLSS-G 2x uses the NVIDIA-signed runtime; the SM86 proxy is injected only for
+  3x-6x and only when present. SR 2160p cannot feed a capped DLSS-G worker.
+- Release documentation: `RELEASE_AUDIT.md`, `KNOWN_ISSUES.md`,
+  `KNOWN_LIMITATIONS.md`, `V1_RELEASE_NOTES.md`, `V1_RELEASE_CHECKLIST.md`,
+  `USER_GUIDE.md`, `ARCHITECTURE.md`.
+- Tests: `brp_next_tests` ALL PASS (82 assertions). Package hashes are in the
+  release section below.
+
+### 1.0.0 package
+
+- Standalone: `dist/BetterRemotePlay-1.0.0-standalone.zip`
+  SHA256 `FA41736751B2588BD530BBD25930181040210CB443FE2C470474F5F43CC2DA7F`
+- Update from 0.4.9: `dist/BetterRemotePlay-1.0.0-update.exe` (1.34 MB)
+  SHA256 `14386225628B0BC58F0A58AAC20387B4602B1212D5C57C7738A6DC280F024C54`
+- `brpnext.exe` SHA256
+  `74B97A0020E40E7843C0EEFEEE3CD3371CC75651E46DC1D786F203F96AB66D01`
+- `brp.exe` SHA256
+  `7256F12F553A7F76E99CEED378B4C839FA8EEFCEF337AE9785132A32F9D8B3E8`
+- Patch verification: `version=1.0.0`, 0 markers, `files_differ=0`.

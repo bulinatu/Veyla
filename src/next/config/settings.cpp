@@ -128,6 +128,9 @@ void AppSettings::Validate(std::vector<std::string>& warnings,
     if (overlay.position < 0 || overlay.position > 3) {
         errors.push_back("overlay.position must be 0..3");
     }
+    if (overlay.scale < 75 || overlay.scale > 200) {
+        errors.push_back("overlay.scale must be 75..200");
+    }
     if (audio.buffer_ms < 5 || audio.buffer_ms > 200) {
         errors.push_back("audio.buffer_ms must be 5..200");
     }
@@ -233,6 +236,7 @@ FlatMap SettingsToFlat(const AppSettings& s) {
     FlatJson::PutBool(f, "overlay.compact", s.overlay.compact);
     FlatJson::PutDouble(f, "overlay.opacity", s.overlay.opacity);
     FlatJson::PutInt(f, "overlay.position", s.overlay.position);
+    FlatJson::PutInt(f, "overlay.scale", s.overlay.scale);
     FlatJson::PutInt(f, "overlay.interval_ms", s.overlay.interval_ms);
     FlatJson::PutBool(f, "overlay.show_performance", s.overlay.show_performance);
     FlatJson::PutBool(f, "overlay.show_gpu", s.overlay.show_gpu);
@@ -362,6 +366,8 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
         FlatJson::GetDouble(f, "overlay.opacity", s.overlay.opacity), 0.1, 1.0));
     s.overlay.position =
         ClampInt(FlatJson::GetInt(f, "overlay.position", s.overlay.position), 0, 3);
+    s.overlay.scale =
+        ClampInt(FlatJson::GetInt(f, "overlay.scale", s.overlay.scale), 75, 200);
     s.overlay.interval_ms = ClampInt(
         FlatJson::GetInt(f, "overlay.interval_ms", s.overlay.interval_ms), 50, 2000);
     s.overlay.show_performance = FlatJson::GetBool(
@@ -527,13 +533,21 @@ Status SettingsStore::Save(const AppSettings& settings) {
             return Status::Error("write failed: " + temp.string());
         }
     }
-    if (std::filesystem::exists(file_, ec)) {
+    const bool had_old = std::filesystem::exists(file_, ec);
+    if (had_old) {
         std::filesystem::copy_file(file_, file_.string() + ".bak",
                                    std::filesystem::copy_options::overwrite_existing, ec);
         std::filesystem::remove(file_, ec);
     }
     std::filesystem::rename(temp, file_, ec);
     if (ec) {
+        // Restore the previous valid file instead of leaving no settings.
+        if (had_old) {
+            std::error_code restore_ec;
+            std::filesystem::copy_file(file_.string() + ".bak", file_,
+                                       std::filesystem::copy_options::overwrite_existing,
+                                       restore_ec);
+        }
         return Status::Error("cannot replace settings: " + ec.message());
     }
     return Status::Ok();

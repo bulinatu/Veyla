@@ -15,6 +15,7 @@ NavigationModel::NavigationModel()
           {Page::Profiles, "Profiles", "Workspace", 6, true},
           {Page::Diagnostics, "Diagnostics", "Workspace", 7, true},
           {Page::Settings, "Settings", "Application", 8, true},
+          {Page::About, "About", "Application", 9, true},
       } {}
 
 const PageInfo* NavigationModel::Find(Page page) const {

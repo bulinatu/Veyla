@@ -35,6 +35,7 @@ public:
     Status Load();
     bool profile_loaded() const { return loaded_; }
 
+    void SetStreamSettings(const StreamingSettings& settings);
     Status Connect(const ConsoleSettings& console) override;
     void Disconnect() override;
     StreamSnapshot Snapshot() const override;
@@ -51,7 +52,7 @@ public:
     session::Profile Profile() const;
     std::string ProfilePath() const { return next_path_.string(); }
 
-    // Stage 5 media/input surface.
+    // Media and input surface used by the Watch view.
     void SetAudio(brp::audio::Engine* engine);
     void SetMotionEnabled(bool enabled);
     bool TakeFrame(media::DecodedFrame& out, int buffer, bool paced);
@@ -70,6 +71,7 @@ private:
     mutable std::mutex mutex_;
     session::Profile profile_;
     session::Streaming streaming_;
+    StreamingSettings stream_options_{};
     session::Pairing pairing_;
     std::thread connect_thread_;
     std::thread discovery_thread_;

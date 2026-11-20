@@ -149,9 +149,20 @@ Status ProfileStore::WriteFile(const std::filesystem::path& path, const Profile&
             return Status::Error("profile write failed: " + temp.string());
         }
     }
-    std::filesystem::remove(path, ec);
+    const bool had_old = std::filesystem::exists(path, ec);
+    if (had_old) {
+        std::filesystem::copy_file(path, path.string() + ".bak",
+                                   std::filesystem::copy_options::overwrite_existing, ec);
+        std::filesystem::remove(path, ec);
+    }
     std::filesystem::rename(temp, path, ec);
     if (ec) {
+        if (had_old) {
+            std::error_code restore_ec;
+            std::filesystem::copy_file(path.string() + ".bak", path,
+                                       std::filesystem::copy_options::overwrite_existing,
+                                       restore_ec);
+        }
         return Status::Error("cannot replace profile: " + ec.message());
     }
     return Status::Ok();

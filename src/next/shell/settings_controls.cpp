@@ -140,41 +140,22 @@ float SettingsControls::General(float x, float y, float width) {
         Touch();
     }
     y += kRow + kGap;
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"Start minimized",
-                        settings_.general.start_minimized)) {
-        Touch();
-    }
-    y += kRow + kGap;
     if (widgets_.Toggle(Next(), Row(x, y, width), L"Notifications",
                         settings_.general.notifications)) {
         Touch();
     }
     y += kRow + kGap;
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"Check for updates",
-                        settings_.general.check_updates)) {
-        Touch();
-    }
-    y += kRow + kGap;
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"Close to tray",
-                        settings_.general.close_to_tray)) {
-        Touch();
-    }
-    return y + kRow;
+    widgets_.Label(Rect(x, y, x + width, y + 40),
+                   L"Settings are written to the application data folder and validated "
+                   L"before they reach the running engines.",
+                   widgets_.Tokens().text_faint, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+    return y + 44.0f;
 }
-
 float SettingsControls::Streaming(float x, float y, float width) {
-    int input = ResolutionIndex(settings_.streaming.input);
-    if (widgets_.Choice(Next(), Row(x, y, width), L"Source resolution", kResolutions,
-                        input)) {
-        settings_.streaming.input = ResolutionAt(input);
-        Touch();
-    }
-    y += kRow + kGap;
-
-    float fps = static_cast<float>(settings_.streaming.fps);
-    if (widgets_.Slider(Next(), Row(x, y, width), L"Source frame rate", fps, 24.0f,
-                        240.0f, 1.0f, L"%.0f fps")) {
-        settings_.streaming.fps = static_cast<int>(std::lround(fps));
+    int fps = settings_.streaming.fps == 30 ? 0 : 1;
+    if (widgets_.Choice(Next(), Row(x, y, width), L"Source frame rate",
+                        {L"30 fps", L"60 fps"}, fps)) {
+        settings_.streaming.fps = fps == 0 ? 30 : 60;
         Touch();
     }
     y += kRow + kGap;
@@ -189,16 +170,8 @@ float SettingsControls::Streaming(float x, float y, float width) {
 
     int buffer = settings_.streaming.frame_buffer;
     if (widgets_.Choice(Next(), Row(x, y, width), L"Frame buffer",
-                        {L"0", L"1", L"2", L"3"}, buffer)) {
-        settings_.streaming.frame_buffer = buffer;
-        Touch();
-    }
-    y += kRow + kGap;
-
-    int codec = CodecIndex(settings_.streaming.codec);
-    if (widgets_.Choice(Next(), Row(x, y, width), L"Codec",
-                        {L"Auto", L"H.264", L"HEVC", L"AV1"}, codec)) {
-        settings_.streaming.codec = CodecAt(codec);
+                        {L"0  (lowest latency)", L"1", L"2"}, buffer)) {
+        settings_.streaming.frame_buffer = std::clamp(buffer, 0, 2);
         Touch();
     }
     y += kRow + kGap;
@@ -213,29 +186,22 @@ float SettingsControls::Streaming(float x, float y, float width) {
     }
     y += kRow + kGap;
 
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"HDR stream",
-                        settings_.streaming.hdr)) {
-        Touch();
-    }
-    return y + kRow;
+    widgets_.Label(Rect(x, y, x + width, y + 42),
+                   L"Remote Play sends 1080p HEVC. The decoder setting is applied when "
+                   L"the next session starts; bitrate and frame rate are renegotiated "
+                   L"by reconnecting.",
+                   widgets_.Tokens().text_faint, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+    return y + 46.0f;
 }
-
 float SettingsControls::Video(float x, float y, float width) {
-    int output = ResolutionIndex(settings_.video.output);
-    if (widgets_.Choice(Next(), Row(x, y, width), L"Output resolution", kResolutions,
-                        output)) {
-        settings_.video.output = ResolutionAt(output);
-        Touch();
-    }
-    y += kRow + kGap;
-
     int target = settings_.video.render_target == 1080
                      ? 1
                      : (settings_.video.render_target == 1440
                             ? 2
                             : (settings_.video.render_target == 2160 ? 3 : 0));
     if (widgets_.Choice(Next(), Row(x, y, width), L"Render target",
-                        {L"Window", L"1080p", L"1440p", L"2160p"}, target)) {
+                        {L"Window / fullscreen", L"1080p", L"1440p", L"2160p"},
+                        target)) {
         settings_.video.render_target =
             target == 1 ? 1080 : (target == 2 ? 1440 : (target == 3 ? 2160 : 0));
         Touch();
@@ -243,10 +209,6 @@ float SettingsControls::Video(float x, float y, float width) {
     y += kRow + kGap;
 
     if (widgets_.Toggle(Next(), Row(x, y, width), L"V-Sync", settings_.video.vsync)) {
-        Touch();
-    }
-    y += kRow + kGap;
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"VRR / G-Sync", settings_.video.vrr)) {
         Touch();
     }
     y += kRow + kGap;
@@ -259,13 +221,13 @@ float SettingsControls::Video(float x, float y, float width) {
     }
     y += kRow + kGap;
 
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"HDR output", settings_.video.hdr)) {
-        Touch();
-    }
-    return y + kRow;
+    widgets_.Label(Rect(x, y, x + width, y + 40),
+                   L"HDR output is not implemented by this presenter and is therefore "
+                   L"not offered.",
+                   widgets_.Tokens().text_faint, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+    return y + 44.0f;
 }
-
-float SettingsControls::Ai(float x, float y, float width) {
+float SettingsControls::SuperResolution(float x, float y, float width) {
     const bool sr_available = system_.dlss_sr;
     if (widgets_.Toggle(Next(), Row(x, y, width), L"Super resolution",
                         settings_.ai.super_resolution, sr_available)) {
@@ -289,8 +251,6 @@ float SettingsControls::Ai(float x, float y, float width) {
                         quality, settings_.ai.super_resolution)) {
         settings_.ai.sr_quality = quality;
         if (quality >= 5) {
-            // DLAA has no output scale; keep the stale SR target out of the
-            // Home summary and the worker stage.
             settings_.ai.sr_output = Resolution::Native;
         }
         Touch();
@@ -298,14 +258,28 @@ float SettingsControls::Ai(float x, float y, float width) {
     y += kRow + kGap;
 
     widgets_.Label(Row(x, y, width),
-                   sr_available ? L"SR backend: DLSS Super Resolution (NGX)"
-                                : L"SR backend: not installed (no nvngx_dlss.dll)",
+                   sr_available ? L"Backend: DLSS Super Resolution (NGX)"
+                                : L"Backend: not installed (no nvngx_dlss.dll)",
                    sr_available ? widgets_.Tokens().success : widgets_.Tokens().text_faint,
-                   13.0f, DWRITE_FONT_WEIGHT_MEDIUM);
-    y += kRow + kGap;
+                   12.0f, DWRITE_FONT_WEIGHT_MEDIUM);
+    y += kRow + kGap + 2.0f;
 
+    const bool dlaa = settings_.ai.sr_quality >= 5 ||
+                      settings_.ai.sr_output == Resolution::R1080;
+    widgets_.Label(
+        Rect(x, y, x + width, y + 40),
+        dlaa ? L"DLAA runs at the stream resolution and feeds the generator at "
+               L"1080p: the lowest-latency DLSS-G path."
+             : L"SR is applied to the decoded frame and read back before frame "
+               L"generation. At 1440p expect about 100 generated fps.",
+        widgets_.Tokens().text_faint, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+    y += 44.0f;
+    return y;
+}
+
+float SettingsControls::FrameGeneration(float x, float y, float width) {
     std::vector<AiBackend> backends = {AiBackend::DlssFg, AiBackend::Rife};
-    std::vector<std::wstring> labels = {L"DLSS FG (worker)", L"RIFE (TensorRT)"};
+    std::vector<std::wstring> labels = {L"DLSS-G (NVIDIA)", L"RIFE (TensorRT)"};
     std::vector<bool> item_enabled = {system_.dlss_fg, system_.rife_lite};
     const bool fg_available =
         frame_generation_wired_ && (item_enabled[0] || item_enabled[1]);
@@ -323,7 +297,7 @@ float SettingsControls::Ai(float x, float y, float width) {
                 break;
             }
         }
-        if (widgets_.Choice(Next(), Row(x, y, width), L"FG backend", labels,
+        if (widgets_.Choice(Next(), Row(x, y, width), L"Backend", labels,
                             backend_index, settings_.ai.frame_generation,
                             &item_enabled)) {
             if (item_enabled[static_cast<std::size_t>(backend_index)]) {
@@ -353,11 +327,10 @@ float SettingsControls::Ai(float x, float y, float width) {
                        system_.nr_worker
                            ? L"FG unavailable: nvngx_dlssg.dll is missing"
                            : L"FG unavailable: worker and RIFE engine are not installed",
-                       widgets_.Tokens().text_faint, 13.0f,
+                       widgets_.Tokens().text_faint, 12.0f,
                        DWRITE_FONT_WEIGHT_MEDIUM);
         y += kRow + kGap;
     }
-
 
     if (settings_.ai.fg_backend == AiBackend::Rife &&
         settings_.ai.frame_generation) {
@@ -374,8 +347,8 @@ float SettingsControls::Ai(float x, float y, float width) {
         y += kRow + kGap;
         if (settings_.ai.rife_model == 1 && !system_.rife_heavy) {
             widgets_.Label(Rect(x, y, x + width, y + 34),
-                           L"Heavy engine is not built; Lite is used until Set up RIFE "
-                           L"builds it in the reference app.",
+                           L"Heavy engine is not built; Lite is used until the heavy "
+                           L"engine is generated.",
                            widgets_.Tokens().warning, 11.5f, DWRITE_FONT_WEIGHT_MEDIUM);
             y += 36.0f;
         }
@@ -416,24 +389,6 @@ float SettingsControls::Ai(float x, float y, float width) {
                        widgets_.Tokens().text_faint, 11.5f,
                        DWRITE_FONT_WEIGHT_MEDIUM);
         y += 42.0f;
-        if (settings_.ai.super_resolution) {
-            const bool dlaa = settings_.ai.sr_quality >= 5 ||
-                              settings_.ai.sr_output == Resolution::R1080;
-            const bool too_large = !dlaa &&
-                                   settings_.ai.sr_output == Resolution::R2160;
-            widgets_.Label(
-                Rect(x, y, x + width, y + 36),
-                dlaa ? L"DLAA stays at the stream resolution (1080p) and feeds the "
-                       L"worker at 1080p: the lowest-latency DLSS-G path."
-                     : (too_large
-                            ? L"DLSS-G is capped at 1440p. Use 1440p SR or turn SR off."
-                            : L"SR feeds the worker through a CPU readback; at "
-                              L"1440p expect about 100 generated fps."),
-                (dlaa || !too_large) ? widgets_.Tokens().text_faint
-                                     : widgets_.Tokens().warning,
-                11.5f, DWRITE_FONT_WEIGHT_MEDIUM);
-            y += 38.0f;
-        }
         if (!system_.dlss_fg_multi && settings_.ai.fg_multiplier > 2) {
             widgets_.Label(Rect(x, y, x + width, y + 36),
                            L"The SM86 FG proxy is not installed; the runtime steps "
@@ -444,132 +399,80 @@ float SettingsControls::Ai(float x, float y, float width) {
         }
         if (source <= 30 && out < 100) {
             widgets_.Label(
-                Rect(x, y, x + width, y + 36),
+                Rect(x, y, x + width, y + 40),
                 L"30 fps source: 2x gives 60 fps. 120 needs a 60 fps source; 4x "
                 L"measured 94 fps with late generated frames, so it is not offered "
                 L"as the smooth path.",
                 widgets_.Tokens().text_faint, 11.5f, DWRITE_FONT_WEIGHT_MEDIUM);
-            y += 38.0f;
+            y += 42.0f;
         }
     }
+    return y;
+}
+
+float SettingsControls::Ai(float x, float y, float width) {
+    y = SuperResolution(x, y, width);
+    y = FrameGeneration(x, y, width);
     return y;
 }
 float SettingsControls::Gpu(float x, float y, float width) {
     widgets_.Label(Row(x, y, width),
                    system_.gpu.present ? (L"Adapter: " + Widen(system_.gpu.name)).c_str()
                                        : L"Adapter: none detected",
-                   widgets_.Tokens().text_dim, 13.0f, DWRITE_FONT_WEIGHT_MEDIUM);
+                   widgets_.Tokens().text, 13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    y += kRow + kGap - 6.0f;
+    widgets_.Label(Row(x, y, width),
+                   (std::to_wstring(system_.gpu.vram_mb / 1024) + L" GB VRAM  |  " +
+                    (system_.gpu.driver.empty()
+                         ? std::wstring(L"driver unknown")
+                         : L"driver " + Widen(system_.gpu.driver)))
+                       .c_str(),
+                   widgets_.Tokens().text_dim, 11.0f, DWRITE_FONT_WEIGHT_MEDIUM);
+    y += kRow + kGap - 6.0f;
+    widgets_.Label(Row(x, y, width),
+                   (std::wstring(L"CUDA: ") +
+                    (system_.cuda ? L"driver present" : L"missing") +
+                    L"  |  TensorRT: " +
+                    (system_.tensorrt_runtime ? L"runtime present" : L"missing"))
+                       .c_str(),
+                   widgets_.Tokens().text_faint, 11.0f, DWRITE_FONT_WEIGHT_MEDIUM);
     y += kRow + kGap;
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"FP16 inference",
-                        settings_.gpu.fp16)) {
-        Touch();
-    }
-    y += kRow + kGap;
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"INT8 inference (experimental)",
-                        settings_.gpu.int8, settings_.advanced.experimental)) {
-        Touch();
-    }
-    y += kRow + kGap;
-
-    float buffers = static_cast<float>(settings_.gpu.frame_buffers);
-    if (widgets_.Slider(Next(), Row(x, y, width), L"Frame buffers", buffers, 1.0f, 4.0f,
-                        1.0f, L"%.0f")) {
-        settings_.gpu.frame_buffers = static_cast<int>(std::lround(buffers));
-        Touch();
-    }
-    y += kRow + kGap;
-
-    float limit = static_cast<float>(settings_.gpu.memory_limit_mb);
-    const float max_limit = system_.gpu.vram_mb > 1024
-                                ? static_cast<float>(system_.gpu.vram_mb)
-                                : 24576.0f;
-    if (widgets_.Slider(Next(), Row(x, y, width), L"VRAM limit (0 = auto)", limit, 0.0f,
-                        max_limit, 512.0f, L"%.0f MB")) {
-        settings_.gpu.memory_limit_mb = static_cast<int>(std::lround(limit));
-        Touch();
-    }
-    y += kRow + kGap;
-
-    int priority = settings_.gpu.priority;
-    if (widgets_.Choice(Next(), Row(x, y, width), L"Workload priority",
-                        {L"Normal", L"High"}, priority)) {
-        settings_.gpu.priority = priority;
-        Touch();
-    }
-    return y + kRow;
+    widgets_.Label(Rect(x, y, x + width, y + 42),
+                   L"Inference and presentation use the adapter owned by the process. "
+                   L"Per-control adapter selection is not exposed in 1.0.",
+                   widgets_.Tokens().text_faint, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+    return y + 46.0f;
 }
-
 float SettingsControls::Display(float x, float y, float width) {
-    std::vector<std::wstring> monitors;
-    for (std::size_t i = 0; i < system_.displays.size(); ++i) {
-        monitors.push_back(MonitorLabel(system_.displays[i], static_cast<int>(i)));
-    }
-    if (monitors.empty()) {
-        monitors.push_back(L"No display detected");
-    }
-    int monitor = std::clamp(settings_.display.monitor, 0,
-                             static_cast<int>(monitors.size()) - 1);
-    if (widgets_.Choice(Next(), Row(x, y, width), L"Monitor", monitors, monitor)) {
-        settings_.display.monitor = monitor;
-        Touch();
-    }
-    y += kRow + kGap;
-
-    int refresh = static_cast<int>(settings_.display.refresh);
-    if (widgets_.Choice(Next(), Row(x, y, width), L"Refresh rate", kRefresh, refresh)) {
-        settings_.display.refresh = static_cast<FrameRate>(std::clamp(refresh, 0, 6));
-        Touch();
-    }
-    y += kRow + kGap;
-
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"V-Sync", settings_.display.vsync)) {
-        Touch();
-    }
-    y += kRow + kGap;
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"VRR / G-Sync", settings_.display.vrr)) {
-        Touch();
-    }
-    y += kRow + kGap;
-
     if (widgets_.Toggle(Next(), Row(x, y, width), L"Fullscreen on play",
                         settings_.display.fullscreen_on_play)) {
         Touch();
     }
     y += kRow + kGap;
-
-    int depth = BitDepthIndex(settings_.display.bit_depth);
-    if (widgets_.Choice(Next(), Row(x, y, width), L"Bit depth", {L"8-bit", L"10-bit"},
-                        depth)) {
-        settings_.display.bit_depth = depth == 1 ? 10 : 8;
-        Touch();
-    }
-    y += kRow + kGap;
-
-    int format = FormatIndex(settings_.display.output_format);
-    if (widgets_.Choice(Next(), Row(x, y, width), L"Colour output",
-                        {L"Auto", L"SDR", L"HDR10"}, format)) {
-        settings_.display.output_format = FormatAt(format);
-        Touch();
-    }
-    return y + kRow;
+    widgets_.Label(Rect(x, y, x + width, y + 42),
+                   L"Fullscreen uses the monitor that contains the window. F11 toggles "
+                   L"borderless fullscreen at any time.",
+                   widgets_.Tokens().text_faint, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+    return y + 46.0f;
 }
-
 float SettingsControls::Overlay(float x, float y, float width) {
     if (widgets_.Toggle(Next(), Row(x, y, width), L"Overlay enabled",
                         settings_.overlay.enabled)) {
         Touch();
     }
     y += kRow + kGap;
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"Compact layout",
-                        settings_.overlay.compact)) {
-        Touch();
-    }
-    y += kRow + kGap;
-
     float opacity = settings_.overlay.opacity * 100.0f;
     if (widgets_.Slider(Next(), Row(x, y, width), L"Opacity", opacity, 10.0f, 100.0f,
                         1.0f, L"%.0f%%")) {
         settings_.overlay.opacity = opacity / 100.0f;
+        Touch();
+    }
+    y += kRow + kGap;
+
+    float scale = static_cast<float>(settings_.overlay.scale);
+    if (widgets_.Slider(Next(), Row(x, y, width), L"Scale", scale, 75.0f, 200.0f,
+                        5.0f, L"%.0f%%")) {
+        settings_.overlay.scale = static_cast<int>(std::lround(scale));
         Touch();
     }
     y += kRow + kGap;
@@ -614,8 +517,8 @@ float SettingsControls::Overlay(float x, float y, float width) {
 }
 
 float SettingsControls::Audio(float x, float y, float width) {
-    widgets_.Label(Row(x, y, width), L"Output device: Default endpoint",
-                   widgets_.Tokens().text_dim, 13.0f, DWRITE_FONT_WEIGHT_MEDIUM);
+    widgets_.Label(Row(x, y, width), L"Output device: Windows default endpoint",
+                   widgets_.Tokens().text_dim, 12.0f, DWRITE_FONT_WEIGHT_MEDIUM);
     y += kRow + kGap;
 
     float buffer = static_cast<float>(settings_.audio.buffer_ms);
@@ -625,38 +528,13 @@ float SettingsControls::Audio(float x, float y, float width) {
         Touch();
     }
     y += kRow + kGap;
-
-    float volume = static_cast<float>(settings_.audio.volume);
-    if (widgets_.Slider(Next(), Row(x, y, width), L"Volume", volume, 0.0f, 100.0f, 1.0f,
-                        L"%.0f%%")) {
-        settings_.audio.volume = static_cast<int>(std::lround(volume));
-        Touch();
-    }
-    y += kRow + kGap;
-
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"Mute", settings_.audio.mute)) {
-        Touch();
-    }
-    return y + kRow;
+    widgets_.Label(Rect(x, y, x + width, y + 42),
+                   L"The buffer is applied when the session opens. Volume follows the "
+                   L"Windows mixer; the stream does not apply a second gain stage.",
+                   widgets_.Tokens().text_faint, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+    return y + 46.0f;
 }
-
 float SettingsControls::Controller(float x, float y, float width) {
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"Controller input",
-                        settings_.controller.enabled)) {
-        Touch();
-    }
-    y += kRow + kGap;
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"Haptics",
-                        settings_.controller.haptics)) {
-        Touch();
-    }
-    y += kRow + kGap;
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"Adaptive triggers",
-                        settings_.controller.adaptive_triggers)) {
-        Touch();
-    }
-    y += kRow + kGap;
-
     float rumble = static_cast<float>(settings_.controller.rumble_strength);
     if (widgets_.Slider(Next(), Row(x, y, width), L"Rumble strength", rumble, 0.0f, 5.0f,
                         1.0f, L"%.0f")) {
@@ -664,28 +542,13 @@ float SettingsControls::Controller(float x, float y, float width) {
         Touch();
     }
     y += kRow + kGap;
-
-    int lightbar = settings_.controller.lightbar;
-    if (widgets_.Choice(Next(), Row(x, y, width), L"Lightbar",
-                        {L"Off", L"Blue", L"Red", L"Green", L"White"}, lightbar)) {
-        settings_.controller.lightbar = lightbar;
-        Touch();
-    }
-    return y + kRow;
+    widgets_.Label(Rect(x, y, x + width, y + 42),
+                   L"DualSense input, haptics and adaptive triggers follow the session. "
+                   L"Rumble strength scales console feedback.",
+                   widgets_.Tokens().text_faint, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+    return y + 46.0f;
 }
-
 float SettingsControls::Advanced(float x, float y, float width) {
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"Experimental features",
-                        settings_.advanced.experimental)) {
-        Touch();
-    }
-    y += kRow + kGap;
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"Debug log",
-                        settings_.advanced.debug_log)) {
-        Touch();
-    }
-    y += kRow + kGap;
-
     int level = static_cast<int>(settings_.advanced.log_level);
     if (widgets_.Choice(Next(), Row(x, y, width), L"Log level",
                         {L"Trace", L"Debug", L"Info", L"Warning", L"Error"}, level)) {
@@ -693,12 +556,10 @@ float SettingsControls::Advanced(float x, float y, float width) {
         Touch();
     }
     y += kRow + kGap;
-
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"GPU presentation",
-                        settings_.advanced.prefer_gpu_present)) {
-        Touch();
-    }
-    return y + kRow;
+    widgets_.Label(Rect(x, y, x + width, y + 42),
+                   L"The log lives beside the settings file in the application data "
+                   L"folder. Diagnostics export never includes credentials or tokens.",
+                   widgets_.Tokens().text_faint, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+    return y + 46.0f;
 }
-
 }  // namespace brp::next

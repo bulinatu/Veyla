@@ -11,7 +11,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $release = Join-Path $root "build\Release"
 $distRoot = Join-Path $root "dist"
 $dest = Join-Path $distRoot "BetterRemotePlay"
-$version = "0.5.0"
+$version = "1.0.0"
 
 function Require-File([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -131,18 +131,18 @@ $readme = @"
 BetterRemotePlay $version - standalone build
 =============================================
 
-Run brp.exe. No installer, no console window, no network service.
+Run brpnext.exe for the 1.0 application. No installer, no console window, no
+network service. brp.exe remains available as the reference pipeline.
 
 Two executables
 ---------------
 - brp.exe: the reference product. Full feature set, including DLSS Frame
   Generation 60 -> 120 and the proven RIFE path.
-- brpnext.exe: the rebuilt application (Stages 5-11). New UI, real streaming,
-  full-window video, audio, controller, DLSS Super Resolution, RIFE 30 -> 60,
-  typed settings, profiles, diagnostics and an independent overlay.
-  DLSS-G 60 -> 120 is shown as a disabled reference option in brpnext (Stage
-  6c was skipped); use brp.exe for 60 -> 120. The two apps share the runtimes
-  but keep separate profiles:
+- brpnext.exe: the 1.0 release. New UI, live interactive overlay, real
+  streaming, full-window video, audio, controller, DLSS Super Resolution
+  (including DLAA), DLSS-G 2x through the NVIDIA worker, RIFE 30 -> 60, typed
+  settings, profiles and diagnostics.
+  The two apps share the runtimes but keep separate profiles:
   %APPDATA%\BetterRemotePlay and %APPDATA%\BetterRemotePlayNext.
 
 brpnext quick start
@@ -150,8 +150,10 @@ brpnext quick start
 1. Run brpnext.exe. It imports the legacy session once, if present.
 2. Console: Discover or enter the address, PSN login / PIN pairing if needed.
 3. Connect. The Watch view opens automatically; Esc returns to Console.
-4. AI Video Engine: DLSS SR or RIFE 30 -> 60; DLSS-G is reference-only.
-5. Settings > Overlay enables the independent stats window.
+4. AI Video Engine: DLSS SR/DLAA and DLSS-G or RIFE live.
+5. In Watch: F11 borderless fullscreen, F10 live control center, Esc twice to
+   disconnect.
+6. Settings > Overlay configures the separate compact stats window.
 
 Requirements
 ------------
