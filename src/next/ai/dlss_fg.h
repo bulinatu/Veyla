@@ -61,6 +61,7 @@ public:
     bool failed() const { return failed_.load(); }
     bool covering() const { return covering_; }
     bool attached() const { return worker_window_ != nullptr; }
+    bool proxy_runtime() const { return proxy_runtime_; }
     int width() const { return width_; }
     int height() const { return height_; }
     int requested_multiplier() const { return multiplier_.load(); }
@@ -93,6 +94,7 @@ private:
     std::atomic<int> multiplier_{2};
     std::atomic<unsigned long long> dropped_{0};
     bool ready_ = false;
+    bool proxy_runtime_ = false;
     int width_ = 0;
     int height_ = 0;
 

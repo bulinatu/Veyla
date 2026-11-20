@@ -2405,8 +2405,14 @@ bool NextApp::EnsureDlssFg(int width, int height) {
     const int multiplier = std::clamp(settings_.ai.fg_multiplier, 2, 6);
     if (dlss_fg_ && dlss_fg_->ready() && dlss_fg_->width() == width &&
         dlss_fg_->height() == height) {
-        dlss_fg_->SetMultiplier(multiplier);
-        return true;
+        if ((multiplier > 2) != dlss_fg_->proxy_runtime()) {
+            // Crossing the 2x boundary changes which runtime is loaded:
+            // official NVIDIA below it, SM86 proxy above it.
+            StopDlssFg();
+        } else {
+            dlss_fg_->SetMultiplier(multiplier);
+            return true;
+        }
     }
     if (width <= 0 || height <= 0) {
         return false;

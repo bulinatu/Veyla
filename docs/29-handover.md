@@ -8,14 +8,14 @@ Build `0.3`. Run `git log -1` for the current commit.
 Version 0.5.0 (20 Nov 2026).
 
 - Standalone: `dist\BetterRemotePlay-0.5.0-standalone.zip`, 623.2 MB, SHA256
-  `DB4B1D0120D0DD3D050FED5744CA96A2928678763FE7A0693D0AE2D50065190D`.
+  `1A4C13B10E8654889F48E77CB61F6C733C1ECA700561CBC6987A42586DB3F3E4`.
 - Update from 0.4.9: `dist\BetterRemotePlay-0.5.0-update.exe`, **1.29 MB, one
   file**, SHA256
-  `67A50518447D6179332DA9626758295E4452E47168BFC51A2E4180C903F61EA5`.
+  `18ACB44507978283CFC0BAE2B1796F876BC7BB0A345939C6825479F625F3B058`.
 - `dist\BetterRemotePlay\brp.exe` SHA256
   `90AF1EBF8106E271A7BE44876FB321032BF9FDBDE74F6BC50F0EE6051FB246BD`.
 - `dist\BetterRemotePlay\brpnext.exe` SHA256
-  `1CAE3E2F30D76325F0A696110E1048FB72E745D34812C02938C8D3C9470670FC`.
+  `918E49906456670A25424A6BCF8E387557EEDF83C6B6BE3B7CF88FC576CBD746`.
 - The package includes both executables, `rife\rife425_1080.engine` (12.5 MB,
   built for the reference RTX 4090), both RIFE models, `cudart64_13.dll` and
   `update.exe`.
@@ -456,3 +456,25 @@ DLSS-G output is `source fps * fg_multiplier`; RIFE is one midpoint (2x). The
 control, the model field, serialization, legacy `fg_target` import and the
 warnings around it were removed. Home and profile summaries now derive the
 output from the source rate and the selected generator.
+
+### 0.5.0 DLSS-G 2x uses the official runtime
+
+The SM86 proxy is a quality trade: it raises the multiplier ceiling, but it
+replaces the NVIDIA-signed `nvngx_dlssg.dll` and applies its own (optionally
+lossy) kernels. For 2x, where the ceiling is not needed, the client now skips
+the injection and lets the worker load the stock runtime:
+
+```
+[fg] the runtime reports a 2x multiplier ceiling
+[fg] 2x enabled at 1920x1080, format=28; flat depth and estimated motion (experimental)
+[fg] displayed 60.0 FPS (real + generated, 2x)
+```
+
+The proxy is injected only when the user asks for 3x-6x. This keeps the common
+2x path on NVIDIA's own blending numerics. Phase telemetry with `NS_PHASE=1`
+shows `generated shown 60 of 60 (late 0, superseded 0)`, so the remaining
+"painted" look is the flat-depth/estimated-motion model, not pacing.
+
+Tested 4x from a 30 fps source: it asks for 120, but the worker displayed
+~94 fps with 48-53 late generated frames per 2 s, so 4x is not a smooth path.
+A 30 fps source tops out at a clean 60 with 2x; 120 needs a 60 fps source.

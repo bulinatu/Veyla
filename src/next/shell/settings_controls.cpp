@@ -442,6 +442,15 @@ float SettingsControls::Ai(float x, float y, float width) {
                            DWRITE_FONT_WEIGHT_MEDIUM);
             y += 38.0f;
         }
+        if (source <= 30 && out < 100) {
+            widgets_.Label(
+                Rect(x, y, x + width, y + 36),
+                L"30 fps source: 2x gives 60 fps. 120 needs a 60 fps source; 4x "
+                L"measured 94 fps with late generated frames, so it is not offered "
+                L"as the smooth path.",
+                widgets_.Tokens().text_faint, 11.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+            y += 38.0f;
+        }
     }
     return y;
 }

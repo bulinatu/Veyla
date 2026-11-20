@@ -68,6 +68,10 @@ bool DlssFg::Start(const std::wstring& runtime_dir, int width, int height, int m
     options.style = 2;
     options.passes = 1;
     options.work_scale = 1.0f;
+    // 2x is the clean cadence; keep the official NVIDIA runtime. The SM86
+    // proxy is only needed to ask for more than 2x.
+    options.inject_fg_proxy = multiplier > 2;
+    proxy_runtime_ = options.inject_fg_proxy;
     if (!nr_->Start(worker.wstring(), dir.wstring(), width, height, options, detail)) {
         nr_.reset();
         return false;

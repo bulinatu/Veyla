@@ -31,6 +31,10 @@ public:
         bool ui_correction = false;
         int passes = 1;             // 1..4, the cascade depth (Boost)
         float work_scale = 1.0f;    // 1.0 = full-res network, < 1 = Boost
+        // Inject the user-supplied DLSSG-SM86 proxy. It raises the multiplier
+        // ceiling above 2x, but replaces the official runtime. Callers that
+        // only need 2x can keep the NVIDIA-signed runtime for its numerics.
+        bool inject_fg_proxy = true;
     };
 
     NvDlssnr() = default;

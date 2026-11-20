@@ -388,7 +388,7 @@ bool NvDlssnr::Start(const std::wstring& worker_exe, const std::wstring& working
     // Generation multiplier ceiling on non-RTX-50 cards. Injection happens
     // right after the process starts, long before the FG runtime is loaded.
     const std::wstring proxy = working_dir + L"\\fg\\winmm.dll";
-    if (std::filesystem::exists(proxy)) {
+    if (options.inject_fg_proxy && std::filesystem::exists(proxy)) {
         std::string proxy_detail;
         if (InjectProxy(process_, proxy, proxy_detail)) {
             std::fprintf(stderr, "[nr] FG proxy injected\n");
