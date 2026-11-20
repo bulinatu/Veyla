@@ -15,6 +15,7 @@
 #include <commdlg.h>
 #include <mmsystem.h>
 #include <shellapi.h>
+#include <avrt.h>
 
 #include <algorithm>
 #include <chrono>
@@ -468,7 +469,7 @@ void NextApp::Render() {
         }
         renderer_->BeginFrame();
         renderer_->EndFrame();
-        presenter_->PresentNow(settings_.video.vsync);
+        presenter_->PresentNow(true);
         return;
     }
     const float clear[4] = {theme.background.r / 255.0f, theme.background.g / 255.0f,
@@ -2997,6 +2998,16 @@ void NextApp::StartPadThread() {
         using Clock = std::chrono::steady_clock;
         Clock::time_point last_haptics = Clock::now();
         bool haptics_on = false;
+        DWORD task_index = 0;
+        HANDLE mmcss = ::AvSetMmThreadCharacteristicsW(L"Games", &task_index);
+        ::SetThreadPriority(::GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+        HANDLE timer = ::CreateWaitableTimerExW(
+            nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+        if (timer) {
+            LARGE_INTEGER due{};
+            due.QuadPart = -40000;  // 4 ms in 100 ns units
+            ::SetWaitableTimer(timer, &due, 4, nullptr, nullptr, FALSE);
+        }
         while (pad_run_.load()) {
             pad_.Poll();
             if (streaming_ && streaming_->Connected()) {
@@ -3046,7 +3057,17 @@ void NextApp::StartPadThread() {
                 pad_.SetConsoleFeedback(feedback);
             }
             pad_.PumpOutput();
-            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+            if (timer) {
+                ::WaitForSingleObject(timer, 8);
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(4));
+            }
+        }
+        if (timer) {
+            ::CloseHandle(timer);
+        }
+        if (mmcss) {
+            ::AvRevertMmThreadCharacteristics(mmcss);
         }
     });
 }

@@ -179,10 +179,10 @@ float SettingsControls::Streaming(float x, float y, float width) {
     }
     y += kRow + kGap;
 
-    widgets_.Label(Rect(x, y, x + width, y + 42),
-                   L"Remote Play sends 1080p HEVC. The decoder setting is applied when "
-                   L"the next session starts; bitrate and frame rate are renegotiated "
-                   L"by reconnecting.",
+    widgets_.Label(Rect(x, y, x + width, y + 46),
+                   L"60 fps is the low-latency choice: the camera and encoder update every "
+                   L"16.7 ms instead of 33 ms. The decoder setting applies when the next "
+                   L"session starts.",
                    widgets_.Tokens().text_faint, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
     return y + 46.0f;
 }
@@ -201,11 +201,6 @@ float SettingsControls::Video(float x, float y, float width) {
     }
     y += kRow + kGap;
 
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"V-Sync", settings_.video.vsync)) {
-        Touch();
-    }
-    y += kRow + kGap;
-
     float sharpening = static_cast<float>(settings_.video.sharpening);
     if (widgets_.Slider(Next(), Row(x, y, width), L"Sharpening", sharpening, 0.0f,
                         100.0f, 1.0f, L"%.0f%%")) {
@@ -215,8 +210,8 @@ float SettingsControls::Video(float x, float y, float width) {
     y += kRow + kGap;
 
     widgets_.Label(Rect(x, y, x + width, y + 40),
-                   L"HDR output is not implemented by this presenter and is therefore "
-                   L"not offered.",
+                   L"The watch surface is V-Synced to the swapchain so the loop cannot "
+                   L"spin and starve streaming threads. HDR output is not offered.",
                    widgets_.Tokens().text_faint, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
     return y + 44.0f;
 }
