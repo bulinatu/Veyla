@@ -113,6 +113,14 @@ void TestSettings() {
     mult_flat["ai.fg_multiplier"] = brp::next::FlatValue{"9", false};
     brp::next::SettingsFromFlat(mult_flat, mult_restored);
     Expect(mult_restored.ai.fg_multiplier == 6, "DLSS-G multiplier clamps to 6");
+
+    brp::next::AppSettings fs;
+    fs.display.fullscreen_on_play = false;
+    brp::next::FlatMap fs_flat = brp::next::SettingsToFlat(fs);
+    brp::next::AppSettings fs_restored;
+    brp::next::SettingsFromFlat(fs_flat, fs_restored);
+    Expect(!fs_restored.display.fullscreen_on_play,
+           "fullscreen-on-play round-trips");
     Expect(restored.general.theme == brp::next::Theme::Dark, "theme default is dark");
 
     flat["streaming.fps"] = brp::next::FlatValue{"999", false};

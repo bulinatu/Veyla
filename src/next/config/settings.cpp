@@ -246,6 +246,7 @@ FlatMap SettingsToFlat(const AppSettings& s) {
     FlatJson::PutString(f, "display.refresh", std::string(ToString(s.display.refresh)));
     FlatJson::PutBool(f, "display.vsync", s.display.vsync);
     FlatJson::PutBool(f, "display.vrr", s.display.vrr);
+    FlatJson::PutBool(f, "display.fullscreen_on_play", s.display.fullscreen_on_play);
     FlatJson::PutString(f, "display.output_format", s.display.output_format);
     FlatJson::PutInt(f, "display.bit_depth", s.display.bit_depth);
 
@@ -367,6 +368,8 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
     s.display.refresh = ReadFrameRate(f, "display.refresh", s.display.refresh);
     s.display.vsync = FlatJson::GetBool(f, "display.vsync", s.display.vsync);
     s.display.vrr = FlatJson::GetBool(f, "display.vrr", s.display.vrr);
+    s.display.fullscreen_on_play =
+        FlatJson::GetBool(f, "display.fullscreen_on_play", s.display.fullscreen_on_play);
     s.display.output_format =
         FlatJson::GetString(f, "display.output_format", s.display.output_format);
     s.display.bit_depth =

@@ -8,14 +8,14 @@ Build `0.3`. Run `git log -1` for the current commit.
 Version 0.5.0 (20 Nov 2026).
 
 - Standalone: `dist\BetterRemotePlay-0.5.0-standalone.zip`, 623.2 MB, SHA256
-  `A230E4B7E755440D465013326E1BF45E148021A4E85C6C6D95CFE2351469B9AB`.
+  `9BD3F8FC47CBDA036DBF6158F819E99BF0CAFC005663C07D77838EC93DF14513`.
 - Update from 0.4.9: `dist\BetterRemotePlay-0.5.0-update.exe`, **1.29 MB, one
   file**, SHA256
-  `B4BB8FDAC18E9CBD67E722F3516C04BEDD23DDCAFB6C41F8CC12FAC502F8185F`.
+  `C96179EB5A1C111B286C93AAB5B2FC432695CF62A82A05F261F8DFDA84EDE660`.
 - `dist\BetterRemotePlay\brp.exe` SHA256
   `90AF1EBF8106E271A7BE44876FB321032BF9FDBDE74F6BC50F0EE6051FB246BD`.
 - `dist\BetterRemotePlay\brpnext.exe` SHA256
-  `CBD8A9D6CAA76F4734442CE4512EF91682EF8CD6464C91E7511D6C3BDCA7549A`.
+  `0BA43CB8589B41F9A3E3432E3345D75DDDDD3B51EB398D6FFD607300944ACF98`.
 - The package includes both executables, `rife\rife425_1080.engine` (12.5 MB,
   built for the reference RTX 4090), both RIFE models, `cudart64_13.dll` and
   `update.exe`.
@@ -400,3 +400,21 @@ Files: `src/next/ai/dlss_fg.h/.cpp`, `src/next/shell/next_app.cpp`
 (`EnsureDlssFg`, `PresentVideo`, Watch overlay), `src/next/platform/system_info.*`
 (worker/dll/proxy discovery), `src/next/shell/settings_controls.cpp` (backend,
 multiplier, honest limits).
+
+### 0.5.0 borderless fullscreen, clean Watch, double Esc
+
+- `Win32Window` now owns borderless fullscreen: it saves the window style,
+  placement and client size, switches to `WS_POPUP` on the current monitor,
+  removes the DWM rounding/caption hit test, and restores the exact placement
+  on exit. `F11` toggles it on any page.
+- `Display > Fullscreen on play` (default on) enters fullscreen when Watch
+  starts and restores the previous placement when Watch ends. If the window was
+  already fullscreen before Watch, it stays fullscreen afterwards.
+- The Watch view no longer paints the in-app top bar. The video is the whole
+  surface; live stats are only in the optional independent overlay, and the
+  DLSS-G worker window is refitted on every client-size change.
+- `Esc` leaves Watch and shows `Esc again to disconnect`. A second `Esc` within
+  2.5 s disconnects the session (`StreamConnection sending Disconnect`,
+  `Session has quit`), stops RIFE/DLSS-G, closes audio and cancels reconnect.
+- The Console page uses the same `DisconnectStream()` path, so the button and
+  the shortcut cannot drift apart.

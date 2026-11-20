@@ -300,8 +300,8 @@ void NextApp::Resize() {
     logical_width_ = static_cast<float>(width) / scale_;
     logical_height_ = static_cast<float>(height) / scale_;
     renderer_->SetScale(scale_);
-    window_->SetFrameMetrics(static_cast<int>(kTitleHeight * scale_),
-                             static_cast<int>(150.0f * scale_));
+    window_->SetFrameMetrics(watching_ ? 0 : static_cast<int>(kTitleHeight * scale_),
+                             watching_ ? 0 : static_cast<int>(150.0f * scale_));
     std::fprintf(stderr, "[next] window %dx%d scale %.3f logical %.1fx%.1f\n",
                  width, height, scale_, logical_width_, logical_height_);
 }
@@ -347,7 +347,8 @@ void NextApp::Frame() {
         Toast(L"GPU device lost; restart the app", true);
     }
     HandlePinInput();
-    const bool fg_watch = watching_ && dlss_fg_ && dlss_fg_->ready();
+    const bool fg_watch = watching_ && dlss_fg_ && dlss_fg_->ready() &&
+                          settings_.overlay.enabled;
     if (fg_watch) {
         const double interval = std::max(0.05, settings_.overlay.interval_ms / 1000.0);
         if (last_overlay_update_ < 0.0 || now_ - last_overlay_update_ >= interval) {
@@ -437,7 +438,6 @@ void NextApp::Render() {
             return;
         }
         renderer_->BeginFrame();
-        RenderWatchOverlay();
         renderer_->EndFrame();
         presenter_->PresentNow(true);
         return;
@@ -837,15 +837,7 @@ void NextApp::RenderConsole(Widgets& widgets) {
         if (widgets.Button(2502, Rect(x + 18 + button_w + 10, y + 132,
                                       x + 18 + button_w * 2 + 10, y + 170),
                            L"Disconnect", false)) {
-            streaming_->Disconnect();
-            StopRifeThread();
-            streaming_->SetAudio(nullptr);
-            audio_.Close();
-            watch_on_connect_ = false;
-            user_disconnect_ = true;
-            connect_requested_ = false;
-            reconnect_attempts_ = 0;
-            Toast(L"Disconnected");
+            DisconnectStream();
         }
     } else {
         if (widgets.Button(2502, Rect(x + 18 + button_w + 10, y + 132,
@@ -1088,7 +1080,7 @@ void NextApp::RenderDisplay(Widgets& widgets) {
     renderer_->Text(L"Detected monitors, modes and presentation preferences",
                     Rect(x, 92, x + w, 112), 12.0f, ToD2D(theme.text_dim));
 
-    widgets.Card(Rect(x, 128, x + w, 270));
+    widgets.Card(Rect(x, 128, x + w, 300));
     widgets.Section(Rect(x + 18, 142, x + w - 18, 158), L"DETECTED DISPLAYS");
     float y = 168.0f;
     if (system_.displays.empty()) {
@@ -1108,16 +1100,18 @@ void NextApp::RenderDisplay(Widgets& widgets) {
                                         : DWRITE_FONT_WEIGHT_NORMAL);
         y += 28.0f;
     }
-    renderer_->Text(L"Mode switching is Stage 5; this page reads the real current modes.",
-                    Rect(x + 18, 236, x + w - 18, 258), 10.5f, ToD2D(theme.text_faint));
+    renderer_->Text(L"These are the modes Windows reports for the current monitor.",
+                    Rect(x + 18, y + 4, x + w - 18, y + 26), 10.5f,
+                    ToD2D(theme.text_faint));
 
     SettingsControls controls(widgets, settings_, system_, true);
     controls.Reset();
-    const float end = controls.Display(x, 292, w);
+    const float end = controls.Display(x, 322, w);
     if (controls.Changed()) {
         Apply();
     }
-    renderer_->Text(L"V-Sync and VRR are saved now and applied by the presenter in Stage 5.",
+    renderer_->Text(L"F11 toggles borderless fullscreen. Fullscreen on play enters it "
+                    L"automatically when Watch starts.",
                     Rect(x, end + 4, x + w, end + 24), 10.5f, ToD2D(theme.text_faint));
 }
 
@@ -1639,15 +1633,31 @@ void NextApp::ProbeIfNeeded(double now) {
 void NextApp::HandlePinInput() {
     const int key = window_->ConsumeKey();
     const int character = window_->ConsumeChar();
-    if (watching_ && key == VK_ESCAPE) {
-        ToggleWatch(false);
-        return;
-    }
-    if (!pin_focus_) {
+    if (key == VK_F11) {
+        ToggleBorderlessFullscreen();
         return;
     }
     if (key == VK_ESCAPE) {
-        pin_focus_ = false;
+        if (pin_focus_) {
+            pin_focus_ = false;
+            return;
+        }
+        if (watching_) {
+            // First Esc leaves Watch and arms the disconnect shortcut.
+            ToggleWatch(false);
+            esc_at_ = now_;
+            Toast(L"Esc again to disconnect");
+            return;
+        }
+        if (esc_at_ >= 0.0 && now_ - esc_at_ <= 2.5) {
+            esc_at_ = -1.0;
+            DisconnectStream();
+            return;
+        }
+        esc_at_ = -1.0;
+        return;
+    }
+    if (!pin_focus_) {
         return;
     }
     if (key == VK_BACK && !pin_.empty()) {
@@ -1657,7 +1667,6 @@ void NextApp::HandlePinInput() {
         pin_.push_back(static_cast<char>(character));
     }
 }
-
 std::wstring NextApp::ClipboardText() const {
     std::wstring text;
     if (!window_ || !::OpenClipboard(window_->hwnd())) {
@@ -2176,14 +2185,24 @@ void NextApp::ToggleWatch(bool watching) {
         StopRifeThread();
         StopDlssFg();
         dlss_fg_failed_ = false;
+        if (settings_.display.fullscreen_on_play && !window_->fullscreen()) {
+            window_->EnterFullscreen();
+            watch_fullscreen_ = true;
+        }
         window_->SetCursorHidden(true);
         presenter_->SetUpscaleMode(2);
-    ApplyPresenterTarget();
+        ApplyPresenterTarget();
+        Resize();
     } else {
         watching_ = false;
         have_frame_ = false;
         StopDlssFg();
+        if (watch_fullscreen_) {
+            window_->ExitFullscreen();
+            watch_fullscreen_ = false;
+        }
         window_->SetCursorHidden(false);
+        Resize();
     }
 }
 
@@ -2412,6 +2431,40 @@ void NextApp::ConnectStream() {
     }
 }
 
+void NextApp::DisconnectStream() {
+    if (!streaming_) {
+        return;
+    }
+    if (watching_) {
+        ToggleWatch(false);
+    }
+    StopRifeThread();
+    streaming_->Disconnect();
+    streaming_->SetAudio(nullptr);
+    audio_.Close();
+    watch_on_connect_ = false;
+    user_disconnect_ = true;
+    connect_requested_ = false;
+    reconnect_attempts_ = 0;
+    esc_at_ = -1.0;
+    Toast(L"Disconnected");
+}
+
+void NextApp::ToggleBorderlessFullscreen() {
+    if (!window_) {
+        return;
+    }
+    if (window_->fullscreen()) {
+        window_->ExitFullscreen();
+        watch_fullscreen_ = false;
+    } else {
+        window_->EnterFullscreen();
+        if (watching_) {
+            watch_fullscreen_ = true;
+        }
+    }
+    Resize();
+}
 void NextApp::WriteSessionReport() {
     AppPaths paths = AppPaths::Default();
     const auto path = paths.settings_file.parent_path() / "session-report.json";

@@ -62,6 +62,14 @@ public:
     void Close();
     bool maximized() const;
 
+    // Borderless fullscreen: covers the monitor, no frame, no taskbar space.
+    // Keeping the WS_POPUP style for the duration avoids a flash of the framed
+    // window when the presenter is resized.
+    void ToggleFullscreen();
+    void EnterFullscreen();
+    void ExitFullscreen();
+    bool fullscreen() const { return fullscreen_; }
+
     // Current monitor refresh rate (24..500 Hz, 60 when unknown).
     int refresh_hz() const { return refresh_hz_; }
 
@@ -98,6 +106,10 @@ private:
     int caption_height_ = 0;
     int caption_client_width_ = 0;
     bool fullscreen_chrome_ = false;
+    bool fullscreen_ = false;
+    LONG saved_style_ = 0;
+    LONG saved_ex_style_ = 0;
+    WINDOWPLACEMENT saved_placement_{};
     bool dwm_corners_ = false;
     bool hidden_test_ = false;
     HMONITOR monitor_ = nullptr;

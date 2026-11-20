@@ -120,6 +120,75 @@ void Win32Window::SetFullscreenChrome(bool fullscreen) {
     ApplyWindowAppearance();
 }
 
+void Win32Window::ToggleFullscreen() {
+    if (fullscreen_) {
+        ExitFullscreen();
+    } else {
+        EnterFullscreen();
+    }
+}
+
+void Win32Window::EnterFullscreen() {
+    if (!hwnd_ || fullscreen_) {
+        return;
+    }
+    saved_style_ = static_cast<LONG>(::GetWindowLongPtrW(hwnd_, GWL_STYLE));
+    saved_ex_style_ = static_cast<LONG>(::GetWindowLongPtrW(hwnd_, GWL_EXSTYLE));
+    saved_placement_.length = sizeof(saved_placement_);
+    if (!::GetWindowPlacement(hwnd_, &saved_placement_)) {
+        saved_placement_.length = 0;
+    }
+
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    if (!::GetMonitorInfoW(::MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST),
+                           &monitor)) {
+        return;
+    }
+
+    fullscreen_ = true;
+    SetFullscreenChrome(true);
+    ::SetWindowLongPtrW(hwnd_, GWL_STYLE,
+                        (saved_style_ & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX |
+                                          WS_MAXIMIZEBOX | WS_SYSMENU)) |
+                            WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS);
+    ::SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, saved_ex_style_);
+    ::SetWindowPos(hwnd_, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
+                   monitor.rcMonitor.right - monitor.rcMonitor.left,
+                   monitor.rcMonitor.bottom - monitor.rcMonitor.top,
+                   SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    ApplyWindowAppearance();
+    ::SetForegroundWindow(hwnd_);
+
+    RECT client{};
+    ::GetClientRect(hwnd_, &client);
+    width_ = client.right - client.left;
+    height_ = client.bottom - client.top;
+    resized_ = true;
+}
+
+void Win32Window::ExitFullscreen() {
+    if (!hwnd_ || !fullscreen_) {
+        return;
+    }
+    fullscreen_ = false;
+    SetFullscreenChrome(false);
+    ::SetWindowLongPtrW(hwnd_, GWL_STYLE, saved_style_);
+    ::SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, saved_ex_style_);
+    if (saved_placement_.length == sizeof(saved_placement_)) {
+        ::SetWindowPlacement(hwnd_, &saved_placement_);
+    }
+    ::SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    ApplyWindowAppearance();
+
+    RECT client{};
+    ::GetClientRect(hwnd_, &client);
+    width_ = client.right - client.left;
+    height_ = client.bottom - client.top;
+    resized_ = true;
+}
+
 void Win32Window::Minimize() {
     if (hwnd_) {
         ShowWindow(hwnd_, SW_MINIMIZE);
@@ -390,6 +459,9 @@ LRESULT Win32Window::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
         }
 
         case WM_DPICHANGED: {
+            if (fullscreen_) {
+                return 0;
+            }
             const RECT* suggested = reinterpret_cast<const RECT*>(lparam);
             ::SetWindowPos(hwnd, nullptr, suggested->left, suggested->top,
                            suggested->right - suggested->left,

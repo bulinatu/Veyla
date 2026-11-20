@@ -79,6 +79,8 @@ private:
     void PushDisplayFrame(media::DecodedFrame frame, double due);
     void RecordVideoShown();
     void ConnectStream();
+    void DisconnectStream();
+    void ToggleBorderlessFullscreen();
     void ApplyPresenterTarget();
     void StartBenchmark();
     void TickBenchmark();
@@ -135,6 +137,8 @@ private:
     bool have_frame_ = false;
     bool watching_ = false;
     bool watch_on_connect_ = false;
+    bool watch_fullscreen_ = false;
+    double esc_at_ = -1.0;
     double video_phase_ = 0.0;
     std::wstring audio_note_;
     std::unique_ptr<brp::media::NvDlssSr> dlss_sr_;

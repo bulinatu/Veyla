@@ -83,6 +83,7 @@ struct DisplaySettings {
     FrameRate refresh = FrameRate::Match;
     bool vsync = true;
     bool vrr = true;
+    bool fullscreen_on_play = true;
     std::string output_format = "auto";
     int bit_depth = 8;
 };

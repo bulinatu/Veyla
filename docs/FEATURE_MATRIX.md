@@ -16,7 +16,7 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 | DualSense HID | LEDs, triggers, haptics, rumble | Same | R behind `IControllerService` | 5 | 10 ms haptic refresh |
 | Controller mapping | Basic | Editable | P | 8 | only if protocol supports |
 | D3D11 presenter | Waitable, 240 Hz | Same | R behind `IPresenter` | 5 | keep borderless behaviour |
-| Borderless/windowed | Working | Same | R | 5 | F11 |
+| Borderless/windowed | Working | **Working in brpnext** | R | 5 | F11 toggles borderless fullscreen; fullscreen on play enters it for Watch |
 | VRR/G-Sync detection | Not implemented | Detect + report | N | 10 | never force unsupported |
 | Bilinear/Catmull/Lanczos | Working | Same | R | 5 | |
 | FSR1 | Working | Same | R | 5 | |
@@ -61,7 +61,7 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 - Stage 2 foundation is built and tested: `src/next/core` (interfaces/models),
   `config` (typed settings, legacy import, profiles), `diagnostics` (logger,
   rolling p50/p95/p99, report), `app` (navigation, DI registry, AppHost),
-  `ui/theme` (dark/light tokens) and `brp_next_tests` (82 assertions).
+  `ui/theme` (dark/light tokens) and `brp_next_tests` (83 assertions).
 - Stage 3 shell is working as `brpnext.exe`.
 - Stage 4 streaming service is working: discovery, PSN, pairing, wake,
   connect/disconnect and live stats.

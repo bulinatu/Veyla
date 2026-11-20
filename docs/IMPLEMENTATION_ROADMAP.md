@@ -31,13 +31,13 @@ Deliverables:
 - `brp_app_next` (navigation + host): page model, grouping, collapsed state,
   history, service registry, bootstrap.
 - `ui/theme`: 15 colour tokens, spacing, radii and type scale for dark/light.
-- `brp_next_tests`: 82 deterministic assertions, exit code 0/1.
+- `brp_next_tests`: 83 deterministic assertions, exit code 0/1.
 - CMake targets; no changes to the existing `brp` target.
 
 Acceptance (met):
 
 - `cmake --build build-perf --target brp_next_tests` succeeds.
-- `brp_next_tests` prints `ALL PASS` (82 assertions).
+- `brp_next_tests` prints `ALL PASS` (83 assertions).
 - Config round-trips, invalid values are rejected, legacy import works,
   profiles create/duplicate/default/export/import/delete, navigation is
   stable, AppHost wires the services.
@@ -109,8 +109,9 @@ in the new app (Stage 5), AI execution (Stage 6).
 - Verified on the PS5: 1920x1080, decode ~7.9-8.8 ms, loss 0.00 %, 28-30 fps
   menu content, full-window video with the overlay.
 
-Not yet: borderless fullscreen/F11 in `brpnext` (windowed presentation is
-working), HDR toggle in the new presenter, and measured A/V sync under load.
+Not yet: HDR toggle in the new presenter and measured A/V sync under load.
+Borderless fullscreen is implemented: `F11` toggles it and Watch enters it
+automatically when `Display > Fullscreen on play` is set.
 
 ## Stage 6 - AI Video Engine (DLSS SR + RIFE 30 -> 60 + DLSS-G working)
 
@@ -206,7 +207,7 @@ center, and full restart-required classification.
 
 - Stage 0: done (0.4.9).
 - Stage 1: done (five documents).
-- Stage 2: done (foundation library, AppHost, theme tokens, 82 tests).
+- Stage 2: done (foundation library, AppHost, theme tokens, 83 tests).
 - Stage 3: shell working (`brpnext.exe`), with streaming/AI execution and the
   independent overlay deferred to Stages 4-7. No page claims a connection it
   does not have.
@@ -225,7 +226,8 @@ center, and full restart-required classification.
 ## Current position update (after Stages 5-8)
 
 - Stage 5: video, audio and controller are live in `brpnext`; DLSS SR is
-  applied to the decoded 1080p frame.
+  applied to the decoded 1080p frame. Borderless fullscreen follows the
+  monitor (F11, or automatically on Watch).
 - Stage 6: DLSS SR, RIFE 30 -> 60 and DLSS-G 60 -> 120 are working in
   `brpnext`. DLSS-G uses the NVIDIA worker presenter; `Esc` stops it.
 - Stage 7: independent layered overlay and diagnostics are working.

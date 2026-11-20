@@ -535,6 +535,12 @@ float SettingsControls::Display(float x, float y, float width) {
     }
     y += kRow + kGap;
 
+    if (widgets_.Toggle(Next(), Row(x, y, width), L"Fullscreen on play",
+                        settings_.display.fullscreen_on_play)) {
+        Touch();
+    }
+    y += kRow + kGap;
+
     int depth = BitDepthIndex(settings_.display.bit_depth);
     if (widgets_.Choice(Next(), Row(x, y, width), L"Bit depth", {L"8-bit", L"10-bit"},
                         depth)) {
