@@ -552,3 +552,27 @@ input processing, one source interval for any frame generator, and DWM
 composition for the worker/window. The AI page now states that frame generation
 adds at least one source interval and that disabling it gives the lowest
 input-to-camera delay.
+
+## 1.0.1 - Input-to-camera latency fix
+
+- Watch no longer uses a source phase gate or a presentation buffer: the newest
+  decoded frame is taken every shell tick and shown immediately.
+- The controller thread matches the reference app: MMCSS `Games`,
+  `THREAD_PRIORITY_HIGHEST` and a high-resolution 4 ms waitable timer instead of
+  `sleep_for`.
+- Watch presents with V-Sync (`PresentNow(true)`) again, matching `brp.exe` and
+  preventing the waitable loop from running unthrottled when the old V-Sync
+  setting was off.
+- The frame-buffer control was removed from the UI; it no longer described a
+  real queue.
+- Frame generation still adds at least one source interval; the AI page says so.
+
+### 1.0.1 package
+
+- Standalone: `dist/BetterRemotePlay-1.0.1-standalone.zip`
+  SHA256 `DC84A167DCD6C5EF705DCE75D4507FEBA052E6A4DC3A7079084018FCDC0E2282`
+- Update from **1.0.0**: `dist/BetterRemotePlay-1.0.1-update.exe` (0.73 MB)
+  SHA256 `4214391F29F3EA7E9E4B735CA8663CFA924CD0836C1DAFB5EC6D5A0C4C406FD4`
+- `brpnext.exe` SHA256
+  `EE842D3F92254541B1359A22B50D5C6B82FF749E56C02BA94F2F0DB17023F27F`
+- Patch verification: `version=1.0.1`, 0 markers, `files_differ=0`.

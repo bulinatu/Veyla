@@ -39,3 +39,12 @@
 - DLSS-G 3x-6x quality; measured only that the proxy raises the ceiling.
 
 See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
+
+## 1.0.1 - latency fix
+
+- Newest decoded frame every tick, no phase gate, no presentation buffer, no
+  redundant re-upload.
+- Controller thread uses MMCSS, highest priority and a 4 ms high-resolution
+  waitable timer, matching the reference app.
+- Watch presents V-Synced so the loop cannot spin and starve streaming threads.
+- Update from 1.0.0 is a 0.73 MB single-file patch; `files_differ=0`.
