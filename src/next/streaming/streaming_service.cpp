@@ -125,6 +125,7 @@ Status StreamingService::Connect(const ConsoleSettings& console) {
     if (profile.host.empty()) {
         return Status::Error("console address is empty");
     }
+    profile.fps = console.fps == 30 ? 30 : 60;
     JoinConnect();
     streaming_.Stop();
     {

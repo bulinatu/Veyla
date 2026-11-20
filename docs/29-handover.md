@@ -8,14 +8,14 @@ Build `0.3`. Run `git log -1` for the current commit.
 Version 0.5.0 (20 Nov 2026).
 
 - Standalone: `dist\BetterRemotePlay-0.5.0-standalone.zip`, 623.2 MB, SHA256
-  `FEB6396D69DB75574C5EA8ABBC77F30D9731C84EA92457598A8686E4817851C4`.
+  `B8AC14FEEF4B175083142CFF600133910FA8CC3D36D4FB64526ED0C7E51A6366`.
 - Update from 0.4.9: `dist\BetterRemotePlay-0.5.0-update.exe`, **1.29 MB, one
   file**, SHA256
-  `E398273D77E85E3D74CDBC4F9D86B399B5B6BDB39EF6034E5F05A6B9C0D069E3`.
+  `E1116921BA6C330C58A711AE9498B93F831645F300D9BC1EAEA8CE44BEE12BB0`.
 - `dist\BetterRemotePlay\brp.exe` SHA256
   `90AF1EBF8106E271A7BE44876FB321032BF9FDBDE74F6BC50F0EE6051FB246BD`.
 - `dist\BetterRemotePlay\brpnext.exe` SHA256
-  `BB6D1321499C09AB9E2D46B0AD97ACB852F7781538EA40098F629BC70059029B`.
+  `FACDAA39C0D49F0CAEF0E6F502D3B42ABAB27DA9DAA7C9A14CCC13454AC0B322`.
 - The package includes both executables, `rife\rife425_1080.engine` (12.5 MB,
   built for the reference RTX 4090), both RIFE models, `cudart64_13.dll` and
   `update.exe`.
@@ -297,3 +297,19 @@ Verified: update 0.4.9 -> 0.5.0, `files_differ=0`, 0 markers; both executables
 launch from the clean package. Not done: automated four-case benchmark matrix,
 4K display validation, multi-hour soak, and the RTX 5080 second-machine pass
 for `brpnext`.
+
+### 0.5.0 benchmark matrix (baseline, real PS5)
+
+`Run benchmark` in Diagnostics (or `BRP_NEXT_BENCH=1`) runs four baseline cases
+with 20 s between console sessions and writes `benchmark-<epoch>.json`:
+
+| Requested | Target | Source fps | Shown fps | Decode | Loss |
+| --- | --- | --- | --- | --- | --- |
+| 30 | 1440p | 26.5 | 26.5 | 7.9 ms | 0.00 % |
+| 30 | 2160p | 27.2 | 27.2 | 7.9 ms | 0.00 % |
+| 60 | 1440p | 54.1 | 54.1 | 8.2 ms | 0.00 % |
+| 60 | 2160p | 53.6 | 53.6 | 7.9 ms | 0.00 % |
+
+Source is the console menu, so the 60 request yields ~54 unique fps; the 2160p
+targets are rendered and fitted to the 1440p display. This is a real baseline
+matrix, not a 4K/120 game validation.

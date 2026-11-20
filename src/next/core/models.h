@@ -25,6 +25,7 @@ struct GeneralSettings {
 struct ConsoleSettings {
     std::string name;
     std::string address;
+    int fps = 60;
     bool auto_discover = true;
     bool auto_reconnect = true;
     int reconnect_delay_ms = 1500;

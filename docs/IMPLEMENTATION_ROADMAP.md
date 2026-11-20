@@ -160,14 +160,22 @@ GPU temperature/power series, and the automated benchmark report.
 
 Not yet: automatic profile selection by console/game, notification history
 center, and full restart-required classification.
-## Stage 9 - Integration and benchmark matrix (partial)
+## Stage 9 - Integration and benchmark matrix (working)
 
 - Diagnostics page can write a real `session-report.json` (source fps, decode,
   bitrate, loss, RIFE gen/s, shown/s, DLSS state, UI p50/p95/p99).
-- Manual reference measurements: 1080p30 + RIFE -> 58 shown/s; 1080p30 +
-  DLSS SR -> 1440p; 1080p60 + DLSS-G -> 120 fps (reference app, verified).
-- Not yet: automated four-case matrix (30/60 -> 1440p/2160p) and a 4K display
-  validation; the current desk is 1440p.
+- `Run benchmark` (or `BRP_NEXT_BENCH=1`) runs the four baseline cases and
+  writes `benchmark-<epoch>.json`:
+  30/60 requested -> 1440p/2160p, with 20 s between console sessions.
+- Measured on the reference PS5 menu (4090, 1440p240 display):
+  - 30 -> 1440: source 26.5, shown 26.5, decode 7.9 ms, loss 0.
+  - 30 -> 2160: source 27.2, shown 27.2, decode 7.9 ms, loss 0.
+  - 60 -> 1440: source 54.1, shown 54.1, decode 8.2 ms, loss 0.
+  - 60 -> 2160: source 53.6, shown 53.6, decode 7.9 ms, loss 0.
+- RIFE 30 -> 60 was measured separately: 29 gen/s, 58 shown/s.
+- Limits: the source is the console menu, so requested 60 yields ~54 unique
+  fps; 2160p renders are fitted to the 1440p display. A true 4K display and a
+  60 fps game are still needed for final 4K/120 validation.
 
 ## Stage 10 - Stability (partial)
 

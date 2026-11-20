@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <cwchar>
 #include <fstream>
 #include <iterator>
@@ -219,6 +220,7 @@ bool NextApp::Init() {
         return false;
     }
     presenter_->SetUpscaleMode(2);
+    ApplyPresenterTarget();
 
     StartupReport report;
     const Status status = host_->Initialize(report);
@@ -251,6 +253,10 @@ bool NextApp::Init() {
     last_frame_ = started_;
     haptic_strength_.store(settings_.controller.rumble_strength);
     StartPadThread();
+    if (std::getenv("BRP_NEXT_BENCH")) {
+        bench_exit_ = true;
+        StartBenchmark();
+    }
     if (report.legacy_imported) {
         Toast(L"Legacy profile imported into the new configuration.");
     }
@@ -284,6 +290,9 @@ void NextApp::Resize() {
 
 void NextApp::Frame() {
     ProbeIfNeeded(now_);
+    if (bench_active_) {
+        TickBenchmark();
+    }
     if (streaming_) {
         streaming_->Poll();
         if (watch_on_connect_ && streaming_->Connected()) {
@@ -300,7 +309,8 @@ void NextApp::Frame() {
         if (snapshot.connected) {
             reconnect_at_ = -1.0;
             reconnect_attempts_ = 0;
-        } else if (!user_disconnect_ && connect_requested_ && snapshot.has_credentials &&
+        } else if (!bench_active_ && !user_disconnect_ && connect_requested_ &&
+                   snapshot.has_credentials &&
                    !snapshot.connecting && settings_.console.auto_reconnect &&
                    reconnect_attempts_ < 5) {
             if (reconnect_at_ < 0.0) {
@@ -1311,6 +1321,10 @@ void NextApp::RenderDiagnostics(Widgets& widgets) {
                        false)) {
         WriteSessionReport();
     }
+    if (widgets.Button(3304, Rect(x + 600, y, x + 790, y + 38), L"Run benchmark",
+                       false)) {
+        StartBenchmark();
+    }
 }
 
 void NextApp::RenderSettings(Widgets& widgets) {
@@ -1426,6 +1440,7 @@ void NextApp::Apply() {
     }
     settings_ = host_->Settings();
     haptic_strength_.store(settings_.controller.rumble_strength);
+    ApplyPresenterTarget();
     if (previous_ai.super_resolution != settings_.ai.super_resolution ||
         previous_ai.sr_output != settings_.ai.sr_output ||
         previous_ai.sr_quality != settings_.ai.sr_quality) {
@@ -1590,11 +1605,13 @@ void NextApp::PresentVideo() {
         return;
     }
 
+    bool new_frame = false;
     if (due) {
         media::DecodedFrame frame;
         if (streaming_->TakeFrame(frame, settings_.streaming.frame_buffer, true)) {
             video_frame_ = std::move(frame);
             have_frame_ = true;
+            new_frame = true;
         }
     }
     if (have_frame_ && !video_frame_.rgba.empty()) {
@@ -1609,6 +1626,9 @@ void NextApp::PresentVideo() {
                                           dlss_sr_->out_height(), video_frame_.pq);
                 presenter_->SetSourceFinal(false);
                 presenter_->Render(now_);
+                if (new_frame) {
+                    display_shown_.fetch_add(1);
+                }
                 return;
             }
             dlss_failed_ = true;
@@ -1618,6 +1638,9 @@ void NextApp::PresentVideo() {
                                    video_frame_.pq);
         presenter_->SetSourceFinal(false);
         presenter_->Render(now_);
+        if (new_frame) {
+            display_shown_.fetch_add(1);
+        }
     } else {
         const float background[4] = {0.015f, 0.017f, 0.022f, 1.0f};
         presenter_->Clear(background);
@@ -1862,6 +1885,7 @@ void NextApp::ToggleWatch(bool watching) {
         StopRifeThread();
         window_->SetCursorHidden(true);
         presenter_->SetUpscaleMode(2);
+    ApplyPresenterTarget();
     } else {
         watching_ = false;
         have_frame_ = false;
@@ -2020,6 +2044,7 @@ void NextApp::ConnectStream() {
         return;
     }
     ConsoleSettings console = settings_.console;
+    console.fps = settings_.streaming.fps;
     if (console.address.empty()) {
         console.address = streaming_->Profile().host;
     }
@@ -2068,6 +2093,190 @@ void NextApp::WriteSessionReport() {
     file << "  \"ui_frames\": " << ui_frames_ << "\n";
     file << "}\n";
     Toast(L"Session report: " + path.wstring());
+}
+void NextApp::ApplyPresenterTarget() {
+    if (!presenter_) {
+        return;
+    }
+    const int target = settings_.video.render_target;
+    if (target == applied_render_target_) {
+        return;
+    }
+    int width = 0;
+    int height = 0;
+    if (target == 1080) {
+        width = 1920;
+        height = 1080;
+    } else if (target == 1440) {
+        width = 2560;
+        height = 1440;
+    } else if (target == 2160) {
+        width = 3840;
+        height = 2160;
+    }
+    presenter_->SetUpscaleTarget(width, height);
+    applied_render_target_ = target;
+}
+void NextApp::StartBenchmark() {
+    if (bench_active_) {
+        return;
+    }
+    bench_saved_ = settings_;
+    bench_active_ = true;
+    bench_case_ = 0;
+    bench_phase_ = 0;
+    bench_at_ = now_;
+    bench_results_.clear();
+    Toast(L"Benchmark: 4 cases, about one minute");
+}
+
+void NextApp::TickBenchmark() {
+    struct Case {
+        int fps;
+        int target;
+    };
+    static const Case cases[] = {{30, 1440}, {30, 2160}, {60, 1440}, {60, 2160}};
+    if (!streaming_ || !presenter_) {
+        bench_active_ = false;
+        return;
+    }
+    if (bench_case_ >= 4) {
+        WriteBenchReport();
+        bench_active_ = false;
+        settings_ = bench_saved_;
+        Apply();
+        if (bench_exit_) {
+            window_->Close();
+        }
+        return;
+    }
+    const Case& current = cases[bench_case_];
+    const StreamSnapshot snapshot = streaming_->Snapshot();
+
+    if (bench_phase_ == 0) {
+        if (bench_case_ > 0 && now_ - bench_at_ < 20.0) {
+            return;
+        }
+        settings_.streaming.fps = current.fps;
+        settings_.video.render_target = current.target;
+        settings_.ai.super_resolution = false;
+        settings_.ai.frame_generation = false;
+        settings_.overlay.enabled = false;
+        Apply();
+        ApplyPresenterTarget();
+        if (snapshot.connected || snapshot.connecting) {
+            streaming_->Disconnect();
+            StopRifeThread();
+        }
+        ConnectStream();
+        bench_phase_ = 1;
+        bench_at_ = now_;
+        return;
+    }
+
+    if (bench_phase_ == 1) {
+        if (snapshot.connected) {
+            if (!watching_) {
+                ToggleWatch(true);
+            }
+            if (now_ - bench_at_ >= 3.0) {
+                bench_phase_ = 2;
+                bench_at_ = now_;
+                bench_shown_start_ = display_shown_.load();
+                bench_source_sum_ = 0.0;
+                bench_decode_sum_ = 0.0;
+                bench_samples_ = 0;
+            }
+        } else if (now_ - bench_at_ > 20.0) {
+            BenchResult result;
+            result.requested_fps = current.fps;
+            result.target = current.target;
+            result.ok = false;
+            bench_results_.push_back(result);
+            ToggleWatch(false);
+            StopRifeThread();
+            streaming_->Disconnect();
+            audio_.Close();
+            bench_case_++;
+            bench_phase_ = 0;
+            bench_at_ = now_;
+        }
+        return;
+    }
+
+    // Measurement.
+    bench_source_sum_ += snapshot.source_fps;
+    bench_decode_sum_ += snapshot.decode_ms;
+    ++bench_samples_;
+    if (now_ - bench_at_ < 10.0) {
+        return;
+    }
+    const double elapsed = std::max(0.001, now_ - bench_at_);
+    const DiagnosticsSnapshot diagnostics = host_->Diagnostics()->Snapshot();
+    BenchResult result;
+    result.requested_fps = current.fps;
+    result.target = current.target;
+    result.ok = snapshot.connected;
+    result.source_fps =
+        bench_samples_ > 0 ? bench_source_sum_ / bench_samples_ : snapshot.source_fps;
+    result.decode_ms =
+        bench_samples_ > 0 ? bench_decode_sum_ / bench_samples_ : snapshot.decode_ms;
+    result.shown_fps =
+        static_cast<double>(display_shown_.load() - bench_shown_start_) / elapsed;
+    result.loss_percent = snapshot.loss_percent;
+    result.ui_p50 = diagnostics.frame_p50_ms;
+    result.ui_p95 = diagnostics.frame_p95_ms;
+    result.ui_p99 = diagnostics.frame_p99_ms;
+    result.generated = rife_generated_.load();
+    bench_results_.push_back(result);
+    ToggleWatch(false);
+    StopRifeThread();
+    streaming_->Disconnect();
+    audio_.Close();
+    bench_case_++;
+    bench_phase_ = 0;
+    bench_at_ = now_;
+}
+
+void NextApp::WriteBenchReport() {
+    const AppPaths paths = AppPaths::Default();
+    const auto folder = paths.settings_file.parent_path();
+    std::error_code ec;
+    std::filesystem::create_directories(folder, ec);
+    const auto path = folder / ("benchmark-" + std::to_string(std::time(nullptr)) + ".json");
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file) {
+        Toast(L"Cannot write benchmark report", true);
+        return;
+    }
+    file << "{\n";
+    file << "  \"app\": \"BetterRemotePlayNext\",\n";
+    file << "  \"gpu\": \"" << system_.gpu.name << "\",\n";
+    file << "  \"driver\": \"" << system_.gpu.driver << "\",\n";
+    if (!system_.displays.empty()) {
+        file << "  \"display\": \"" << system_.displays.front().width << "x"
+             << system_.displays.front().height << " @ "
+             << system_.displays.front().refresh_hz << " Hz\",\n";
+    }
+    file << "  \"cases\": [\n";
+    for (std::size_t i = 0; i < bench_results_.size(); ++i) {
+        const auto& r = bench_results_[i];
+        file << "    {\"requested_fps\": " << r.requested_fps
+             << ", \"target\": " << r.target << ", \"ok\": " << (r.ok ? "true" : "false")
+             << ", \"source_fps\": " << r.source_fps
+             << ", \"shown_fps\": " << r.shown_fps << ", \"decode_ms\": " << r.decode_ms
+             << ", \"loss_percent\": " << r.loss_percent << ", \"ui_p50_ms\": " << r.ui_p50
+             << ", \"ui_p95_ms\": " << r.ui_p95 << ", \"ui_p99_ms\": " << r.ui_p99
+             << ", \"generated\": " << r.generated << "}";
+        if (i + 1 != bench_results_.size()) {
+            file << ',';
+        }
+        file << '\n';
+    }
+    file << "  ],\n";
+    file << "  \"note\": \"2160p targets are rendered and fitted to the desktop display\"\n";
+    file << "}\n";
+    Toast(L"Benchmark report: " + path.wstring());
 }
 }  // namespace brp::next
 

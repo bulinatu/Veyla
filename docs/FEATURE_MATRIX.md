@@ -49,7 +49,7 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 | Packaging | Standalone zip | Same layout | R | 11 | shared runtimes |
 | Unit tests | None | `brp_next_tests` | N | 2 | config/nav/metrics |
 | Hardware probes | 20+ manual | Keep | R | 2 | GPU truth |
-| Benchmark matrix | Manual | Session report working; 4-case matrix pending | N | 9 | 1440p/2160p |
+| Benchmark matrix | Manual | **4-case baseline matrix working** | N | 9 | 1440p/2160p; 4K display validation pending |
 | Long soak/device loss | Partial | Auto reconnect + device-loss stop; soak pending | P | 10 | 5080 too |
 | Telemetry/cloud | None | None | - | - | local only |
 
@@ -72,7 +72,8 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
   in the reference app (Stage 6c).
 - Stage 7 independent overlay and diagnostics are working (basic widget set).
 - Stage 8 settings/profiles/reset/import/export/compatibility warnings work.
-- Stage 9 has a real session report; the automated four-case matrix is pending.
+- Stage 9 has both a session report and an automated four-case baseline matrix;
+  true 4K display validation is pending.
 - Stage 10 has auto reconnect and device-loss handling; soak tests are pending.
 - `brp.exe` 0.4.9 still builds and runs.
 

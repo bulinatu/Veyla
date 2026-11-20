@@ -75,6 +75,10 @@ private:
     void ScheduleRifeFrame(const media::DecodedFrame& frame);
     void PushDisplayFrame(media::DecodedFrame frame, double due);
     void ConnectStream();
+    void ApplyPresenterTarget();
+    void StartBenchmark();
+    void TickBenchmark();
+    void WriteBenchReport();
     void WriteSessionReport();
 
     float ContentX() const;
@@ -178,6 +182,32 @@ private:
     bool connect_requested_ = false;
     double reconnect_at_ = -1.0;
     int reconnect_attempts_ = 0;
+    int applied_render_target_ = -1;
+
+    struct BenchResult {
+        int requested_fps = 0;
+        int target = 0;
+        bool ok = false;
+        double source_fps = 0.0;
+        double shown_fps = 0.0;
+        double decode_ms = 0.0;
+        double loss_percent = 0.0;
+        double ui_p50 = 0.0;
+        double ui_p95 = 0.0;
+        double ui_p99 = 0.0;
+        std::uint64_t generated = 0;
+    };
+    bool bench_active_ = false;
+    bool bench_exit_ = false;
+    int bench_case_ = 0;
+    int bench_phase_ = 0;
+    double bench_at_ = 0.0;
+    std::uint64_t bench_shown_start_ = 0;
+    double bench_source_sum_ = 0.0;
+    double bench_decode_sum_ = 0.0;
+    int bench_samples_ = 0;
+    std::vector<BenchResult> bench_results_;
+    AppSettings bench_saved_;
 };
 
 }  // namespace brp::next
