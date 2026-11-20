@@ -82,21 +82,18 @@ void TestSettings() {
     Expect(errors.empty(), "defaults validate");
 
     settings.streaming.fps = 10;
-    settings.ai.target_fps = 30;
     settings.overlay.opacity = 2.0f;
     settings.Validate(warnings, errors);
-    Expect(errors.size() >= 3, "invalid fps/target/opacity are errors");
+    Expect(errors.size() >= 2, "invalid fps/opacity are errors");
 
     settings = brp::next::AppSettings{};
     settings.streaming.fps = 30;
     settings.ai.frame_generation = true;
     settings.ai.fg_backend = brp::next::AiBackend::DlssFg;
-    settings.ai.target_fps = 120;
     warnings.clear();
     errors.clear();
     settings.Validate(warnings, errors);
-    Expect(errors.empty() && !warnings.empty(),
-           "DLSS-G 30 -> 120 is a warning, not a silent mode");
+    Expect(errors.empty(), "DLSS-G settings validate without a target");
 
     brp::next::FlatMap flat = brp::next::SettingsToFlat(settings);
     brp::next::AppSettings restored;
@@ -104,7 +101,6 @@ void TestSettings() {
     Expect(restored.streaming.fps == 30, "fps round-trips");
     Expect(restored.ai.fg_backend == brp::next::AiBackend::DlssFg,
            "backend round-trips");
-    Expect(restored.ai.target_fps == 120, "target round-trips");
     settings.ai.fg_multiplier = 4;
     brp::next::FlatMap mult_flat = brp::next::SettingsToFlat(settings);
     brp::next::AppSettings mult_restored;

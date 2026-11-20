@@ -110,13 +110,6 @@ void AppSettings::Validate(std::vector<std::string>& warnings,
     if (ai.sr_quality < 0 || ai.sr_quality > 5) {
         errors.push_back("ai.sr_quality must be 0..5");
     }
-    if (ai.target_fps != 60 && ai.target_fps != 90 && ai.target_fps != 120 &&
-        ai.target_fps != 144 && ai.target_fps != 165 && ai.target_fps != 240) {
-        errors.push_back("ai.target_fps must be 60, 90, 120, 144, 165 or 240");
-    }
-    if (ai.target_fps < streaming.fps) {
-        errors.push_back("ai.target_fps cannot be lower than streaming.fps");
-    }
     if (ai.blend < 0 || ai.blend > 40) {
         errors.push_back("ai.blend must be 0..40");
     }
@@ -151,23 +144,10 @@ void AppSettings::Validate(std::vector<std::string>& warnings,
         errors.push_back("gpu.frame_buffers must be 1..4");
     }
 
-    if (ai.frame_generation && ai.fg_backend == AiBackend::DlssFg) {
-        const int ceiling = streaming.fps * std::clamp(ai.fg_multiplier, 2, 6);
-        if (ai.target_fps > ceiling) {
-            warnings.push_back(
-                "DLSS Frame Generation at " + std::to_string(ai.fg_multiplier) +
-                "x caps " + std::to_string(streaming.fps) + " fps input at " +
-                std::to_string(ceiling) + " fps, not " + std::to_string(ai.target_fps));
-        }
-        if (ai.super_resolution && ai.sr_output == Resolution::R2160) {
-            warnings.push_back(
-                "the DLSS-G worker is capped at 1440p; SR 2160p cannot feed it");
-        }
-    }
-    if (ai.frame_generation && ai.fg_backend == AiBackend::Rife &&
-        ai.target_fps != 60) {
-        warnings.push_back("RIFE generates one midpoint: 30 -> 60, not " +
-                           std::to_string(ai.target_fps));
+    if (ai.frame_generation && ai.fg_backend == AiBackend::DlssFg &&
+        ai.super_resolution && ai.sr_output == Resolution::R2160) {
+        warnings.push_back(
+            "the DLSS-G worker is capped at 1440p; SR 2160p cannot feed it");
     }
     if (ai.super_resolution && ai.sr_output == Resolution::R2160 &&
         video.output == Resolution::R1080) {
@@ -227,7 +207,6 @@ FlatMap SettingsToFlat(const AppSettings& s) {
     FlatJson::PutBool(f, "ai.frame_generation", s.ai.frame_generation);
     FlatJson::PutString(f, "ai.fg_backend", std::string(ToString(s.ai.fg_backend)));
     FlatJson::PutInt(f, "ai.fg_multiplier", s.ai.fg_multiplier);
-    FlatJson::PutInt(f, "ai.target_fps", s.ai.target_fps);
     FlatJson::PutInt(f, "ai.quality", s.ai.quality);
     FlatJson::PutBool(f, "ai.occlusion", s.ai.occlusion);
     FlatJson::PutBool(f, "ai.adaptive", s.ai.adaptive);
@@ -337,14 +316,16 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
     s.ai.sr_model = FlatJson::GetString(f, "ai.sr_model", s.ai.sr_model);
     s.ai.sr_quality =
         ClampInt(FlatJson::GetInt(f, "ai.sr_quality", s.ai.sr_quality), 0, 5);
+    if (s.ai.sr_quality >= 5) {
+        // DLAA runs at the stream size; an SR target has no meaning.
+        s.ai.sr_output = Resolution::Native;
+    }
     s.ai.temporal = FlatJson::GetBool(f, "ai.temporal", s.ai.temporal);
     s.ai.frame_generation =
         FlatJson::GetBool(f, "ai.frame_generation", s.ai.frame_generation);
     s.ai.fg_backend = ReadBackend(f, "ai.fg_backend", s.ai.fg_backend);
     s.ai.fg_multiplier =
         ClampInt(FlatJson::GetInt(f, "ai.fg_multiplier", s.ai.fg_multiplier), 2, 6);
-    s.ai.target_fps =
-        ClampInt(FlatJson::GetInt(f, "ai.target_fps", s.ai.target_fps), 60, 240);
     s.ai.quality = ClampInt(FlatJson::GetInt(f, "ai.quality", s.ai.quality), 0, 3);
     s.ai.occlusion = FlatJson::GetBool(f, "ai.occlusion", s.ai.occlusion);
     s.ai.adaptive = FlatJson::GetBool(f, "ai.adaptive", s.ai.adaptive);
@@ -459,17 +440,15 @@ Status ImportLegacySettings(const std::filesystem::path& path, AppSettings& out,
 
     out.ai.super_resolution = FlatJson::GetInt(flat, "neural_sr", 0) > 0;
     out.ai.sr_quality = ClampInt(FlatJson::GetInt(flat, "dlss_mode", 4), 0, 5);
+    if (out.ai.sr_quality >= 5) {
+        out.ai.sr_output = Resolution::Native;
+    }
     out.ai.frame_generation = FlatJson::GetInt(flat, "dlss_fg", 0) >= 2;
     out.ai.fg_multiplier = ClampInt(FlatJson::GetInt(flat, "dlss_fg", 2), 2, 6);
     const bool rife = FlatJson::GetInt(flat, "fg_engine", 0) == 1;
     out.ai.fg_backend = out.ai.frame_generation
                            ? (rife ? AiBackend::Rife : AiBackend::DlssFg)
                            : AiBackend::None;
-    out.ai.target_fps =
-        ClampInt(FlatJson::GetInt(flat, "fg_target", 120), 60, 240);
-    if (out.ai.target_fps < out.streaming.fps) {
-        out.ai.target_fps = out.streaming.fps;
-    }
     out.ai.rife_model = ClampInt(FlatJson::GetInt(flat, "rife_model", 0), 0, 1);
     out.ai.blend = ClampInt(FlatJson::GetInt(flat, "rife_blend", 10), 0, 40);
     out.ai.motion_safety = FlatJson::GetInt(flat, "rife_safe_motion", 1) != 0;

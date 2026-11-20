@@ -51,26 +51,8 @@ Resolution ResolutionAt(int index) {
 }
 
 const std::vector<std::wstring> kResolutions = {L"Native", L"1080p", L"1440p", L"2160p"};
-const std::vector<std::wstring> kTargets = {L"60", L"90", L"120", L"144", L"165", L"240"};
 const std::vector<std::wstring> kRefresh = {L"Match", L"60", L"90", L"120",
                                              L"144",   L"165", L"240"};
-
-int TargetIndex(int fps) {
-    switch (fps) {
-        case 60: return 0;
-        case 90: return 1;
-        case 120: return 2;
-        case 144: return 3;
-        case 165: return 4;
-        case 240: return 5;
-        default: return 2;
-    }
-}
-
-int TargetAt(int index) {
-    static const int values[] = {60, 90, 120, 144, 165, 240};
-    return values[std::clamp(index, 0, 5)];
-}
 
 int CodecIndex(const std::string& codec) {
     if (codec == "h264") return 1;
@@ -293,7 +275,8 @@ float SettingsControls::Ai(float x, float y, float width) {
 
     int sr_output = ResolutionIndex(settings_.ai.sr_output);
     if (widgets_.Choice(Next(), Row(x, y, width), L"SR output", kResolutions, sr_output,
-                        settings_.ai.super_resolution)) {
+                        settings_.ai.super_resolution &&
+                            settings_.ai.sr_quality < 5)) {
         settings_.ai.sr_output = ResolutionAt(sr_output);
         Touch();
     }
@@ -305,6 +288,11 @@ float SettingsControls::Ai(float x, float y, float width) {
                          L"Ultra Quality", L"DLAA"},
                         quality, settings_.ai.super_resolution)) {
         settings_.ai.sr_quality = quality;
+        if (quality >= 5) {
+            // DLAA has no output scale; keep the stale SR target out of the
+            // Home summary and the worker stage.
+            settings_.ai.sr_output = Resolution::Native;
+        }
         Touch();
     }
     y += kRow + kGap;
@@ -370,13 +358,6 @@ float SettingsControls::Ai(float x, float y, float width) {
         y += kRow + kGap;
     }
 
-    int target = TargetIndex(settings_.ai.target_fps);
-    if (widgets_.Choice(Next(), Row(x, y, width), L"Target frame rate", kTargets, target,
-                        settings_.ai.frame_generation)) {
-        settings_.ai.target_fps = TargetAt(target);
-        Touch();
-    }
-    y += kRow + kGap;
 
     if (settings_.ai.fg_backend == AiBackend::Rife &&
         settings_.ai.frame_generation) {

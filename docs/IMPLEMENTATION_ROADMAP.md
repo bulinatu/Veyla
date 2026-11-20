@@ -31,13 +31,13 @@ Deliverables:
 - `brp_app_next` (navigation + host): page model, grouping, collapsed state,
   history, service registry, bootstrap.
 - `ui/theme`: 15 colour tokens, spacing, radii and type scale for dark/light.
-- `brp_next_tests`: 83 deterministic assertions, exit code 0/1.
+- `brp_next_tests`: 82 deterministic assertions, exit code 0/1.
 - CMake targets; no changes to the existing `brp` target.
 
 Acceptance (met):
 
 - `cmake --build build-perf --target brp_next_tests` succeeds.
-- `brp_next_tests` prints `ALL PASS` (83 assertions).
+- `brp_next_tests` prints `ALL PASS` (82 assertions).
 - Config round-trips, invalid values are rejected, legacy import works,
   profiles create/duplicate/default/export/import/delete, navigation is
   stable, AppHost wires the services.
@@ -210,7 +210,7 @@ center, and full restart-required classification.
 
 - Stage 0: done (0.4.9).
 - Stage 1: done (five documents).
-- Stage 2: done (foundation library, AppHost, theme tokens, 83 tests).
+- Stage 2: done (foundation library, AppHost, theme tokens, 82 tests).
 - Stage 3: shell working (`brpnext.exe`), with streaming/AI execution and the
   independent overlay deferred to Stages 4-7. No page claims a connection it
   does not have.

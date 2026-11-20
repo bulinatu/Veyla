@@ -8,14 +8,14 @@ Build `0.3`. Run `git log -1` for the current commit.
 Version 0.5.0 (20 Nov 2026).
 
 - Standalone: `dist\BetterRemotePlay-0.5.0-standalone.zip`, 623.2 MB, SHA256
-  `B779EE5893EAC8612990095DD6E9C0B347B43434EFA61700FBF9274357151662`.
+  `DB4B1D0120D0DD3D050FED5744CA96A2928678763FE7A0693D0AE2D50065190D`.
 - Update from 0.4.9: `dist\BetterRemotePlay-0.5.0-update.exe`, **1.29 MB, one
   file**, SHA256
-  `55F343B0B3401585885F7E6B56A4A4F3449E0A6F710EFDF2989B1575B528DE20`.
+  `67A50518447D6179332DA9626758295E4452E47168BFC51A2E4180C903F61EA5`.
 - `dist\BetterRemotePlay\brp.exe` SHA256
   `90AF1EBF8106E271A7BE44876FB321032BF9FDBDE74F6BC50F0EE6051FB246BD`.
 - `dist\BetterRemotePlay\brpnext.exe` SHA256
-  `D64BAC7EF32A4F9E007510D1FBEC69E0399BED33CE34601DAFE02AA2A536D80A`.
+  `1CAE3E2F30D76325F0A696110E1048FB72E745D34812C02938C8D3C9470670FC`.
 - The package includes both executables, `rife\rife425_1080.engine` (12.5 MB,
   built for the reference RTX 4090), both RIFE models, `cudart64_13.dll` and
   `update.exe`.
@@ -447,3 +447,12 @@ the mode note on multi-monitor machines.
 Measured with the game in its 30 fps mode: `source 28.0 fps`, overlay
 `DLSS-G 2x | 60.0 fps`, worker `2x enabled at 1920x1080`, no parent presents.
 The same path on a 60 fps source is the earlier 120 fps case.
+
+### 0.5.0 target frame rate removed
+
+`ai.target_fps` was a leftover from the early design: it was displayed as
+"target frame rate" and used in warnings, but it never drove execution.
+DLSS-G output is `source fps * fg_multiplier`; RIFE is one midpoint (2x). The
+control, the model field, serialization, legacy `fg_target` import and the
+warnings around it were removed. Home and profile summaries now derive the
+output from the source rate and the selected generator.

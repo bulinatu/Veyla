@@ -60,6 +60,18 @@ Color Alpha(const Color& color, float alpha) {
                  static_cast<std::uint8_t>(std::clamp(alpha, 0.0f, 1.0f) * 255)};
 }
 
+int OutputFps(const AppSettings& settings) {
+    int fps = std::clamp(settings.streaming.fps, 24, 240);
+    if (!settings.ai.frame_generation) {
+        return fps;
+    }
+    if (settings.ai.fg_backend == AiBackend::DlssFg) {
+        fps *= std::clamp(settings.ai.fg_multiplier, 2, 6);
+    } else if (settings.ai.fg_backend == AiBackend::Rife) {
+        fps *= 2;
+    }
+    return fps;
+}
 std::wstring BackendLabel(AiBackend backend) {
     switch (backend) {
         case AiBackend::DlssFg: return L"DLSS-G";
@@ -676,12 +688,16 @@ void NextApp::RenderHome(Widgets& widgets) {
            Widen(settings_.streaming.codec));
     metric(1, L"OUTPUT",
            Widen(std::string(ToString(settings_.video.output))) + L" " +
-               std::to_wstring(settings_.ai.target_fps) + L" fps",
+               std::to_wstring(OutputFps(settings_)) + L" fps",
            Widen(settings_.video.color_space));
+    const bool dlaa = settings_.ai.super_resolution &&
+                      (settings_.ai.sr_quality >= 5 ||
+                       settings_.ai.sr_output == Resolution::R1080);
     metric(2, L"SUPER RESOLUTION",
-           settings_.ai.super_resolution ? L"DLSS" : L"Off",
+           settings_.ai.super_resolution ? (dlaa ? L"DLAA" : L"DLSS") : L"Off",
            settings_.ai.super_resolution
-               ? Widen(std::string(ToString(settings_.ai.sr_output)))
+               ? (dlaa ? L"native AA"
+                       : Widen(std::string(ToString(settings_.ai.sr_output))))
                : L"native");
     metric(3, L"FRAME GENERATION",
            settings_.ai.frame_generation ? BackendLabel(settings_.ai.fg_backend)
@@ -690,10 +706,10 @@ void NextApp::RenderHome(Widgets& widgets) {
                ? (settings_.ai.fg_backend == AiBackend::DlssFg
                       ? std::to_wstring(
                             std::clamp(settings_.ai.fg_multiplier, 2, 6)) +
-                            L"x  |  " + std::to_wstring(settings_.ai.target_fps) +
-                            L" fps target"
+                            L"x  |  " + std::to_wstring(OutputFps(settings_)) +
+                            L" fps out"
                       : L"30 -> 60  |  " +
-                            std::to_wstring(settings_.ai.target_fps) + L" fps target")
+                            std::to_wstring(OutputFps(settings_)) + L" fps out")
                : L"source only");
 
     y += 142.0f + gap;
@@ -1247,7 +1263,6 @@ void NextApp::RenderProfiles(Widgets& widgets) {
         preset.ai.super_resolution = false;
         preset.ai.frame_generation = true;
         preset.ai.fg_backend = AiBackend::Rife;
-        preset.ai.target_fps = 60;
         preset.ai.rife_model = 0;
         apply_preset(L"1440p RIFE", preset);
     }
@@ -1710,12 +1725,15 @@ std::wstring NextApp::Summary(const Profile& profile) const {
         Widen(std::string(ToString(s.streaming.input))) + L" " +
         std::to_wstring(s.streaming.fps) + L" fps  ->  " +
         Widen(std::string(ToString(s.video.output))) + L" " +
-        std::to_wstring(s.ai.target_fps) + L" fps";
+        std::to_wstring(OutputFps(s)) + L" fps";
     if (s.ai.frame_generation) {
         summary += L"  |  " + BackendLabel(s.ai.fg_backend);
     }
     if (s.ai.super_resolution) {
-        summary += L"  |  SR " + Widen(std::string(ToString(s.ai.sr_output)));
+        const bool dlaa = s.ai.sr_quality >= 5 ||
+                          s.ai.sr_output == Resolution::R1080;
+        summary += dlaa ? L"  |  DLAA"
+                        : L"  |  SR " + Widen(std::string(ToString(s.ai.sr_output)));
     }
     return summary;
 }

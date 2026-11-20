@@ -61,7 +61,7 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 - Stage 2 foundation is built and tested: `src/next/core` (interfaces/models),
   `config` (typed settings, legacy import, profiles), `diagnostics` (logger,
   rolling p50/p95/p99, report), `app` (navigation, DI registry, AppHost),
-  `ui/theme` (dark/light tokens) and `brp_next_tests` (83 assertions).
+  `ui/theme` (dark/light tokens) and `brp_next_tests` (82 assertions).
 - Stage 3 shell is working as `brpnext.exe`.
 - Stage 4 streaming service is working: discovery, PSN, pairing, wake,
   connect/disconnect and live stats.
