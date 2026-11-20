@@ -344,3 +344,22 @@ Two causes of the "frame teleports once a second" report:
 Measured after the fix, native presentation, no SR/FG: `cad p50 16.7 ms,
 p99 16.9 ms` at 57 fps source. The overlay now shows cadence live as
 `cad p50/p99`.
+
+### 0.5.0 manual Connect "already in use" fix
+
+Pressing Connect manually could end with the console saying "Remote is already
+in use" a few seconds later, even though Next had just established the session.
+Cause: after the worker finished `Streaming::Start`, the state was `Connecting`
+but `Snapshot.connecting` only reflected the worker flag, which was already
+false. Auto-reconnect therefore thought the session had ended and issued a
+second request, tearing down the first handshake.
+
+Fixes:
+
+- `Snapshot.connecting` is true for both the worker flag and the chiaki
+  `Connecting` state.
+- Auto-reconnect only runs in `idle` or `failed`, never while connecting.
+- `StreamingService::Connect` refuses a second request while a session is
+  connecting or streaming.
+- "already in use" stops the automatic retry loop (manual retry still works
+  after the console releases the old session).

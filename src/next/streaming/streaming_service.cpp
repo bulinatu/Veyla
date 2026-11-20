@@ -112,6 +112,12 @@ Status StreamingService::Load() {
 }
 
 Status StreamingService::Connect(const ConsoleSettings& console) {
+    // A second request while the first session is still being established is
+    // exactly what makes the console answer "Remote is already in use".
+    if (streaming_.state() == session::StreamState::Streaming ||
+        streaming_.state() == session::StreamState::Connecting) {
+        return Status::Error("session is already active");
+    }
     if (!loaded_ || !profile_.has_console()) {
         return Status::Error("no console saved; discover or pair one first");
     }
@@ -206,7 +212,8 @@ StreamSnapshot StreamingService::Snapshot() const {
     snapshot.state = connecting_.load() ? "connecting" : StateName(state);
     snapshot.connected = state == session::StreamState::Streaming;
     snapshot.streaming = snapshot.connected;
-    snapshot.connecting = connecting_.load();
+    snapshot.connecting = connecting_.load() ||
+                          state == session::StreamState::Connecting;
     snapshot.pairing = pairing_.state() == session::PairState::Running;
     snapshot.discovering = discovering_.load();
     snapshot.has_credentials = profile_.credentials.present();

@@ -327,8 +327,9 @@ void NextApp::Frame() {
             reconnect_attempts_ = 0;
         } else if (!bench_active_ && !user_disconnect_ && connect_requested_ &&
                    snapshot.has_credentials &&
-                   !snapshot.connecting && settings_.console.auto_reconnect &&
-                   reconnect_attempts_ < 5) {
+                   (snapshot.state == "idle" || snapshot.state == "failed") &&
+                   snapshot.message.find("already in use") == std::string::npos &&
+                   settings_.console.auto_reconnect && reconnect_attempts_ < 5) {
             if (reconnect_at_ < 0.0) {
                 reconnect_at_ = now_ + settings_.console.reconnect_delay_ms / 1000.0;
             } else if (now_ >= reconnect_at_) {
