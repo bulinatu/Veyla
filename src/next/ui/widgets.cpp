@@ -76,16 +76,21 @@ bool Widgets::Button(int id, const D2D1_RECT_F& rect, const wchar_t* label, bool
     const bool hover = enabled && Hover(rect);
     hovered_ = hovered_ || hover;
     const bool clicked = Pressed(id, rect, enabled);
-    Color fill = primary ? theme_.accent : theme_.surface_alt;
-    Color text = primary ? theme_.accent_text : theme_.text;
+    Color fill = primary ? WithAlpha(theme_.accent, hover ? 0.38f : 0.26f)
+                         : theme_.surface_alt;
+    Color text = primary ? theme_.text : theme_.text;
     if (!enabled) {
         fill = theme_.surface_alt;
         text = theme_.text_faint;
-    } else if (hover) {
-        fill = primary ? theme_.accent_hover : theme_.surface_hover;
+    } else if (hover && !primary) {
+        fill = theme_.surface_hover;
     }
     renderer_.FillRounded(rect, static_cast<float>(theme_.radius_md), ToD2D(fill));
-    if (!primary && enabled) {
+    if (primary) {
+        renderer_.StrokeRounded(rect, static_cast<float>(theme_.radius_md),
+                               ToD2D(WithAlpha(theme_.accent_warm, hover ? 0.55f : 0.35f)),
+                               1.0f);
+    } else if (enabled) {
         renderer_.StrokeRounded(rect, static_cast<float>(theme_.radius_md),
                                ToD2D(theme_.border), 1.0f);
     }
@@ -125,8 +130,8 @@ bool Widgets::Choice(int id, const D2D1_RECT_F& rect, const wchar_t* label,
         const bool hover = enabled && item_ok && Hover(pill);
         hovered_ = hovered_ || hover;
         interactable_hovered_ = interactable_hovered_ || hover;
-        Color fill = selected ? theme_.accent : theme_.surface_alt;
-        Color text = selected ? theme_.accent_text : theme_.text_dim;
+        Color fill = selected ? WithAlpha(theme_.accent, 0.30f) : theme_.surface_alt;
+        Color text = selected ? theme_.text : theme_.text_dim;
         if (!enabled || !item_ok) {
             fill = theme_.surface_alt;
             text = theme_.text_faint;
@@ -135,7 +140,10 @@ bool Widgets::Choice(int id, const D2D1_RECT_F& rect, const wchar_t* label,
             text = theme_.text;
         }
         renderer_.FillRounded(pill, static_cast<float>(theme_.radius_sm), ToD2D(fill));
-        if (!selected) {
+        if (selected) {
+            renderer_.StrokeRounded(pill, static_cast<float>(theme_.radius_sm),
+                                   ToD2D(WithAlpha(theme_.accent_warm, 0.45f)), 1.0f);
+        } else {
             renderer_.StrokeRounded(pill, static_cast<float>(theme_.radius_sm),
                                    ToD2D(theme_.border), 1.0f);
         }

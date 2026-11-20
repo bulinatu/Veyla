@@ -408,12 +408,6 @@ float SettingsControls::Ai(float x, float y, float width) {
                        widgets_.Tokens().warning, 12.0f, DWRITE_FONT_WEIGHT_MEDIUM);
         y += 40.0f;
     }
-    if (settings_.ai.frame_generation && settings_.ai.fg_backend == AiBackend::Rife) {
-        widgets_.Label(Rect(x, y, x + width, y + 34),
-                       L"RIFE inserts one midpoint: 30 -> 60. 90/120 need DLSS FG.",
-                       widgets_.Tokens().text_faint, 12.0f, DWRITE_FONT_WEIGHT_MEDIUM);
-        y += 36.0f;
-    }
     return y;
 }
 float SettingsControls::Gpu(float x, float y, float width) {

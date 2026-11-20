@@ -17,6 +17,7 @@ struct Color {
 // defined. Screens and components consume these; they never hardcode values.
 struct ThemeTokens {
     Color background;
+    Color background_bottom;
     Color surface;
     Color surface_alt;
     Color surface_hover;
@@ -27,6 +28,7 @@ struct ThemeTokens {
     Color text_faint;
     Color accent;
     Color accent_hover;
+    Color accent_warm;
     Color accent_text;
     Color success;
     Color warning;

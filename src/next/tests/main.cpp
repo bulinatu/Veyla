@@ -269,8 +269,8 @@ void TestTheme() {
     std::cout << "Theme\n";
     const auto& dark = brp::next::ThemeFor(brp::next::Theme::Dark);
     const auto& light = brp::next::ThemeFor(brp::next::Theme::Light);
-    Expect(dark.accent.r == 0x76 && dark.accent.g == 0xB9 && dark.accent.b == 0x00,
-           "dark accent is NVIDIA green");
+    Expect(dark.accent.r == 0xB0 && dark.accent.g == 0x72 && dark.accent.b == 0xFF,
+           "dark accent is the PS5 purple");
     Expect(dark.background.r < dark.surface.r, "dark background is darker than surface");
     Expect(light.background.r > light.text.r, "light background is lighter than text");
     Expect(dark.sidebar_width > dark.sidebar_collapsed, "sidebar collapse is narrower");

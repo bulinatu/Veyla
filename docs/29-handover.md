@@ -8,14 +8,14 @@ Build `0.3`. Run `git log -1` for the current commit.
 Version 0.5.0 (20 Nov 2026).
 
 - Standalone: `dist\BetterRemotePlay-0.5.0-standalone.zip`, 623.2 MB, SHA256
-  `B8AC14FEEF4B175083142CFF600133910FA8CC3D36D4FB64526ED0C7E51A6366`.
+  `B5740523BC8CE4F3676E627F98732018D66337B87264BC71EB58F67C75417958`.
 - Update from 0.4.9: `dist\BetterRemotePlay-0.5.0-update.exe`, **1.29 MB, one
   file**, SHA256
-  `E1116921BA6C330C58A711AE9498B93F831645F300D9BC1EAEA8CE44BEE12BB0`.
+  `3413A1BE77AE9B651562D2963DCEBE42BCD81C3F9A56328E8F4C85DEE927449D`.
 - `dist\BetterRemotePlay\brp.exe` SHA256
   `90AF1EBF8106E271A7BE44876FB321032BF9FDBDE74F6BC50F0EE6051FB246BD`.
 - `dist\BetterRemotePlay\brpnext.exe` SHA256
-  `FACDAA39C0D49F0CAEF0E6F502D3B42ABAB27DA9DAA7C9A14CCC13454AC0B322`.
+  `C3A6B8E92E0D696FB32970AD5EB2B97AFC42386DB810195134F184941480862C`.
 - The package includes both executables, `rife\rife425_1080.engine` (12.5 MB,
   built for the reference RTX 4090), both RIFE models, `cudart64_13.dll` and
   `update.exe`.
@@ -313,3 +313,17 @@ with 20 s between console sessions and writes `benchmark-<epoch>.json`:
 Source is the console menu, so the 60 request yields ~54 unique fps; the 2160p
 targets are rendered and fitted to the 1440p display. This is a real baseline
 matrix, not a 4K/120 game validation.
+
+### 0.5.0 UI pass
+
+- Palette switched back to the reference app's PS5 violet family:
+  background 120A20 -> 05030A, panel 1A1029, ink F7F3FF, accent B072FF,
+  warm accent FF6BD6. The previous green NVIDIA theme is gone.
+- Primary buttons use the reference style: translucent violet fill, warm
+  border and ink text. Secondary buttons keep the glass surface.
+- Home "AI capabilities" is now a five-tile row (DLSS SR, DLSS-G, RIFE Lite,
+  RIFE Heavy, TensorRT) with a status dot, AVAILABLE/REFERENCE/MISSING and a
+  short detail; no more oversized pills.
+- Profiles has a Quick Presets row: Native, 1440p Sharp, 1440p RIFE and Low
+  latency, using the same primary/secondary buttons as the rest of the app.
+- Title pill reads 0.5.0; sidebar footer reads Next 0.5.0.

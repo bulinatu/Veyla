@@ -54,6 +54,22 @@ std::wstring PathW(const std::filesystem::path& path) {
     return path.wstring();
 }
 
+Color Alpha(const Color& color, float alpha) {
+    return Color{color.r, color.g, color.b,
+                 static_cast<std::uint8_t>(std::clamp(alpha, 0.0f, 1.0f) * 255)};
+}
+
+std::wstring BackendLabel(AiBackend backend) {
+    switch (backend) {
+        case AiBackend::DlssFg: return L"DLSS FG";
+        case AiBackend::Rife: return L"RIFE";
+        case AiBackend::NvidiaVfg: return L"NVIDIA VFG";
+        case AiBackend::DlssSr: return L"DLSS SR";
+        case AiBackend::TensorRtSr: return L"TensorRT SR";
+        default: return L"Off";
+    }
+}
+
 std::string Narrow(const std::wstring& text) {
     if (text.empty()) {
         return {};
@@ -391,8 +407,8 @@ void NextApp::Render() {
                             theme.background.b / 255.0f, 1.0f};
     presenter_->Clear(clear);
     renderer_->BeginFrame();
-    renderer_->FillRect(Rect(0, 0, logical_width_, logical_height_),
-                        ToD2D(theme.background));
+    renderer_->FillLinearV(Rect(0, 0, logical_width_, logical_height_),
+                           ToD2D(theme.background), ToD2D(theme.background_bottom));
 
     const auto& mouse = window_->mouse();
     WidgetInput input;
@@ -474,8 +490,8 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
             settings_.general.theme == Theme::Dark ? Theme::Light : Theme::Dark;
         Apply();
     }
-    widgets.StatusPill(Rect(330, 11, 420, kTitleHeight - 11), L"STAGE 3",
-                       theme.warning, true);
+    widgets.StatusPill(Rect(330, 11, 430, kTitleHeight - 11), L"0.5.0",
+                       theme.accent, true);
 }
 
 void NextApp::RenderSidebar(Widgets& widgets) {
@@ -515,12 +531,12 @@ void NextApp::RenderSidebar(Widgets& widgets) {
     }
 
     if (!collapsed_) {
-        renderer_->Text(L"Foundation", Rect(20, logical_height_ - 56, width - 16,
-                                            logical_height_ - 40),
+        renderer_->Text(L"Next 0.5.0", Rect(20, logical_height_ - 56, width - 16,
+                                           logical_height_ - 40),
                         10.5f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        renderer_->Text(L"config / profiles / diagnostics", Rect(20, logical_height_ - 40,
-                                                                width - 16,
-                                                                logical_height_ - 22),
+        renderer_->Text(L"streaming / AI / overlay", Rect(20, logical_height_ - 40,
+                                                               width - 16,
+                                                               logical_height_ - 22),
                         10.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_NORMAL);
     }
 }
@@ -626,40 +642,79 @@ void NextApp::RenderHome(Widgets& widgets) {
                ? Widen(std::string(ToString(settings_.ai.sr_output)))
                : L"native");
     metric(3, L"FRAME GENERATION",
-           settings_.ai.frame_generation
-               ? Widen(std::string(ToString(settings_.ai.fg_backend)))
-               : L"Off",
+           settings_.ai.frame_generation ? BackendLabel(settings_.ai.fg_backend)
+                                          : L"Off",
            settings_.ai.frame_generation
                ? std::to_wstring(settings_.ai.target_fps) + L" fps target"
                : L"source only");
 
     y += 142.0f + gap;
-    widgets.Card(Rect(x, y, x + w, y + 122.0f));
-    widgets.Section(Rect(x + 18, y + 14, x + w - 18, y + 30), L"AI CAPABILITIES");
-    const float pill_w = 170.0f;
-    const float pill_gap = 10.0f;
-    float px = x + 18.0f;
-    const float py = y + 44.0f;
-    auto capability = [&](bool available, const wchar_t* label, const wchar_t* reason) {
-        const Color color = available ? theme.success : theme.warning;
-        widgets.StatusPill(Rect(px, py, px + pill_w, py + 30), label, color, true);
-        px += pill_w + pill_gap;
-        if (!available && reason) {
-            renderer_->Text(reason, Rect(px - pill_w - pill_gap, py + 34,
-                                         px - pill_gap, py + 54),
-                            10.0f, ToD2D(theme.text_faint));
-        }
-    };
-    capability(system_.dlss_sr, L"DLSS SR", L"nvngx_dlss.dll");
-    capability(system_.nr_worker, L"DLSS FG 2x", L"nr worker");
-    capability(system_.rife_lite, L"RIFE Lite", L"engine");
-    capability(system_.rife_heavy, L"RIFE Heavy", L"engine");
-    capability(system_.tensorrt_runtime, L"TensorRT", L"runtime");
-    renderer_->Text(
-        L"Capabilities are file/SDK checks, not promises. Inference wiring lands in Stage 6.",
-        Rect(x + 18, y + 96, x + w - 18, y + 114), 10.5f, ToD2D(theme.text_faint));
+    widgets.Card(Rect(x, y, x + w, y + 176.0f));
+    widgets.Section(Rect(x + 18, y + 14, x + w - 260, y + 30), L"AI CAPABILITIES");
 
-    y += 122.0f + 18.0f;
+    struct CapabilityTile {
+        const wchar_t* title;
+        bool available;
+        bool reference;
+        const wchar_t* status;
+        const wchar_t* detail;
+    };
+    const CapabilityTile tiles[] = {
+        {L"DLSS Super Resolution", system_.dlss_sr, false,
+         system_.dlss_sr ? L"AVAILABLE" : L"MISSING", L"nvngx_dlss.dll"},
+        {L"DLSS Frame Generation", system_.nr_worker, true,
+         system_.nr_worker ? L"REFERENCE" : L"MISSING",
+         system_.nr_worker ? L"Stage 6c - disabled" : L"worker not installed"},
+        {L"RIFE Lite 4.25", system_.rife_lite, false,
+         system_.rife_lite ? L"AVAILABLE" : L"MISSING", L"TensorRT 1080p"},
+        {L"RIFE Heavy 4.26", system_.rife_heavy, false,
+         system_.rife_heavy ? L"AVAILABLE" : L"MISSING", L"engine built on demand"},
+        {L"TensorRT", system_.tensorrt_runtime, false,
+         system_.tensorrt_runtime ? L"AVAILABLE" : L"MISSING", L"nvinfer_10.dll"},
+    };
+    int available_count = 0;
+    for (const auto& tile : tiles) {
+        if (tile.available) {
+            ++available_count;
+        }
+    }
+    renderer_->Text((std::to_wstring(available_count) + L" available").c_str(),
+                    Rect(x + w - 240, y + 14, x + w - 18, y + 30), 10.5f,
+                    ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM,
+                    DWRITE_TEXT_ALIGNMENT_TRAILING);
+
+    const float tile_gap = 10.0f;
+    const float tile_w = (w - 36.0f - tile_gap * 4.0f) / 5.0f;
+    const float tile_h = 92.0f;
+    const float tile_y = y + 38.0f;
+    for (int i = 0; i < 5; ++i) {
+        const CapabilityTile& tile = tiles[i];
+        const float tx = x + 18.0f + (tile_w + tile_gap) * i;
+        const D2D1_RECT_F rect = Rect(tx, tile_y, tx + tile_w, tile_y + tile_h);
+        const Color accent = tile.available ? theme.success : theme.warning;
+        renderer_->FillRounded(rect, 12.0f, ToD2D(theme.surface_alt));
+        renderer_->StrokeRounded(rect, 12.0f,
+                                ToD2D(tile.available
+                                          ? Alpha(theme.success, 0.28f)
+                                          : theme.border),
+                                1.0f);
+        renderer_->FillCircle(tx + 16.0f, tile_y + 22.0f, 4.0f, ToD2D(accent));
+        renderer_->TextEllipsis(tile.title, Rect(tx + 28.0f, tile_y + 10.0f,
+                                                tx + tile_w - 10.0f, tile_y + 34.0f),
+                                12.5f, ToD2D(theme.text),
+                                DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        renderer_->Text(tile.status, Rect(tx + 14.0f, tile_y + 42.0f,
+                                         tx + tile_w - 10.0f, tile_y + 58.0f),
+                        9.5f, ToD2D(accent), DWRITE_FONT_WEIGHT_BOLD);
+        renderer_->TextEllipsis(tile.detail, Rect(tx + 14.0f, tile_y + 62.0f,
+                                                 tx + tile_w - 10.0f, tile_y + 80.0f),
+                                9.5f, ToD2D(theme.text_faint));
+    }
+    renderer_->Text(
+        L"Capabilities are file/SDK checks. DLSS SR and RIFE run in the Watch view; "
+        L"DLSS-G is reference-only.",
+        Rect(x + 18, y + 146, x + w - 18, y + 164), 10.5f, ToD2D(theme.text_faint));
+    y += 176.0f + 18.0f;
     const float button_w = 190.0f;
     if (widgets.Button(1001, Rect(x, y, x + button_w, y + 38), L"AI Video Engine")) {
         navigation_.Select(Page::AiVideo);
@@ -968,13 +1023,11 @@ void NextApp::RenderAi(Widgets& widgets) {
                     Rect(x, 210, x + w, 230), 10.5f, ToD2D(theme.text_faint));
     SettingsControls controls(widgets, settings_, system_, true);
     controls.Reset();
-    const float end = controls.Ai(x, 232, w);
+    controls.Ai(x, 232, w);
     if (controls.Changed()) {
         Apply();
     }
-    renderer_->Text(L"Inference is wired in Stage 6. This page only exposes capabilities "
-                    L"that are actually present and persists the selection.",
-                    Rect(x, end + 4, x + w, end + 24), 10.5f, ToD2D(theme.text_faint));
+
 }
 
 void NextApp::RenderDisplay(Widgets& widgets) {
@@ -1110,17 +1163,71 @@ void NextApp::RenderProfiles(Widgets& widgets) {
         }
     }
 
+    widgets.Card(Rect(x, 124, x + w, 216));
+    widgets.Section(Rect(x + 18, 136, x + w - 18, 152), L"QUICK PRESETS");
+    auto apply_preset = [&](const wchar_t* name, AppSettings preset) {
+        settings_ = std::move(preset);
+        Apply();
+        Toast(std::wstring(L"Preset applied: ") + name);
+    };
+    const float preset_y = 160.0f;
+    if (widgets.Button(3110, Rect(x + 18, preset_y, x + 158, preset_y + 38), L"Native",
+                       false)) {
+        AppSettings preset = settings_;
+        preset.video.output = Resolution::Native;
+        preset.video.render_target = 0;
+        preset.video.vsync = true;
+        preset.streaming.frame_buffer = 1;
+        preset.ai.super_resolution = false;
+        preset.ai.frame_generation = false;
+        apply_preset(L"Native", preset);
+    }
+    if (widgets.Button(3111, Rect(x + 168, preset_y, x + 348, preset_y + 38),
+                       L"1440p Sharp", false)) {
+        AppSettings preset = settings_;
+        preset.video.output = Resolution::R1440;
+        preset.video.render_target = 1440;
+        preset.ai.super_resolution = true;
+        preset.ai.sr_output = Resolution::R1440;
+        preset.ai.sr_quality = 3;
+        preset.ai.frame_generation = false;
+        apply_preset(L"1440p Sharp", preset);
+    }
+    if (widgets.Button(3112, Rect(x + 358, preset_y, x + 548, preset_y + 38),
+                       L"1440p RIFE", true)) {
+        AppSettings preset = settings_;
+        preset.video.output = Resolution::R1440;
+        preset.video.render_target = 1440;
+        preset.ai.super_resolution = false;
+        preset.ai.frame_generation = true;
+        preset.ai.fg_backend = AiBackend::Rife;
+        preset.ai.target_fps = 60;
+        preset.ai.rife_model = 0;
+        apply_preset(L"1440p RIFE", preset);
+    }
+    if (widgets.Button(3113, Rect(x + 558, preset_y, x + 738, preset_y + 38),
+                       L"Low latency", false)) {
+        AppSettings preset = settings_;
+        preset.video.output = Resolution::Native;
+        preset.video.render_target = 0;
+        preset.video.vsync = false;
+        preset.streaming.frame_buffer = 0;
+        preset.ai.super_resolution = false;
+        preset.ai.frame_generation = false;
+        apply_preset(L"Low latency", preset);
+    }
+
     if (profiles_.empty()) {
-        widgets.Card(Rect(x, 124, x + w, 220));
-        renderer_->Text(L"No profiles yet.", Rect(x + 18, 142, x + w - 18, 170), 15.0f,
+        widgets.Card(Rect(x, 228, x + w, 324));
+        renderer_->Text(L"No profiles yet.", Rect(x + 18, 246, x + w - 18, 274), 15.0f,
                         ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
         renderer_->Text(L"Save the current configuration as the first profile.",
-                        Rect(x + 18, 172, x + w - 18, 198), 11.5f,
+                        Rect(x + 18, 276, x + w - 18, 302), 11.5f,
                         ToD2D(theme.text_faint));
         return;
     }
 
-    float y = 124.0f;
+    float y = 228.0f;
     int index = 0;
     for (const auto& profile : profiles_) {
         if (index >= 8) {
@@ -1536,7 +1643,7 @@ std::wstring NextApp::Summary(const Profile& profile) const {
         Widen(std::string(ToString(s.video.output))) + L" " +
         std::to_wstring(s.ai.target_fps) + L" fps";
     if (s.ai.frame_generation) {
-        summary += L"  |  " + Widen(std::string(ToString(s.ai.fg_backend)));
+        summary += L"  |  " + BackendLabel(s.ai.fg_backend);
     }
     if (s.ai.super_resolution) {
         summary += L"  |  SR " + Widen(std::string(ToString(s.ai.sr_output)));
