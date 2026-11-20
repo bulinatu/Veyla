@@ -8,14 +8,14 @@ Build `0.3`. Run `git log -1` for the current commit.
 Version 0.5.0 (20 Nov 2026).
 
 - Standalone: `dist\BetterRemotePlay-0.5.0-standalone.zip`, 623.2 MB, SHA256
-  `B5740523BC8CE4F3676E627F98732018D66337B87264BC71EB58F67C75417958`.
+  `A230E4B7E755440D465013326E1BF45E148021A4E85C6C6D95CFE2351469B9AB`.
 - Update from 0.4.9: `dist\BetterRemotePlay-0.5.0-update.exe`, **1.29 MB, one
   file**, SHA256
-  `3413A1BE77AE9B651562D2963DCEBE42BCD81C3F9A56328E8F4C85DEE927449D`.
+  `B4BB8FDAC18E9CBD67E722F3516C04BEDD23DDCAFB6C41F8CC12FAC502F8185F`.
 - `dist\BetterRemotePlay\brp.exe` SHA256
   `90AF1EBF8106E271A7BE44876FB321032BF9FDBDE74F6BC50F0EE6051FB246BD`.
 - `dist\BetterRemotePlay\brpnext.exe` SHA256
-  `C3A6B8E92E0D696FB32970AD5EB2B97AFC42386DB810195134F184941480862C`.
+  `CBD8A9D6CAA76F4734442CE4512EF91682EF8CD6464C91E7511D6C3BDCA7549A`.
 - The package includes both executables, `rife\rife425_1080.engine` (12.5 MB,
   built for the reference RTX 4090), both RIFE models, `cudart64_13.dll` and
   `update.exe`.
@@ -290,8 +290,8 @@ The package now contains both executables:
 - RIFE 30 -> 60: 29 generated/s, 58 shown/s from a 28.8 fps source.
 - Independent layered overlay, typed settings, profiles, reset/import/export,
   session report.
-- DLSS-G 60 -> 120 is a visible but disabled reference option in `brpnext`
-  (Stage 6c skipped by decision); use `brp.exe` for 60 -> 120.
+- DLSS-G 60 -> 120 runs in `brpnext` through the NVIDIA worker
+  (2x verified at 120.0 fps; see the DLSS-G section below).
 
 Verified: update 0.4.9 -> 0.5.0, `files_differ=0`, 0 markers; both executables
 launch from the clean package. Not done: automated four-case benchmark matrix,
@@ -322,7 +322,7 @@ matrix, not a 4K/120 game validation.
 - Primary buttons use the reference style: translucent violet fill, warm
   border and ink text. Secondary buttons keep the glass surface.
 - Home "AI capabilities" is now a five-tile row (DLSS SR, DLSS-G, RIFE Lite,
-  RIFE Heavy, TensorRT) with a status dot, AVAILABLE/REFERENCE/MISSING and a
+  RIFE Heavy, TensorRT) with a status dot, AVAILABLE/MISSING and a
   short detail; no more oversized pills.
 - Profiles has a Quick Presets row: Native, 1440p Sharp, 1440p RIFE and Low
   latency, using the same primary/secondary buttons as the rest of the app.
@@ -363,3 +363,40 @@ Fixes:
   connecting or streaming.
 - "already in use" stops the automatic retry loop (manual retry still works
   after the console releases the old session).
+
+### 0.5.0 DLSS Frame Generation in brpnext
+
+`DlssFg` (`src/next/ai/dlss_fg.*`) owns the NVIDIA NeuralScreen worker and
+speaks its present-mode protocol:
+
+- it starts `nr/native/nvngx.dll` with `nvngx_dlssg.dll` beside it, asks for
+  `WNDO` present mode, disables Neural Rendering (bypass) and sends the
+  DLSS-G flags with the selected multiplier;
+- a one-slot worker thread feeds it RGBA at the source cadence, so decode
+  never blocks on the GPU worker;
+- the worker's window is a top-level, topmost, never-activated overlay fitted
+  to the client; `Esc` sends `WNDO` disable and stops the worker;
+- the overlay reads `nr-worker.log` once a second, so the number shown is the
+  worker's own `[fg] displayed ... FPS`, not a requested value. The AI page
+  states that 2x is the clean cadence and that 3x-6x land near 150-165 fps.
+
+Measured on the reference PS5, 1080p source, no SR:
+
+```
+[fg] 2x enabled at 1920x1080, format=28; flat depth and estimated motion (experimental)
+[fg] displayed 120.0 FPS (real + generated, 2x)
+source 57.8 fps | decode 8.52 ms | 100000 kbps
+```
+
+SR + DLSS-G: the 1440p SR output is read back to RGBA and fed to a worker
+sized 2560x1440. Verified at `101.3 fps` generated from a 58.3 fps source;
+the 1440p worker is the limit, so the UI does not promise 120 there.
+
+The 1440p path costs the SR pass plus a 1440p readback per source frame; the
+1080p path exists so the common case (stream at 1080p, FG at 2x) stays at the
+clean 120. 30 fps sources reach 60, not 120, with the same 2x runtime.
+
+Files: `src/next/ai/dlss_fg.h/.cpp`, `src/next/shell/next_app.cpp`
+(`EnsureDlssFg`, `PresentVideo`, Watch overlay), `src/next/platform/system_info.*`
+(worker/dll/proxy discovery), `src/next/shell/settings_controls.cpp` (backend,
+multiplier, honest limits).

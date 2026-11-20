@@ -354,6 +354,7 @@ add_executable(brpnext
     src/next/shell/main_next.cpp
     src/next/shell/next_app.cpp
     src/next/shell/settings_controls.cpp
+    src/next/ai/dlss_fg.cpp
     src/next/ui/widgets.cpp
     src/next/ui/theme.cpp
     src/next/platform/system_info.cpp

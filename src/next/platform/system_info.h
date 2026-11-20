@@ -42,6 +42,9 @@ struct SystemInfo {
     bool tensorrt_runtime = false;
     bool cuda = false;
     bool nr_worker = false;
+    bool dlss_fg = false;
+    bool dlss_fg_multi = false;
+    std::wstring nr_dir;
     std::wstring exe_dir;
 };
 

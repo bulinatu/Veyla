@@ -1,5 +1,6 @@
 #include "shell/next_app.h"
 
+#include "ai/dlss_fg.h"
 #include "diagnostics/metrics.h"
 #include "media/nv_dlss_sr.h"
 #include "media/pipeline.h"
@@ -61,7 +62,7 @@ Color Alpha(const Color& color, float alpha) {
 
 std::wstring BackendLabel(AiBackend backend) {
     switch (backend) {
-        case AiBackend::DlssFg: return L"DLSS FG";
+        case AiBackend::DlssFg: return L"DLSS-G";
         case AiBackend::Rife: return L"RIFE";
         case AiBackend::NvidiaVfg: return L"NVIDIA VFG";
         case AiBackend::DlssSr: return L"DLSS SR";
@@ -201,6 +202,7 @@ int NextApp::Run() {
     }
     ::timeEndPeriod(1);
     StopPadThread();
+    StopDlssFg();
     overlay_.Destroy();
     audio_.Close();
     if (streaming_) {
@@ -345,7 +347,30 @@ void NextApp::Frame() {
         Toast(L"GPU device lost; restart the app", true);
     }
     HandlePinInput();
-    if (streaming_ && streaming_->Connected() && settings_.overlay.enabled) {
+    const bool fg_watch = watching_ && dlss_fg_ && dlss_fg_->ready();
+    if (fg_watch) {
+        const double interval = std::max(0.05, settings_.overlay.interval_ms / 1000.0);
+        if (last_overlay_update_ < 0.0 || now_ - last_overlay_update_ >= interval) {
+            const StreamSnapshot snapshot = streaming_ ? streaming_->Snapshot()
+                                                       : StreamSnapshot{};
+            std::vector<std::wstring> lines;
+            wchar_t buffer[200] = {};
+            const int shown_mult =
+                fg_actual_mult_ > 1 ? fg_actual_mult_ : settings_.ai.fg_multiplier;
+            std::swprintf(buffer, 200, L"DLSS-G %dx  |  %.1f fps", shown_mult, fg_fps_);
+            lines.emplace_back(buffer);
+            std::swprintf(buffer, 200,
+                          L"source %.1f fps  |  decode %.2f ms  |  %.0f kbps",
+                          snapshot.source_fps, snapshot.decode_ms, snapshot.bitrate_kbps);
+            lines.emplace_back(buffer);
+            lines.emplace_back(L"ESC  Back to console");
+            overlay_.Update(lines, std::max(0.90f, settings_.overlay.opacity),
+                            settings_.overlay.position);
+            overlay_.Raise();
+            last_overlay_update_ = now_;
+        }
+    } else if (watching_ && streaming_ && streaming_->Connected() &&
+               settings_.overlay.enabled) {
         const double interval = std::max(0.05, settings_.overlay.interval_ms / 1000.0);
         if (last_overlay_update_ < 0.0 || now_ - last_overlay_update_ >= interval) {
             const StreamSnapshot snapshot = streaming_->Snapshot();
@@ -401,6 +426,16 @@ void NextApp::Render() {
     const ThemeTokens& theme = ThemeFor(settings_.general.theme);
     if (watching_) {
         PresentVideo();
+        if (fg_covering_) {
+            // The worker's window owns the visible picture. The parent still
+            // presents an empty frame so the waitable keeps the 240 Hz loop
+            // cadence that gates the source frames.
+            renderer_->BeginFrame();
+            renderer_->EndFrame();
+            presenter_->PresentNow(true);
+            window_->set_hand_cursor(false);
+            return;
+        }
         renderer_->BeginFrame();
         RenderWatchOverlay();
         renderer_->EndFrame();
@@ -649,7 +684,13 @@ void NextApp::RenderHome(Widgets& widgets) {
            settings_.ai.frame_generation ? BackendLabel(settings_.ai.fg_backend)
                                           : L"Off",
            settings_.ai.frame_generation
-               ? std::to_wstring(settings_.ai.target_fps) + L" fps target"
+               ? (settings_.ai.fg_backend == AiBackend::DlssFg
+                      ? std::to_wstring(
+                            std::clamp(settings_.ai.fg_multiplier, 2, 6)) +
+                            L"x  |  " + std::to_wstring(settings_.ai.target_fps) +
+                            L" fps target"
+                      : L"30 -> 60  |  " +
+                            std::to_wstring(settings_.ai.target_fps) + L" fps target")
                : L"source only");
 
     y += 142.0f + gap;
@@ -666,9 +707,10 @@ void NextApp::RenderHome(Widgets& widgets) {
     const CapabilityTile tiles[] = {
         {L"DLSS Super Resolution", system_.dlss_sr, false,
          system_.dlss_sr ? L"AVAILABLE" : L"MISSING", L"nvngx_dlss.dll"},
-        {L"DLSS Frame Generation", system_.nr_worker, true,
-         system_.nr_worker ? L"REFERENCE" : L"MISSING",
-         system_.nr_worker ? L"Stage 6c - disabled" : L"worker not installed"},
+        {L"DLSS Frame Generation", system_.dlss_fg, false,
+         system_.dlss_fg ? L"AVAILABLE" : L"MISSING",
+         system_.dlss_fg ? (system_.dlss_fg_multi ? L"worker 2x-6x" : L"worker 2x")
+                         : L"nvngx_dlssg.dll"},
         {L"RIFE Lite 4.25", system_.rife_lite, false,
          system_.rife_lite ? L"AVAILABLE" : L"MISSING", L"TensorRT 1080p"},
         {L"RIFE Heavy 4.26", system_.rife_heavy, false,
@@ -715,8 +757,8 @@ void NextApp::RenderHome(Widgets& widgets) {
                                 9.5f, ToD2D(theme.text_faint));
     }
     renderer_->Text(
-        L"Capabilities are file/SDK checks. DLSS SR and RIFE run in the Watch view; "
-        L"DLSS-G is reference-only.",
+        L"Capabilities are file/SDK checks. DLSS SR, DLSS-G and RIFE run in the "
+        L"Watch view.",
         Rect(x + 18, y + 146, x + w - 18, y + 164), 10.5f, ToD2D(theme.text_faint));
     y += 176.0f + 18.0f;
     const float button_w = 190.0f;
@@ -1015,15 +1057,18 @@ void NextApp::RenderAi(Widgets& widgets) {
                     system_.dlss_sr ? L"AVAILABLE" : L"MISSING", system_.dlss_sr,
                     L"nvngx_dlss.dll");
     capability_card(1, L"DLSS Frame Generation",
-                    system_.nr_worker ? L"STAGE 6C" : L"MISSING", false,
-                    L"reference only");
+                    system_.dlss_fg ? L"AVAILABLE" : L"MISSING", system_.dlss_fg,
+                    system_.dlss_fg
+                        ? (system_.dlss_fg_multi ? L"worker - up to 6x"
+                                                 : L"worker - 2x")
+                        : L"nvngx_dlssg.dll");
     capability_card(2, L"RIFE TensorRT", system_.rife_lite ? L"AVAILABLE" : L"MISSING",
                     system_.rife_lite, L"30 -> 60");
     capability_card(3, L"TensorRT runtime",
                     system_.tensorrt_runtime ? L"AVAILABLE" : L"MISSING",
                     system_.tensorrt_runtime, L"nvinfer_10");
-    renderer_->Text(L"DLSS-G 60 -> 120 is visible as a reference option only; RIFE is the "
-                    L"executable 30 -> 60 path in this build.",
+    renderer_->Text(L"DLSS-G runs through the NVIDIA worker; 2x is the clean cadence. "
+                    L"RIFE is the in-process 30 -> 60 path.",
                     Rect(x, 210, x + w, 230), 10.5f, ToD2D(theme.text_faint));
     SettingsControls controls(widgets, settings_, system_, true);
     controls.Reset();
@@ -1561,6 +1606,12 @@ void NextApp::Apply() {
             dlss_sr_->Shutdown();
         }
     }
+    if (previous_ai.frame_generation != settings_.ai.frame_generation ||
+        previous_ai.fg_backend != settings_.ai.fg_backend ||
+        previous_ai.fg_multiplier != settings_.ai.fg_multiplier) {
+        StopDlssFg();
+        dlss_fg_failed_ = false;
+    }
     Toast(L"Saved");
 }
 
@@ -1631,7 +1682,9 @@ std::wstring NextApp::ProfileWarning(const Profile& profile) const {
     }
     if (ai.frame_generation) {
         if (ai.fg_backend == AiBackend::DlssFg) {
-            return L"DLSS-G 60->120 is reference-only (Stage 6c)";
+            if (!system_.dlss_fg) {
+                return L"DLSS-G worker runtime missing";
+            }
         }
         if (ai.fg_backend == AiBackend::Rife && !system_.rife_lite) {
             return L"RIFE engine missing";
@@ -1675,6 +1728,112 @@ void NextApp::PresentVideo() {
         video_phase_ = std::max(0.0, video_phase_);
     }
 
+    const bool fg_mode = settings_.ai.frame_generation &&
+                         settings_.ai.fg_backend == AiBackend::DlssFg &&
+                         !dlss_fg_failed_;
+    if (fg_mode) {
+        const float background[4] = {0.01f, 0.008f, 0.016f, 1.0f};
+        bool new_frame = false;
+        if (due) {
+            media::DecodedFrame frame;
+            if (streaming_->TakeFrame(frame, settings_.streaming.frame_buffer, true)) {
+                video_frame_ = std::move(frame);
+                have_frame_ = true;
+                new_frame = true;
+            }
+        }
+
+        bool fed = false;
+        if (new_frame && have_frame_ && !video_frame_.rgba.empty()) {
+            int feed_w = video_frame_.width;
+            int feed_h = video_frame_.height;
+            std::vector<std::uint8_t> rgba;
+            bool have_rgba = false;
+            if (settings_.ai.super_resolution) {
+                if (EnsureDlssSr(feed_w, feed_h)) {
+                    brp::media::NvDlssSr::Frame sr_frame;
+                    std::string detail;
+                    if (dlss_sr_->Process(video_frame_.rgba.data(), feed_w, feed_h,
+                                          sr_frame, detail) &&
+                        dlss_sr_->Readback(rgba, detail)) {
+                        feed_w = dlss_sr_->out_width();
+                        feed_h = dlss_sr_->out_height();
+                        have_rgba = true;
+                    } else {
+                        dlss_failed_ = true;
+                        Toast(L"DLSS SR readback: " + Widen(detail), true);
+                    }
+                }
+            }
+            if (EnsureDlssFg(feed_w, feed_h)) {
+                dlss_fg_->Submit(have_rgba ? rgba.data() : video_frame_.rgba.data(),
+                                 feed_w, feed_h);
+                fed = true;
+                RecordVideoShown();
+            } else if (have_rgba &&
+                       EnsureDlssFg(video_frame_.width, video_frame_.height)) {
+                // SR output is too large for the worker (2160p); feed the
+                // stream frame at its own size rather than inventing a scale.
+                dlss_fg_->Submit(video_frame_.rgba.data(), video_frame_.width,
+                                 video_frame_.height);
+                fed = true;
+                RecordVideoShown();
+            }
+        }
+        (void)fed;
+
+        if (!dlss_fg_ || !dlss_fg_->ready()) {
+            if (new_frame) {
+                RecordVideoShown();
+            }
+            if (have_frame_ && !video_frame_.rgba.empty()) {
+                presenter_->SetSourceFrame(video_frame_.rgba.data(), video_frame_.width,
+                                           video_frame_.height, video_frame_.pq);
+                presenter_->SetSourceFinal(false);
+                presenter_->Render(now_);
+            } else {
+                presenter_->Clear(background);
+            }
+            return;
+        }
+
+        dlss_fg_->FrameWindow(window_->hwnd(), now_);
+        fg_covering_ = dlss_fg_->covering();
+        fg_fps_ = dlss_fg_->displayed_fps();
+        fg_actual_mult_ = dlss_fg_->actual_multiplier();
+        fg_dropped_ = dlss_fg_->dropped();
+        if (dlss_fg_->failed()) {
+            const std::wstring note = dlss_fg_->note();
+            StopDlssFg();
+            dlss_fg_failed_ = true;
+            fg_covering_ = false;
+            Toast(note.empty() ? L"DLSS-G stopped" : note, true);
+            if (have_frame_ && !video_frame_.rgba.empty()) {
+                presenter_->SetSourceFrame(video_frame_.rgba.data(), video_frame_.width,
+                                           video_frame_.height, video_frame_.pq);
+                presenter_->SetSourceFinal(false);
+                presenter_->Render(now_);
+            } else {
+                presenter_->Clear(background);
+            }
+            return;
+        }
+        if (!dlss_fg_->attached()) {
+            // The worker is running but its presenter window is not up yet.
+            // Keep showing the source so the first seconds are not black.
+            if (have_frame_ && !video_frame_.rgba.empty()) {
+                presenter_->SetSourceFrame(video_frame_.rgba.data(), video_frame_.width,
+                                           video_frame_.height, video_frame_.pq);
+                presenter_->SetSourceFinal(false);
+                presenter_->Render(now_);
+            } else {
+                presenter_->Clear(background);
+            }
+            return;
+        }
+        presenter_->Clear(background);
+        return;
+    }
     const bool rife_mode =
         settings_.ai.frame_generation && settings_.ai.fg_backend == AiBackend::Rife &&
         content < 45.0 && EnsureRife();
@@ -1967,16 +2126,30 @@ void NextApp::RenderWatchOverlay() {
     renderer_->Text(L"LIVE", Rect(16, 0, 66, 42), 11.0f, ToD2D(theme.accent),
                     DWRITE_FONT_WEIGHT_BOLD);
     float stats_left = 72.0f;
-    if (dlss_ready_) {
+    const bool fg_running = dlss_fg_ && dlss_fg_->ready();
+    if (fg_running) {
+        renderer_->Text(L"DLSS-G", Rect(70, 0, 140, 42), 10.5f, ToD2D(theme.success),
+                        DWRITE_FONT_WEIGHT_BOLD);
+        stats_left = 142.0f;
+    } else if (dlss_ready_) {
         renderer_->Text(L"DLSS", Rect(70, 0, 122, 42), 10.5f, ToD2D(theme.success),
                         DWRITE_FONT_WEIGHT_BOLD);
         stats_left = 126.0f;
     }
     wchar_t stats[256] = {};
-    std::swprintf(stats, 256,
-                  L"%dx%d  |  %.1f fps  |  cad %.1f/%.1f ms  |  decode %.2f ms  |  %.0f kbps",
-                  snapshot.source_width, snapshot.source_height, snapshot.source_fps,
-                  cadence_p50_, cadence_p99_, snapshot.decode_ms, snapshot.bitrate_kbps);
+    if (fg_running) {
+        std::swprintf(stats, 256,
+                      L"%dx%d  |  %.1f generated fps  |  %dx  |  %.0f kbps",
+                      snapshot.source_width, snapshot.source_height, fg_fps_,
+                      fg_actual_mult_ > 1 ? fg_actual_mult_
+                                          : settings_.ai.fg_multiplier,
+                      snapshot.bitrate_kbps);
+    } else {
+        std::swprintf(stats, 256,
+                      L"%dx%d  |  %.1f fps  |  cad %.1f/%.1f ms  |  decode %.2f ms  |  %.0f kbps",
+                      snapshot.source_width, snapshot.source_height, snapshot.source_fps,
+                      cadence_p50_, cadence_p99_, snapshot.decode_ms, snapshot.bitrate_kbps);
+    }
     renderer_->Text(stats, Rect(stats_left, 0, logical_width_ - 250, 42), 11.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_MEDIUM);
     renderer_->Text(L"ESC  Back to console", Rect(logical_width_ - 230, 0,
@@ -2001,12 +2174,15 @@ void NextApp::ToggleWatch(bool watching) {
         video_intervals_.Reset();
         last_video_shown_at_ = -1.0;
         StopRifeThread();
+        StopDlssFg();
+        dlss_fg_failed_ = false;
         window_->SetCursorHidden(true);
         presenter_->SetUpscaleMode(2);
     ApplyPresenterTarget();
     } else {
         watching_ = false;
         have_frame_ = false;
+        StopDlssFg();
         window_->SetCursorHidden(false);
     }
 }
@@ -2157,6 +2333,62 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
     return true;
 }
 
+bool NextApp::EnsureDlssFg(int width, int height) {
+    if (!settings_.ai.frame_generation ||
+        settings_.ai.fg_backend != AiBackend::DlssFg) {
+        return false;
+    }
+    if (dlss_fg_failed_) {
+        return false;
+    }
+    const int multiplier = std::clamp(settings_.ai.fg_multiplier, 2, 6);
+    if (dlss_fg_ && dlss_fg_->ready() && dlss_fg_->width() == width &&
+        dlss_fg_->height() == height) {
+        dlss_fg_->SetMultiplier(multiplier);
+        return true;
+    }
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+    // The printable window is the worker's own presenter; anything larger is
+    // refused instead of being silently scaled.
+    if (width > 2560 || height > 1440) {
+        return false;
+    }
+    if (dlss_fg_) {
+        StopDlssFg();
+    }
+    if (!system_.dlss_fg || system_.nr_dir.empty()) {
+        dlss_fg_failed_ = true;
+        Toast(L"DLSS-G runtime missing: nr/native/nvngx_dlssg.dll", true);
+        return false;
+    }
+    dlss_fg_ = std::make_unique<DlssFg>();
+    std::string detail;
+    if (!dlss_fg_->Start(system_.nr_dir, width, height, multiplier, detail)) {
+        dlss_fg_.reset();
+        dlss_fg_failed_ = true;
+        Toast(L"DLSS-G: " + Widen(detail), true);
+        return false;
+    }
+    fg_covering_ = false;
+    fg_fps_ = 0.0;
+    fg_actual_mult_ = 0;
+    fg_dropped_ = 0;
+    Toast(std::to_wstring(multiplier) + L"x DLSS-G active at " +
+          std::to_wstring(width) + L"x" + std::to_wstring(height));
+    return true;
+}
+
+void NextApp::StopDlssFg() {
+    if (dlss_fg_) {
+        dlss_fg_->Stop();
+        dlss_fg_.reset();
+    }
+    fg_covering_ = false;
+    fg_fps_ = 0.0;
+    fg_actual_mult_ = 0;
+}
 void NextApp::ConnectStream() {
     if (!streaming_) {
         return;
@@ -2204,6 +2436,12 @@ void NextApp::WriteSessionReport() {
     file << "  \"rife_generated_per_s\": " << rife_generated_rate_ << ",\n";
     file << "  \"displayed_per_s\": " << display_rate_ << ",\n";
     file << "  \"dlss_sr\": " << (dlss_ready_ ? "true" : "false") << ",\n";
+    file << "  \"dlss_fg\": " << ((dlss_fg_ && dlss_fg_->ready()) ? "true" : "false")
+         << ",\n";
+    file << "  \"fg_multiplier\": " << settings_.ai.fg_multiplier << ",\n";
+    file << "  \"fg_actual_multiplier\": " << fg_actual_mult_ << ",\n";
+    file << "  \"fg_displayed_fps\": " << fg_fps_ << ",\n";
+    file << "  \"fg_dropped\": " << fg_dropped_ << ",\n";
     file << "  \"ui_p50_ms\": " << diagnostics.frame_p50_ms << ",\n";
     file << "  \"ui_p95_ms\": " << diagnostics.frame_p95_ms << ",\n";
     file << "  \"ui_p99_ms\": " << diagnostics.frame_p99_ms << ",\n";

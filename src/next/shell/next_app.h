@@ -36,6 +36,7 @@ namespace brp::next {
 
 class SettingsControls;
 class StreamingService;
+class DlssFg;
 
 class NextApp {
 public:
@@ -68,6 +69,8 @@ private:
     void ToggleWatch(bool watching);
     bool OpenAudio();
     bool EnsureDlssSr(int input_width, int input_height);
+    bool EnsureDlssFg(int width, int height);
+    void StopDlssFg();
     bool EnsureRife();
     void StartRifeThread();
     void StopRifeThread();
@@ -139,6 +142,12 @@ private:
     bool dlss_failed_ = false;
     int dlss_in_w_ = 0;
     int dlss_in_h_ = 0;
+    std::unique_ptr<DlssFg> dlss_fg_;
+    bool dlss_fg_failed_ = false;
+    bool fg_covering_ = false;
+    int fg_actual_mult_ = 0;
+    double fg_fps_ = 0.0;
+    unsigned long long fg_dropped_ = 0;
     OverlayWindow overlay_;
     double last_overlay_update_ = -1.0;
 

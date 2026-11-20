@@ -189,7 +189,29 @@ SystemInfo ProbeSystem() {
         info.cuda = true;
         ::FreeLibrary(cuda);
     }
-    info.nr_worker = std::filesystem::exists(dir / "nr" / "native" / "nvngx.dll", ec);
+    info.nr_worker = false;
+    std::vector<std::filesystem::path> nr_candidates;
+    nr_candidates.push_back(dir / "nr" / "native");
+    nr_candidates.push_back(dir / ".." / ".." / "third_party" / "neuralscreen" /
+                            "native");
+    std::error_code cwd_ec;
+    const std::filesystem::path cwd = std::filesystem::current_path(cwd_ec);
+    if (!cwd_ec) {
+        nr_candidates.push_back(cwd / "third_party" / "neuralscreen" / "native");
+    }
+    for (const auto& candidate : nr_candidates) {
+        if (std::filesystem::exists(candidate / "nvngx.dll", ec)) {
+            std::error_code abs_ec;
+            const std::filesystem::path absolute =
+                std::filesystem::absolute(candidate, abs_ec);
+            info.nr_dir = (abs_ec ? candidate : absolute).wstring();
+            info.nr_worker = true;
+            info.dlss_fg = std::filesystem::exists(candidate / "nvngx_dlssg.dll", ec);
+            info.dlss_fg_multi =
+                std::filesystem::exists(candidate / "fg" / "winmm.dll", ec);
+            break;
+        }
+    }
     return info;
 }
 

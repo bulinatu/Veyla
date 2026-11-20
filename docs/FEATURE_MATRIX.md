@@ -25,12 +25,12 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 | Custom TensorRT SR | Not implemented | Optional/experimental | N | 6 | only if measured worthwhile |
 | RTX VSR | Removed | **Excluded** | - | - | explicit requirement |
 | RIFE 30->60 | Working (4.25 lite / 4.26 heavy) | **Working in brpnext** | R behind `IFrameGenerator` | 6 | 29 gen/s, 58 shown/s verified |
-| DLSS-G 60->120 | Working after 0.4.9 | **Reference-only option (disabled)** | R | 6c skipped | visible in AI page, not selectable |
+| DLSS-G 60->120 | Working after 0.4.9 | **Working in brpnext** | R | 6c | worker presenter, 2x at 120.0 fps verified; 3x-6x with the SM86 proxy |
 | DLSS-G 30->120 | Impossible on this runtime | Not offered | - | - | runtime refuses >2x |
 | NVIDIA VFG legacy | Optional, working | Keep or drop | R | 6 | only if it beats DLSS-G |
 | NVOF/NvOFFRUC backend | Not implemented | Evaluate | N | 6 | quality win required |
 | Hybrid OF + refinement | Not implemented | Evaluate | N | 6 | no fake backend |
-| SR + FG simultaneous | Working (DLAA + 120 verified) | Reference app only | R/N | 6c | brpnext runs SR or RIFE, not both yet |
+| SR + FG simultaneous | Working (DLAA + 120 verified) | **Working in brpnext** | R | 6c | 1080p SR -> 1440p readback -> worker, ~101 generated fps at 1440p |
 | Colour grading | Working | Same | R behind `IColorPipeline` | 5 | 10 controls |
 | Sharpening | Working | Same | R | 5 | |
 | Main UI | PS5 purple, immediate mode | New NVIDIA-style design system | N | 3 | dark default + light |
@@ -61,15 +61,15 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 - Stage 2 foundation is built and tested: `src/next/core` (interfaces/models),
   `config` (typed settings, legacy import, profiles), `diagnostics` (logger,
   rolling p50/p95/p99, report), `app` (navigation, DI registry, AppHost),
-  `ui/theme` (dark/light tokens) and `brp_next_tests` (79 assertions).
+  `ui/theme` (dark/light tokens) and `brp_next_tests` (82 assertions).
 - Stage 3 shell is working as `brpnext.exe`.
 - Stage 4 streaming service is working: discovery, PSN, pairing, wake,
   connect/disconnect and live stats.
 - Stage 5 media presentation is working: full-window video, audio and
   controller input on the real session.
-- Stage 6 is partly working: DLSS SR 1080p -> 1440p and RIFE 30 -> 60
-  (29 gen/s, 58 shown/s) are verified in `brpnext`; DLSS-G 60 -> 120 remains
-  in the reference app (Stage 6c).
+- Stage 6 is working: DLSS SR 1080p -> 1440p, RIFE 30 -> 60
+  (29 gen/s, 58 shown/s) and DLSS-G 60 -> 120 through the worker are verified
+  in `brpnext`.
 - Stage 7 independent overlay and diagnostics are working (basic widget set).
 - Stage 8 settings/profiles/reset/import/export/compatibility warnings work.
 - Stage 9 has both a session report and an automated four-case baseline matrix;
@@ -79,3 +79,5 @@ Legend: **R** = reuse from the reference implementation, **N** = new module,
 
 - Stage 11: 0.5.0 package with both executables and a 1.29 MB update from
   0.4.9; clean-package launch verified.
+- DLSS-G in `brpnext`: 60 fps source -> 120.0 generated fps at 1080p; SR 1440p
+  -> worker reaches about 101 generated fps.

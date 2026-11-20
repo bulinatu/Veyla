@@ -105,6 +105,14 @@ void TestSettings() {
     Expect(restored.ai.fg_backend == brp::next::AiBackend::DlssFg,
            "backend round-trips");
     Expect(restored.ai.target_fps == 120, "target round-trips");
+    settings.ai.fg_multiplier = 4;
+    brp::next::FlatMap mult_flat = brp::next::SettingsToFlat(settings);
+    brp::next::AppSettings mult_restored;
+    brp::next::SettingsFromFlat(mult_flat, mult_restored);
+    Expect(mult_restored.ai.fg_multiplier == 4, "DLSS-G multiplier round-trips");
+    mult_flat["ai.fg_multiplier"] = brp::next::FlatValue{"9", false};
+    brp::next::SettingsFromFlat(mult_flat, mult_restored);
+    Expect(mult_restored.ai.fg_multiplier == 6, "DLSS-G multiplier clamps to 6");
     Expect(restored.general.theme == brp::next::Theme::Dark, "theme default is dark");
 
     flat["streaming.fps"] = brp::next::FlatValue{"999", false};
@@ -170,6 +178,7 @@ void TestLegacyImport(const std::filesystem::path& root) {
     Expect(imported.ai.super_resolution, "SR flag mapped");
     Expect(imported.ai.frame_generation, "FG flag mapped");
     Expect(imported.ai.fg_backend == brp::next::AiBackend::Rife, "RIFE backend mapped");
+    Expect(imported.ai.fg_multiplier == 2, "DLSS-G multiplier mapped");
     Expect(imported.ai.rife_model == 1 && imported.ai.blend == 20, "RIFE tuning mapped");
     Expect(!imported.ai.motion_safety, "motion safety mapped");
     Expect(imported.advanced.debug_log, "testing log mapped");

@@ -20,6 +20,7 @@ public:
     bool Create();
     void Destroy();
     void Update(const std::vector<std::wstring>& lines, float opacity, int position);
+    void Raise();
     void Hide();
 
     bool visible() const { return visible_; }

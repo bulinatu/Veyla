@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cwchar>
 #include <string>
 #include <vector>
 
@@ -315,16 +316,11 @@ float SettingsControls::Ai(float x, float y, float width) {
                    13.0f, DWRITE_FONT_WEIGHT_MEDIUM);
     y += kRow + kGap;
 
-    if (widgets_.Toggle(Next(), Row(x, y, width), L"Temporal (Neural Rendering)",
-                        settings_.ai.temporal)) {
-        Touch();
-    }
-    y += kRow + kGap;
-
     std::vector<AiBackend> backends = {AiBackend::DlssFg, AiBackend::Rife};
-    std::vector<std::wstring> labels = {L"DLSS FG 2x", L"RIFE (TensorRT)"};
-    std::vector<bool> item_enabled = {false, system_.rife_lite};
-    const bool fg_available = frame_generation_wired_ && item_enabled[1];
+    std::vector<std::wstring> labels = {L"DLSS FG (worker)", L"RIFE (TensorRT)"};
+    std::vector<bool> item_enabled = {system_.dlss_fg, system_.rife_lite};
+    const bool fg_available =
+        frame_generation_wired_ && (item_enabled[0] || item_enabled[1]);
     if (widgets_.Toggle(Next(), Row(x, y, width), L"Frame generation",
                         settings_.ai.frame_generation, fg_available)) {
         Touch();
@@ -332,7 +328,7 @@ float SettingsControls::Ai(float x, float y, float width) {
     y += kRow + kGap;
 
     if (fg_available) {
-        int backend_index = 1;
+        int backend_index = 0;
         for (std::size_t i = 0; i < backends.size(); ++i) {
             if (backends[i] == settings_.ai.fg_backend) {
                 backend_index = static_cast<int>(i);
@@ -348,14 +344,31 @@ float SettingsControls::Ai(float x, float y, float width) {
                 Touch();
             }
         }
+        y += kRow + kGap;
+
+        if (settings_.ai.fg_backend == AiBackend::DlssFg) {
+            int multiplier = std::clamp(settings_.ai.fg_multiplier, 2, 6) - 2;
+            const std::vector<std::wstring> mult_labels = {L"2x", L"3x", L"4x",
+                                                           L"5x", L"6x"};
+            std::vector<bool> mult_enabled(5, system_.dlss_fg_multi);
+            mult_enabled[0] = true;
+            if (widgets_.Choice(Next(), Row(x, y, width), L"DLSS-G multiplier",
+                                mult_labels, multiplier,
+                                settings_.ai.frame_generation, &mult_enabled)) {
+                settings_.ai.fg_multiplier = multiplier + 2;
+                Touch();
+            }
+            y += kRow + kGap;
+        }
     } else {
         widgets_.Label(Row(x, y, width),
-                       frame_generation_wired_
-                           ? L"FG selectable backends: RIFE engine missing"
-                           : L"Frame generation execution lands in Stage 6b; DLSS SR is active.",
-                       widgets_.Tokens().text_faint, 13.0f, DWRITE_FONT_WEIGHT_MEDIUM);
+                       system_.nr_worker
+                           ? L"FG unavailable: nvngx_dlssg.dll is missing"
+                           : L"FG unavailable: worker and RIFE engine are not installed",
+                       widgets_.Tokens().text_faint, 13.0f,
+                       DWRITE_FONT_WEIGHT_MEDIUM);
+        y += kRow + kGap;
     }
-    y += kRow + kGap;
 
     int target = TargetIndex(settings_.ai.target_fps);
     if (widgets_.Choice(Next(), Row(x, y, width), L"Target frame rate", kTargets, target,
@@ -365,7 +378,8 @@ float SettingsControls::Ai(float x, float y, float width) {
     }
     y += kRow + kGap;
 
-    if (settings_.ai.fg_backend == AiBackend::Rife) {
+    if (settings_.ai.fg_backend == AiBackend::Rife &&
+        settings_.ai.frame_generation) {
         int model = settings_.ai.rife_model;
         const std::vector<bool> model_enabled = {true, system_.rife_heavy};
         if (widgets_.Choice(Next(), Row(x, y, width), L"RIFE model",
@@ -402,11 +416,45 @@ float SettingsControls::Ai(float x, float y, float width) {
 
     if (settings_.ai.frame_generation &&
         settings_.ai.fg_backend == AiBackend::DlssFg) {
-        widgets_.Label(Rect(x, y, x + width, y + 38),
-                       L"DLSS-G 60->120 is visible as a reference option only; it is not "
-                       L"selectable in brpnext (Stage 6c). Choose RIFE for 30->60.",
-                       widgets_.Tokens().warning, 12.0f, DWRITE_FONT_WEIGHT_MEDIUM);
-        y += 40.0f;
+        const int source = std::clamp(settings_.streaming.fps, 24, 240);
+        const int multiplier = std::clamp(settings_.ai.fg_multiplier, 2, 6);
+        const int out = source * multiplier;
+        wchar_t note[260] = {};
+        if (multiplier == 2) {
+            std::swprintf(note, 260,
+                          L"%d fps source -> %d fps with 2x. The worker presents in "
+                          L"its own window; this is the clean cadence.",
+                          source, out);
+        } else {
+            std::swprintf(note, 260,
+                          L"%dx asks for up to %d fps. The worker sustains about "
+                          L"150-165 generated fps; the overlay shows the real rate.",
+                          multiplier, out);
+        }
+        widgets_.Label(Rect(x, y, x + width, y + 40), note,
+                       widgets_.Tokens().text_faint, 11.5f,
+                       DWRITE_FONT_WEIGHT_MEDIUM);
+        y += 42.0f;
+        if (settings_.ai.super_resolution) {
+            widgets_.Label(Rect(x, y, x + width, y + 36),
+                           settings_.ai.sr_output == Resolution::R2160
+                               ? L"DLSS-G is capped at 1440p. Use 1440p SR or turn SR off."
+                               : L"SR feeds the worker through a CPU readback; at "
+                                 L"1440p expect about 100 generated fps.",
+                           settings_.ai.sr_output == Resolution::R2160
+                               ? widgets_.Tokens().warning
+                               : widgets_.Tokens().text_faint,
+                           11.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+            y += 38.0f;
+        }
+        if (!system_.dlss_fg_multi && settings_.ai.fg_multiplier > 2) {
+            widgets_.Label(Rect(x, y, x + width, y + 36),
+                           L"The SM86 FG proxy is not installed; the runtime steps "
+                           L"back to 2x.",
+                           widgets_.Tokens().warning, 11.5f,
+                           DWRITE_FONT_WEIGHT_MEDIUM);
+            y += 38.0f;
+        }
     }
     return y;
 }

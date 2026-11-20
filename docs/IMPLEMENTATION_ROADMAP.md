@@ -31,13 +31,13 @@ Deliverables:
 - `brp_app_next` (navigation + host): page model, grouping, collapsed state,
   history, service registry, bootstrap.
 - `ui/theme`: 15 colour tokens, spacing, radii and type scale for dark/light.
-- `brp_next_tests`: 79 deterministic assertions, exit code 0/1.
+- `brp_next_tests`: 82 deterministic assertions, exit code 0/1.
 - CMake targets; no changes to the existing `brp` target.
 
 Acceptance (met):
 
 - `cmake --build build-perf --target brp_next_tests` succeeds.
-- `brp_next_tests` prints `ALL PASS` (79 assertions).
+- `brp_next_tests` prints `ALL PASS` (82 assertions).
 - Config round-trips, invalid values are rejected, legacy import works,
   profiles create/duplicate/default/export/import/delete, navigation is
   stable, AppHost wires the services.
@@ -112,7 +112,7 @@ in the new app (Stage 5), AI execution (Stage 6).
 Not yet: borderless fullscreen/F11 in `brpnext` (windowed presentation is
 working), HDR toggle in the new presenter, and measured A/V sync under load.
 
-## Stage 6 - AI Video Engine (DLSS SR + RIFE 30 -> 60 working)
+## Stage 6 - AI Video Engine (DLSS SR + RIFE 30 -> 60 + DLSS-G working)
 
 Working:
 
@@ -126,16 +126,21 @@ Working:
   measured **29 generated/s and 58 shown/s** from a 28.8 fps source.
   Overlay: `RIFE | 29 gen/s | 58 shown/s`.
 
-Deliberately not enabled yet:
+- DLSS-G 60 -> 120 through the NVIDIA worker (`NvDlssnr` present mode):
+  `DlssFg` owns the worker, feeds it at the source cadence and fits the
+  worker's topmost window over the client. Verified in `brpnext`:
+  `[fg] displayed 120.0 FPS (real + generated, 2x)` at 1080p, with the source
+  at 57-58 fps. `Esc` stops the worker and returns to the console page.
+- DLSS SR + DLSS-G: the SR output is read back to RGBA at 1440p and fed to the
+  worker at 2560x1440. Verified at about **101 generated fps** (worker limit at
+  1440p, not a claimed 120).
+- The multiplier is selectable 2x-6x when `fg/winmm.dll` (SM86 proxy) is
+  installed; without it only 2x is enabled. The UI says 3x-6x land near
+  150-165 generated fps and the overlay reads the worker's own log, so the real
+  rate is never replaced by the requested one.
 
-- DLSS-G 60 -> 120 in `brpnext`: **skipped by decision**. The option is visible
-  in the FG backend list but greyed out and cannot be selected; the capability
-  card says STAGE 6C / reference only. RIFE is the executable path. DLSS SR and
-  RIFE are mutually exclusive in the new Watch path (RIFE runs at 1080p, then
-  the presenter upscales).
-- Simultaneous SR + RIFE is not claimed.
-
-Next: DLSS-G worker presenter for 60 -> 120, then a side-by-side SR+RIFE mode.
+Not claimed: simultaneous SR + RIFE, and 30 -> 120 (the runtime inserts at most
+one midpoint for a 30 fps source).
 
 ## Stage 7 - Overlay and diagnostics (working, basic)
 
@@ -201,7 +206,7 @@ center, and full restart-required classification.
 
 - Stage 0: done (0.4.9).
 - Stage 1: done (five documents).
-- Stage 2: done (foundation library, AppHost, theme tokens, 79 tests).
+- Stage 2: done (foundation library, AppHost, theme tokens, 82 tests).
 - Stage 3: shell working (`brpnext.exe`), with streaming/AI execution and the
   independent overlay deferred to Stages 4-7. No page claims a connection it
   does not have.
@@ -213,7 +218,7 @@ center, and full restart-required classification.
 
 - Never break `brp.exe` while building `brpnext.exe`.
 - Never add VSR.
-- Never expose 4x/6x DLSS-G or 30 -> 120 on this runtime.
+- Never claim 30 -> 120. 3x-6x DLSS-G is offered only with the SM86 proxy and the overlay reports the worker record rate, not the requested one.
 - Never populate statistics with constants.
 - Every new module compiles independently and has an owner interface.
 
@@ -221,8 +226,8 @@ center, and full restart-required classification.
 
 - Stage 5: video, audio and controller are live in `brpnext`; DLSS SR is
   applied to the decoded 1080p frame.
-- Stage 6: DLSS SR is working; RIFE and DLSS-G execution are explicitly not
-  enabled yet (control disabled, labelled Stage 6b).
+- Stage 6: DLSS SR, RIFE 30 -> 60 and DLSS-G 60 -> 120 are working in
+  `brpnext`. DLSS-G uses the NVIDIA worker presenter; `Esc` stops it.
 - Stage 7: independent layered overlay and diagnostics are working.
 - Stage 8: settings, profiles, reset, import/export and compatibility warnings
   are working.

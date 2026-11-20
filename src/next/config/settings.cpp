@@ -123,6 +123,9 @@ void AppSettings::Validate(std::vector<std::string>& warnings,
     if (ai.rife_model < 0 || ai.rife_model > 1) {
         errors.push_back("ai.rife_model must be 0 or 1");
     }
+    if (ai.fg_multiplier < 2 || ai.fg_multiplier > 6) {
+        errors.push_back("ai.fg_multiplier must be 2..6");
+    }
     if (overlay.opacity < 0.1f || overlay.opacity > 1.0f) {
         errors.push_back("overlay.opacity must be 0.1..1.0");
     }
@@ -149,12 +152,16 @@ void AppSettings::Validate(std::vector<std::string>& warnings,
     }
 
     if (ai.frame_generation && ai.fg_backend == AiBackend::DlssFg) {
-        const int ceiling = streaming.fps * 2;
+        const int ceiling = streaming.fps * std::clamp(ai.fg_multiplier, 2, 6);
         if (ai.target_fps > ceiling) {
             warnings.push_back(
-                "DLSS Frame Generation is 2x in this runtime: " +
-                std::to_string(streaming.fps) + " fps input caps at " +
+                "DLSS Frame Generation at " + std::to_string(ai.fg_multiplier) +
+                "x caps " + std::to_string(streaming.fps) + " fps input at " +
                 std::to_string(ceiling) + " fps, not " + std::to_string(ai.target_fps));
+        }
+        if (ai.super_resolution && ai.sr_output == Resolution::R2160) {
+            warnings.push_back(
+                "the DLSS-G worker is capped at 1440p; SR 2160p cannot feed it");
         }
     }
     if (ai.frame_generation && ai.fg_backend == AiBackend::Rife &&
@@ -219,6 +226,7 @@ FlatMap SettingsToFlat(const AppSettings& s) {
     FlatJson::PutBool(f, "ai.temporal", s.ai.temporal);
     FlatJson::PutBool(f, "ai.frame_generation", s.ai.frame_generation);
     FlatJson::PutString(f, "ai.fg_backend", std::string(ToString(s.ai.fg_backend)));
+    FlatJson::PutInt(f, "ai.fg_multiplier", s.ai.fg_multiplier);
     FlatJson::PutInt(f, "ai.target_fps", s.ai.target_fps);
     FlatJson::PutInt(f, "ai.quality", s.ai.quality);
     FlatJson::PutBool(f, "ai.occlusion", s.ai.occlusion);
@@ -332,6 +340,8 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
     s.ai.frame_generation =
         FlatJson::GetBool(f, "ai.frame_generation", s.ai.frame_generation);
     s.ai.fg_backend = ReadBackend(f, "ai.fg_backend", s.ai.fg_backend);
+    s.ai.fg_multiplier =
+        ClampInt(FlatJson::GetInt(f, "ai.fg_multiplier", s.ai.fg_multiplier), 2, 6);
     s.ai.target_fps =
         ClampInt(FlatJson::GetInt(f, "ai.target_fps", s.ai.target_fps), 60, 240);
     s.ai.quality = ClampInt(FlatJson::GetInt(f, "ai.quality", s.ai.quality), 0, 3);
@@ -447,6 +457,7 @@ Status ImportLegacySettings(const std::filesystem::path& path, AppSettings& out,
     out.ai.super_resolution = FlatJson::GetInt(flat, "neural_sr", 0) > 0;
     out.ai.sr_quality = ClampInt(FlatJson::GetInt(flat, "dlss_mode", 4), 0, 5);
     out.ai.frame_generation = FlatJson::GetInt(flat, "dlss_fg", 0) >= 2;
+    out.ai.fg_multiplier = ClampInt(FlatJson::GetInt(flat, "dlss_fg", 2), 2, 6);
     const bool rife = FlatJson::GetInt(flat, "fg_engine", 0) == 1;
     out.ai.fg_backend = out.ai.frame_generation
                            ? (rife ? AiBackend::Rife : AiBackend::DlssFg)

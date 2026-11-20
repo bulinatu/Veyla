@@ -59,6 +59,7 @@ struct AiSettings {
     bool temporal = false;
     bool frame_generation = false;
     AiBackend fg_backend = AiBackend::None;
+    int fg_multiplier = 2;  // DLSS-G only: 2x .. 6x
     int target_fps = 120;
     int quality = 1;  // QualityPreset index
     bool occlusion = true;

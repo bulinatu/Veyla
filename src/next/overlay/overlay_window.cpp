@@ -64,6 +64,14 @@ void OverlayWindow::Destroy() {
     visible_ = false;
 }
 
+void OverlayWindow::Raise() {
+    if (!hwnd_ || !visible_) {
+        return;
+    }
+    ::SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+}
+
 void OverlayWindow::Hide() {
     if (hwnd_) {
         ::ShowWindow(hwnd_, SW_HIDE);
@@ -155,8 +163,8 @@ void OverlayWindow::Paint(HDC dc) const {
     ::GetClientRect(hwnd_, &client);
     ::FillRect(dc, &client, static_cast<HBRUSH>(::GetStockObject(BLACK_BRUSH)));
 
-    HBRUSH panel = ::CreateSolidBrush(RGB(18, 20, 24));
-    HPEN border = ::CreatePen(PS_SOLID, 1, RGB(118, 185, 0));
+    HBRUSH panel = ::CreateSolidBrush(RGB(20, 16, 30));
+    HPEN border = ::CreatePen(PS_SOLID, 1, RGB(176, 114, 255));
     HGDIOBJ old_brush = ::SelectObject(dc, panel);
     HGDIOBJ old_pen = ::SelectObject(dc, border);
     ::RoundRect(dc, 1, 1, client.right - 1, client.bottom - 1, 14, 14);
@@ -171,9 +179,9 @@ void OverlayWindow::Paint(HDC dc) const {
                                CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                                DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
     HGDIOBJ old_font = ::SelectObject(dc, font);
-    ::SetTextColor(dc, RGB(242, 244, 247));
+    ::SetTextColor(dc, RGB(247, 243, 255));
     ::TextOutW(dc, 16, 12, L"BetterRemotePlay", 16);
-    ::SetTextColor(dc, RGB(118, 185, 0));
+    ::SetTextColor(dc, RGB(255, 107, 214));
     ::TextOutW(dc, 148, 12, L"LIVE", 4);
 
     int y = 38;
@@ -181,12 +189,12 @@ void OverlayWindow::Paint(HDC dc) const {
         if (y > client.bottom - 20) {
             break;
         }
-        ::SetTextColor(dc, RGB(170, 178, 190));
+        ::SetTextColor(dc, RGB(211, 200, 230));
         ::TextOutW(dc, 16, y, line.c_str(), static_cast<int>(line.size()));
         y += 20;
     }
     if (lines_.empty()) {
-        ::SetTextColor(dc, RGB(120, 130, 145));
+        ::SetTextColor(dc, RGB(154, 140, 180));
         ::TextOutW(dc, 16, 38, L"Waiting for stream metrics...", 29);
     }
     ::SelectObject(dc, old_font);
