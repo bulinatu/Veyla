@@ -576,3 +576,36 @@ input-to-camera delay.
 - `brpnext.exe` SHA256
   `EE842D3F92254541B1359A22B50D5C6B82FF749E56C02BA94F2F0DB17023F27F`
 - Patch verification: `version=1.0.1`, 0 markers, `files_differ=0`.
+
+## 1.0.2 - Upscale / frame-generation / streaming polish
+
+- DLSS Super Resolution now uses NVIDIA's real render-scale ladder instead of a
+  cosmetic preset hint:
+  Ultra Performance 33%, Performance 50%, Balanced 58%, Quality 66%,
+  Ultra Quality 77%, DLAA 100%.
+  The 1080p stream is area-downscaled to the selected input size before NGX,
+  and DLSS reconstructs 1440p/2160p from it. Verified live:
+  `[dlss] SR initialized 1688x950 -> 2560x1440, quality 2`.
+- The AI page and overlay show the effective render scale and both dimensions.
+  DLAA remains native 1080p AA and the lowest-latency generator input.
+- Streaming snapshots now report the actual decoder (D3D11VA/D3D12VA/Vulkan/
+  CUDA/Software) instead of only the settings value; the Home decode step uses
+  the live value.
+- Frame generation keeps the 2x NVIDIA-signed runtime, the optional SM86 proxy
+  for 3x-6x, immediate newest-frame feeding and the 1440p worker cap.
+- Tests: brp_next_tests ALL PASS (82).
+
+### 1.0.2 package
+
+- Standalone: `dist/BetterRemotePlay-1.0.2-standalone.zip`
+  SHA256 `F62C1F0145A98231A4507B936861130A8CFFA8E0A4869070449D9636B143C282`
+- Update **1.0.1 -> 1.0.2**:
+  `dist/BetterRemotePlay-1.0.1-to-1.0.2-update.exe` (1.35 MB)
+  SHA256 `56CC6A18C6775A15B7F6D549520C82052A2AF20B2778F61730E59C4A50EDE548`
+- Update **1.0.0 -> 1.0.2**:
+  `dist/BetterRemotePlay-1.0.0-to-1.0.2-update.exe` (1.35 MB)
+  SHA256 `C95433CF5BF8EBB5C5CB0E2CFFD13C53F3D1A526464018E172551405BD4892DB`
+- `brpnext.exe` SHA256
+  `EB3E957FD9FFB6CB22EF927F665794A11FD0B5E222E7AF21D61B09283F525445`
+- Patch 1.0.1 -> 1.0.2 verified: `version=1.0.2`, 0 markers,
+  `files_differ=0`.

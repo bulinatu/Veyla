@@ -234,7 +234,7 @@ float SettingsControls::SuperResolution(float x, float y, float width) {
 
     int quality = settings_.ai.sr_quality;
     if (widgets_.Choice(Next(), Row(x, y, width), L"SR quality",
-                        {L"Performance", L"Balanced", L"Quality", L"Ultra",
+                        {L"Ultra Performance", L"Performance", L"Balanced", L"Quality",
                          L"Ultra Quality", L"DLAA"},
                         quality, settings_.ai.super_resolution)) {
         settings_.ai.sr_quality = quality;
@@ -251,6 +251,21 @@ float SettingsControls::SuperResolution(float x, float y, float width) {
                    sr_available ? widgets_.Tokens().success : widgets_.Tokens().text_faint,
                    12.0f, DWRITE_FONT_WEIGHT_MEDIUM);
     y += kRow + kGap + 2.0f;
+
+    if (settings_.ai.super_resolution && settings_.ai.sr_quality < 5) {
+        static const int pct[6] = {33, 50, 58, 66, 77, 100};
+        const int index = std::clamp(settings_.ai.sr_quality, 0, 5);
+        const int out_w = settings_.ai.sr_output == Resolution::R2160 ? 3840 : 2560;
+        const int out_h = settings_.ai.sr_output == Resolution::R2160 ? 2160 : 1440;
+        const int in_w = std::max(2, (out_w * pct[index] / 100) / 2 * 2);
+        const int in_h = std::max(2, (out_h * pct[index] / 100) / 2 * 2);
+        wchar_t scale[160] = {};
+        std::swprintf(scale, 160, L"Render scale %d%%  |  %dx%d -> %dx%d",
+                      pct[index], in_w, in_h, out_w, out_h);
+        widgets_.Label(Rect(x, y, x + width, y + 24), scale,
+                       widgets_.Tokens().text_dim, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
+        y += 28.0f;
+    }
 
     const bool dlaa = settings_.ai.sr_quality >= 5 ||
                       settings_.ai.sr_output == Resolution::R1080;

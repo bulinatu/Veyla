@@ -48,3 +48,13 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
   waitable timer, matching the reference app.
 - Watch presents V-Synced so the loop cannot spin and starve streaming threads.
 - Update from 1.0.0 is a 0.73 MB single-file patch; `files_differ=0`.
+
+## 1.0.2 - upscale / FG / streaming polish
+
+- DLSS SR quality presets now drive real render-scale percentages
+  (33/50/58/66/77/100), with a CPU area-downscale before NGX and the effective
+  scale shown in the AI page and overlay.
+- DLAA stays 100% native.
+- Live snapshots report the actual decoder; Home uses it.
+- Frame generation remains the 2x official runtime with the SM86 proxy optional
+  for 3x-6x, fed from the newest frame, capped at 1440p.

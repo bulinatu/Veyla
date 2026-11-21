@@ -154,6 +154,8 @@ private:
     bool dlss_failed_ = false;
     int dlss_in_w_ = 0;
     int dlss_in_h_ = 0;
+    std::vector<std::uint8_t> sr_scaled_;
+    std::vector<std::uint16_t> sr_scale_temp_;
     std::unique_ptr<DlssFg> dlss_fg_;
     bool dlss_fg_failed_ = false;
     bool fg_covering_ = false;

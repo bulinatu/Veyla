@@ -59,6 +59,8 @@ public:
     bool runtime_loaded() const { return runtime_loaded_; }
     bool ready() const { return feature_ != nullptr; }
     double last_ms() const { return last_ms_; }
+    int in_width() const { return in_width_; }
+    int in_height() const { return in_height_; }
     int out_width() const { return out_width_; }
     int out_height() const { return out_height_; }
     const std::string& status() const { return status_; }

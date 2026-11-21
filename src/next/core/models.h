@@ -182,6 +182,7 @@ struct StreamSnapshot {
     std::string message;
     std::string pairing_message;
     std::string codec;
+    std::string decoder;
     int source_width = 0;
     int source_height = 0;
     double source_fps = 0.0;

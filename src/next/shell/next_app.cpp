@@ -6,6 +6,7 @@
 #include "media/nv_dlss_sr.h"
 #include "media/pipeline.h"
 #include "media/rife.h"
+#include "media/rgba_scale.h"
 #include "platform/win32_window.h"
 #include "shell/settings_controls.h"
 #include "streaming/streaming_service.h"
@@ -38,7 +39,7 @@ constexpr float kTitleHeight = 40.0f;
 constexpr float kSidebar = 224.0f;
 constexpr float kSidebarCollapsed = 68.0f;
 constexpr float kPad = 28.0f;
-constexpr wchar_t kVersion[] = L"1.0.1";
+constexpr wchar_t kVersion[] = L"1.0.2";
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -63,8 +64,8 @@ Color Alpha(const Color& color, float alpha) {
 }
 
 const wchar_t* QualityLabel(int quality) {
-    static const wchar_t* names[] = {L"Performance", L"Balanced", L"Quality", L"Ultra",
-                                     L"Ultra Quality", L"DLAA"};
+    static const wchar_t* names[] = {L"Ultra Performance", L"Performance", L"Balanced",
+                                     L"Quality", L"Ultra Quality", L"DLAA"};
     return names[std::clamp(quality, 0, 5)];
 }
 
@@ -550,7 +551,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  1.0.1", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  1.0.2", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -664,7 +665,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"BetterRemotePlay Next 1.0.1",
+        renderer_->Text(L"BetterRemotePlay Next 1.0.2",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -755,8 +756,9 @@ void NextApp::RenderHome(Widgets& widgets) {
         bool active;
     };
     const Step steps[4] = {
-        {L"DECODE", snapshot.connected ? Widen(settings_.streaming.decoder)
-                                       : L"idle",
+        {L"DECODE", snapshot.connected && !snapshot.decoder.empty()
+                            ? Widen(snapshot.decoder)
+                            : L"idle",
          std::to_wstring(snapshot.source_width) + L"x" +
              std::to_wstring(snapshot.source_height),
          snapshot.connected},
@@ -1741,7 +1743,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"BetterRemotePlay Next 1.0.1  |  stable release", L"STABLE", true);
+               L"BetterRemotePlay Next 1.0.2  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -1750,7 +1752,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay Next", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 1.0.1  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 1.0.2  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -2099,6 +2101,23 @@ void NextApp::BuildOverlayView() {
         OverlayAction::SrOutputPrev, OverlayAction::SrOutputNext,
         L"1080p / 1440p / 2160p; 2160p cannot feed DLSS-G",
         sr_on && settings_.ai.sr_quality < 5));
+    {
+        static const int pct[6] = {33, 50, 58, 66, 77, 100};
+        const int index = std::clamp(settings_.ai.sr_quality, 0, 5);
+        wchar_t scale[64] = {};
+        if (sr_on && settings_.ai.sr_quality < 5) {
+            std::swprintf(scale, 64, L"%d%%  |  %dx%d -> %dx%d", pct[index],
+                          (int)((settings_.ai.sr_output == Resolution::R2160 ? 3840 : 2560) *
+                                pct[index] / 100),
+                          (int)((settings_.ai.sr_output == Resolution::R2160 ? 2160 : 1440) *
+                                pct[index] / 100),
+                          settings_.ai.sr_output == Resolution::R2160 ? 3840 : 2560,
+                          settings_.ai.sr_output == Resolution::R2160 ? 2160 : 1440);
+        } else {
+            std::swprintf(scale, 64, L"100%%  |  native AA");
+        }
+        sr.rows.push_back(info(L"RENDER SCALE", scale));
+    }
     sr.rows.push_back(info(L"BACKEND", L"DLSS Super Resolution",
                            system_.dlss_sr ? L"nvngx_dlss.dll" : L"runtime missing"));
     sr.rows.push_back(info(L"ENGINE", dlss_ready_ ? L"Active" : L"Idle",
@@ -2561,8 +2580,19 @@ void NextApp::PresentVideo() {
                 if (EnsureDlssSr(feed_w, feed_h)) {
                     brp::media::NvDlssSr::Frame sr_frame;
                     std::string detail;
-                    if (dlss_sr_->Process(video_frame_.rgba.data(), feed_w, feed_h,
-                                          sr_frame, detail) &&
+                    const int sw = feed_w;
+                    const int sh = feed_h;
+                    const int iw = dlss_sr_->in_width();
+                    const int ih = dlss_sr_->in_height();
+                    const std::uint8_t* input = video_frame_.rgba.data();
+                    if (iw != sw || ih != sh) {
+                        sr_scaled_.resize(static_cast<std::size_t>(iw) * ih * 4);
+                        brp::media::DownscaleRgba(video_frame_.rgba.data(), sw, sh,
+                                                  sr_scaled_.data(), iw, ih,
+                                                  sr_scale_temp_);
+                        input = sr_scaled_.data();
+                    }
+                    if (dlss_sr_->Process(input, iw, ih, sr_frame, detail) &&
                         dlss_sr_->Readback(rgba, detail)) {
                         feed_w = dlss_sr_->out_width();
                         feed_h = dlss_sr_->out_height();
@@ -2701,8 +2731,16 @@ void NextApp::PresentVideo() {
         if (EnsureDlssSr(width, height)) {
             brp::media::NvDlssSr::Frame sr_frame;
             std::string detail;
-            if (dlss_sr_->Process(video_frame_.rgba.data(), width, height, sr_frame,
-                                  detail)) {
+            const int iw = dlss_sr_->in_width();
+            const int ih = dlss_sr_->in_height();
+            const std::uint8_t* input = video_frame_.rgba.data();
+            if (iw != width || ih != height) {
+                sr_scaled_.resize(static_cast<std::size_t>(iw) * ih * 4);
+                brp::media::DownscaleRgba(video_frame_.rgba.data(), width, height,
+                                          sr_scaled_.data(), iw, ih, sr_scale_temp_);
+                input = sr_scaled_.data();
+            }
+            if (dlss_sr_->Process(input, iw, ih, sr_frame, detail)) {
                 presenter_->SetSourceView(sr_frame.srv.Get(), dlss_sr_->out_width(),
                                           dlss_sr_->out_height(), video_frame_.pq);
                 presenter_->SetSourceFinal(false);
@@ -3102,32 +3140,32 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
     if (dlss_ready_ && dlss_in_w_ == input_width && dlss_in_h_ == input_height) {
         return true;
     }
-    // DLAA and an explicit 1080p SR output stay at the stream resolution:
-    // there is no upscale to pay for, and the DLSS-G worker can run at 1080p
-    // (its clean 120 fps case) instead of 1440p.
+    // NVIDIA's quality ladder is a render-scale ladder. The console frame is
+    // downscaled to the selected percentage first, then DLSS reconstructs the
+    // target. DLAA stays at 100% and an explicit 1080p output is native AA.
     const bool dlaa = settings_.ai.sr_quality >= 5 ||
                       settings_.ai.sr_output == Resolution::R1080;
     int out_w = input_width;
     int out_h = input_height;
+    int in_w = input_width;
+    int in_h = input_height;
     int quality = 5;
     if (!dlaa) {
-        out_w = 2560;
-        out_h = 1440;
-        if (settings_.ai.sr_output == Resolution::R2160) {
-            out_w = 3840;
-            out_h = 2160;
-        }
+        out_w = settings_.ai.sr_output == Resolution::R2160 ? 3840 : 2560;
+        out_h = settings_.ai.sr_output == Resolution::R2160 ? 2160 : 1440;
         if (out_w <= input_width || out_h <= input_height) {
             out_w = 2560;
             out_h = 1440;
         }
-        switch (settings_.ai.sr_quality) {
-            case 0:
-            case 1: quality = 0; break;
-            case 2: quality = 1; break;
-            case 3: quality = 2; break;
-            default: quality = 4; break;
-        }
+        static const int kPercent[6] = {33, 50, 58, 66, 77, 100};
+        static const int kQuality[6] = {3, 0, 1, 2, 4, 5};
+        const int index = std::clamp(settings_.ai.sr_quality, 0, 5);
+        const int pct = kPercent[index];
+        quality = kQuality[index];
+        in_w = std::max(2, (out_w * pct / 100) / 2 * 2);
+        in_h = std::max(2, (out_h * pct / 100) / 2 * 2);
+        in_w = std::min(in_w, input_width);
+        in_h = std::min(in_h, input_height);
     }
     if (!dlss_sr_) {
         dlss_sr_ = std::make_unique<brp::media::NvDlssSr>();
@@ -3149,8 +3187,8 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
         }
     }
     std::string detail;
-    if (!dlss_sr_->Initialize(presenter_->device(), presenter_->context(), input_width,
-                              input_height, out_w, out_h, 12, quality, detail)) {
+    if (!dlss_sr_->Initialize(presenter_->device(), presenter_->context(), in_w,
+                              in_h, out_w, out_h, 12, quality, detail)) {
         dlss_failed_ = true;
         Toast(L"DLSS SR: " + Widen(detail), true);
         return false;

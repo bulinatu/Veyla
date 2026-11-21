@@ -155,6 +155,10 @@ Status StreamingService::Connect(const ConsoleSettings& console) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         profile_.host = profile.host;
+        profile_.decoder = profile.decoder;
+        profile_.bitrate_kbps = profile.bitrate_kbps;
+        profile_.width = profile.width;
+        profile_.height = profile.height;
         message_ = "Connecting to " + profile.host;
         stats_ = {};
         last_stats_ = std::chrono::steady_clock::now();
@@ -240,6 +244,15 @@ StreamSnapshot StreamingService::Snapshot() const {
     snapshot.console_address = profile_.host;
     snapshot.target_id = profile_.target_id;
     snapshot.codec = "hevc";
+    switch (profile_.decoder) {
+        case 1: snapshot.decoder = "D3D11VA"; break;
+        case 2: snapshot.decoder = "D3D12VA"; break;
+        case 3: snapshot.decoder = "Vulkan"; break;
+        case 4: snapshot.decoder = "DXVA2"; break;
+        case 5: snapshot.decoder = "CUDA"; break;
+        case 6: snapshot.decoder = "Software"; break;
+        default: snapshot.decoder = "Auto"; break;
+    }
     snapshot.source_width = profile_.width;
     snapshot.source_height = profile_.height;
     snapshot.bitrate_kbps = static_cast<double>(profile_.bitrate_kbps);
