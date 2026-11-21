@@ -372,6 +372,10 @@ void Streaming::OnVideo(uint8_t* buf, size_t size, int32_t frames_lost) {
 }
 
 void Streaming::DecodeThreadMain() {
+    // Keep the producer one step ahead of presentation. A default-priority
+    // decode thread loses its slice to ordinary background work exactly when a
+    // hitch would be visible as a held frame.
+    ::SetThreadPriority(::GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
     for (;;) {
         EncodedUnit unit;
         {

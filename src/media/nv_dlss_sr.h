@@ -50,10 +50,13 @@ public:
                     int in_height, int out_width, int out_height, int preset, int quality,
                     std::string& detail);
 
-    // Copies the last SR output back to CPU RGBA (target resolution). Used by
-    // the NVIDIA pipeline order, where NR runs on the upscaled frame.
+    // Copies the last SR output back to CPU RGBA (target resolution). Waits for
+    // the submission that is still in flight first.
     bool Readback(std::vector<uint8_t>& out, std::string& detail);
-    // Reads the previous completed output without waiting. Used to feed the
+    // Copies the previous completed output without waiting for the frame that
+    // was just submitted. Safe right after Process(): the returned slot is not
+    // written again until the following Process().
+    bool ReadbackCompleted(std::vector<uint8_t>& out, std::string& detail);
     bool Process(const uint8_t* rgba, int width, int height, Frame& out, std::string& detail);
 
     bool runtime_loaded() const { return runtime_loaded_; }

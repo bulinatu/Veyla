@@ -98,6 +98,7 @@ private:
     float ContentX() const;
     float ContentWidth() const;
     float SidebarWidth() const;
+    int RefreshHz() const;
     bool Apply();
     void RefreshProfiles();
     void Toast(const std::wstring& text, bool error = false);
@@ -209,9 +210,17 @@ private:
     double rife_generated_at_ = -1.0;
     std::atomic<int> display_shown_{0};
     RollingStats video_intervals_{512};
+    RollingStats loop_intervals_{512};
     double last_video_shown_at_ = -1.0;
     double cadence_p50_ = 0.0;
     double cadence_p99_ = 0.0;
+    double loop_p99_ = 0.0;
+    unsigned long long present_misses_seen_ = 0;
+    unsigned long long present_misses_rate_ = 0;
+    unsigned present_refresh_seen_ = 0;
+    double present_refresh_hz_ = 0.0;
+    double stats_at_ = -1.0;
+    double sr_cpu_ms_ = 0.0;
     int display_shown_last_ = 0;
     int display_rate_ = 0;
     bool user_disconnect_ = false;

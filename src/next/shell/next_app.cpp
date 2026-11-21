@@ -39,7 +39,7 @@ constexpr float kTitleHeight = 40.0f;
 constexpr float kSidebar = 224.0f;
 constexpr float kSidebarCollapsed = 68.0f;
 constexpr float kPad = 28.0f;
-constexpr wchar_t kVersion[] = L"1.0.2";
+constexpr wchar_t kVersion[] = L"1.0.3";
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -231,6 +231,10 @@ int NextApp::Run() {
     if (!Init()) {
         return 1;
     }
+    // The presentation thread must not lose its vblank slot to background work.
+    // Above-normal is enough to beat ordinary helpers without starving audio,
+    // decode or the OS. The reference app does the same.
+    ::SetThreadPriority(::GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
     ::timeBeginPeriod(1);
     window_->Show();
     while (window_->Pump()) {
@@ -250,7 +254,19 @@ int NextApp::Run() {
                     std::this_thread::sleep_for(std::chrono::milliseconds(4));
                 }
             } else if (presenter_->frame_waitable()) {
-                ::WaitForSingleObject(presenter_->frame_waitable(), 8);
+                // One iteration per vblank. A short timeout (the previous 8 ms)
+                // made the loop run twice per refresh: the second pass presented
+                // a backbuffer that had not been drawn, so every other vblank
+                // showed a frame from two frames ago. That is exactly how a
+                // perfectly decoded stream looks like it is skipping.
+                const int hz = RefreshHz();
+                const DWORD timeout =
+                    static_cast<DWORD>(std::clamp(2000 / hz, 8, 40));
+                ::WaitForSingleObject(presenter_->frame_waitable(), timeout);
+            } else {
+                // No waitable swapchain (old driver): Present(1) blocks on the
+                // vblank, so a short sleep is only there to avoid a spin.
+                std::this_thread::sleep_for(std::chrono::milliseconds(4));
             }
         }
         Frame();
@@ -437,7 +453,8 @@ void NextApp::Frame() {
         if (overlay_control_) {
             overlay_control_ = false;
         }
-    }    if (rife_generated_at_ < 0.0 || now_ - rife_generated_at_ >= 1.0) {
+    }
+    if (rife_generated_at_ < 0.0 || now_ - rife_generated_at_ >= 1.0) {
         const int total = rife_generated_.load();
         rife_generated_rate_ = total - rife_generated_last_;
         rife_generated_last_ = total;
@@ -447,10 +464,44 @@ void NextApp::Frame() {
         display_shown_last_ = shown;
         cadence_p50_ = video_intervals_.Percentile(0.50);
         cadence_p99_ = video_intervals_.Percentile(0.99);
+        loop_p99_ = loop_intervals_.Percentile(0.99);
+        if (presenter_) {
+            const double span = stats_at_ >= 0.0 ? std::max(0.001, now_ - stats_at_) : 1.0;
+            stats_at_ = now_;
+            const unsigned long long misses = presenter_->present_misses();
+            present_misses_rate_ =
+                misses >= present_misses_seen_ ? misses - present_misses_seen_ : 0;
+            present_misses_seen_ = misses;
+            const unsigned refresh = presenter_->present_refresh_count();
+            const unsigned refreshes = refresh >= present_refresh_seen_
+                                           ? refresh - present_refresh_seen_
+                                           : 0;
+            present_refresh_seen_ = refresh;
+            // Measured scanout rate, not the value advertised by the monitor
+            // (which can be 240 Hz while a game mode runs at 60).
+            present_refresh_hz_ = static_cast<double>(refreshes) / span;
+            if (std::getenv("BRP_NEXT_FRAME_PROBE")) {
+                const StreamSnapshot probe =
+                    streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
+                std::fprintf(stderr,
+                             "[next] loop p50 %.2f p99 %.2f max %.2f  |  cadence p50 %.1f "
+                             "p99 %.1f  |  scanout %.1f Hz  |  present misses %llu  |  "
+                             "shown %d  |  sr submit %.2f ms  |  sr cpu %.2f ms  |  "
+                             "net jitter %.2f ms loss %.2f%% drops %d\n",
+                             loop_intervals_.Percentile(0.50), loop_p99_,
+                             loop_intervals_.Max(), cadence_p50_, cadence_p99_,
+                             present_refresh_hz_, present_misses_rate_, display_rate_,
+                             dlss_sr_ ? dlss_sr_->last_ms() : 0.0, sr_cpu_ms_,
+                             probe.jitter_ms, probe.loss_percent, probe.decoder_drops);
+            }
+        }
     }
     Render();
     const double delta = std::max(0.0, now_ - last_frame_);
     last_frame_ = now_;
+    if (delta > 0.0 && delta < 1.0) {
+        loop_intervals_.Add(delta * 1000.0);
+    }
     if (auto* diagnostics = dynamic_cast<DiagnosticsCollector*>(host_->Diagnostics())) {
         diagnostics->AddFrame(delta * 1000.0, 0.0, 0.0, 0.0, 0.0);
         diagnostics->Tick(delta);
@@ -551,7 +602,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  1.0.2", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  1.0.3", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -665,7 +716,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"BetterRemotePlay Next 1.0.2",
+        renderer_->Text(L"BetterRemotePlay Next 1.0.3",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -681,6 +732,28 @@ float NextApp::ContentX() const { return SidebarWidth() + kPad; }
 
 float NextApp::ContentWidth() const {
     return logical_width_ - ContentX() - kPad;
+}
+
+int NextApp::RefreshHz() const {
+    if (!system_.displays.empty() && system_.displays.front().refresh_hz > 0) {
+        return std::clamp(system_.displays.front().refresh_hz, 24, 240);
+    }
+    if (settings_.display.refresh == FrameRate::F90) {
+        return 90;
+    }
+    if (settings_.display.refresh == FrameRate::F120) {
+        return 120;
+    }
+    if (settings_.display.refresh == FrameRate::F144) {
+        return 144;
+    }
+    if (settings_.display.refresh == FrameRate::F165) {
+        return 165;
+    }
+    if (settings_.display.refresh == FrameRate::F240) {
+        return 240;
+    }
+    return 60;
 }
 
 void NextApp::RenderHome(Widgets& widgets) {
@@ -1628,7 +1701,7 @@ void NextApp::RenderDiagnostics(Widgets& widgets) {
     }
 
     float y = 138.0f + (card_h + gap) * 2.0f;
-    widgets.Card(Rect(x, y, x + w, y + 164));
+    widgets.Card(Rect(x, y, x + w, y + 196));
     widgets.Section(Rect(x + 16, y + 12, x + w - 16, y + 28), L"UI LOOP TIMING");
     const DiagnosticsSnapshot snapshot = host_->Diagnostics()->Snapshot();
     double uptime = 0.0;
@@ -1672,7 +1745,31 @@ void NextApp::RenderDiagnostics(Widgets& widgets) {
                     Rect(x + 16, y + 128, x + w - 16, y + 148), 10.5f,
                     ToD2D(theme.text_faint));
 
-    y += 180.0f;
+    wchar_t scanout[240] = {};
+    if (stream.connected && watching_ && !fg_covering_) {
+        std::swprintf(scanout, 240,
+                      L"Scanout: %.1f Hz measured  |  present misses %llu/s  |  "
+                      L"loop p99 %.2f ms  |  target %.1f Hz",
+                      present_refresh_hz_, present_misses_rate_, loop_p99_,
+                      static_cast<double>(RefreshHz()));
+    } else if (stream.connected && fg_covering_) {
+        std::swprintf(scanout, 240,
+                      L"Scanout: generator window  |  %.1f fps shown  |  source %.1f fps  |  "
+                      L"target %.1f Hz",
+                      fg_fps_, stream.source_fps, static_cast<double>(RefreshHz()));
+    } else if (stream.connected) {
+        std::swprintf(scanout, 240,
+                      L"Scanout: %.1f Hz desktop  |  not in Watch  |  target %.1f Hz",
+                      present_refresh_hz_, static_cast<double>(RefreshHz()));
+    } else {
+        std::swprintf(scanout, 240,
+                      L"Scanout: %.1f Hz desktop  |  loop p99 %.2f ms  |  target %.1f Hz",
+                      present_refresh_hz_, loop_p99_, static_cast<double>(RefreshHz()));
+    }
+    renderer_->Text(scanout, Rect(x + 16, y + 152, x + w - 16, y + 176), 10.5f,
+                    ToD2D(theme.text_faint));
+
+    y += 212.0f;
     if (widgets.Button(3301, Rect(x, y, x + 190, y + 38), L"Write report")) {
         const auto report = paths_.settings_file.parent_path() / "diagnostics.txt";
         const Status status = host_->Diagnostics()->WriteReport(report.string());
@@ -1743,7 +1840,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"BetterRemotePlay Next 1.0.2  |  stable release", L"STABLE", true);
+               L"BetterRemotePlay Next 1.0.3  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -1752,7 +1849,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay Next", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 1.0.2  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 1.0.3  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -2200,6 +2297,13 @@ void NextApp::BuildOverlayView() {
             L" fps"));
     std::swprintf(buffer, 220, L"%.2f ms", snapshot.decode_ms);
     performance.rows.push_back(info(L"DECODE", buffer));
+    if (!dlss_fg && watching_) {
+        wchar_t scanout_detail[96] = {};
+        std::swprintf(buffer, 220, L"%.1f Hz", present_refresh_hz_);
+        std::swprintf(scanout_detail, 96, L"%llu present misses/s",
+                      present_misses_rate_);
+        performance.rows.push_back(info(L"SCANOUT", buffer, scanout_detail));
+    }
     std::swprintf(buffer, 220, L"%.1f / %.1f ms", cadence_p50_, cadence_p99_);
     performance.rows.push_back(info(L"CADENCE", buffer, L"p50 / p99"));
     performance.rows.push_back(info(L"GENERATED",
@@ -2576,6 +2680,7 @@ void NextApp::PresentVideo() {
             const bool sr_can_feed_fg =
                 settings_.ai.sr_output != Resolution::R2160 ||
                 settings_.ai.sr_quality >= 5;
+            const auto fg_sr_started = std::chrono::steady_clock::now();
             if (settings_.ai.super_resolution && sr_can_feed_fg) {
                 if (EnsureDlssSr(feed_w, feed_h)) {
                     brp::media::NvDlssSr::Frame sr_frame;
@@ -2593,7 +2698,7 @@ void NextApp::PresentVideo() {
                         input = sr_scaled_.data();
                     }
                     if (dlss_sr_->Process(input, iw, ih, sr_frame, detail) &&
-                        dlss_sr_->Readback(rgba, detail)) {
+                        dlss_sr_->ReadbackCompleted(rgba, detail)) {
                         feed_w = dlss_sr_->out_width();
                         feed_h = dlss_sr_->out_height();
                         have_rgba = true;
@@ -2613,6 +2718,9 @@ void NextApp::PresentVideo() {
                 publish(std::move(video_frame_.rgba), video_frame_.width,
                         video_frame_.height);
             }
+            sr_cpu_ms_ = std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - fg_sr_started)
+                             .count();
         }
 
         if (!dlss_fg_ || !dlss_fg_->ready()) {
@@ -2697,16 +2805,17 @@ void NextApp::PresentVideo() {
         if (have_shown) {
             rife_last_shown_ = std::move(shown.frame);
             rife_have_shown_ = true;
-            RecordVideoShown();
-        }
-        if (!have_shown && rife_have_shown_) {
-            return;
-        }
-        if (rife_have_shown_ && !rife_last_shown_.rgba.empty()) {
             presenter_->SetSourceFrame(rife_last_shown_.rgba.data(),
                                        rife_last_shown_.width, rife_last_shown_.height,
                                        rife_last_shown_.pq);
             presenter_->SetSourceFinal(false);
+            RecordVideoShown();
+        }
+        if (rife_have_shown_ && !rife_last_shown_.rgba.empty()) {
+            // Redraw the standing frame on every swapchain tick. Skipping the
+            // redraw made the flip chain alternate between the new frame and
+            // the backbuffer contents from earlier in the queue, which reads
+            // as a backwards skip even though the decode cadence was perfect.
             presenter_->Render(now_);
         } else {
             const float background[4] = {0.015f, 0.017f, 0.022f, 1.0f};
@@ -2722,12 +2831,17 @@ void NextApp::PresentVideo() {
         have_frame_ = true;
         new_frame = true;
     }
-    if (!new_frame) {
+    if (!have_frame_ || video_frame_.rgba.empty()) {
+        const float background[4] = {0.015f, 0.017f, 0.022f, 1.0f};
+        presenter_->Clear(background);
         return;
     }
-    if (have_frame_ && !video_frame_.rgba.empty()) {
-        const int width = video_frame_.width;
-        const int height = video_frame_.height;
+
+    const int width = video_frame_.width;
+    const int height = video_frame_.height;
+    if (new_frame) {
+        bool sr_drawn = false;
+        const auto sr_started = std::chrono::steady_clock::now();
         if (EnsureDlssSr(width, height)) {
             brp::media::NvDlssSr::Frame sr_frame;
             std::string detail;
@@ -2737,33 +2851,37 @@ void NextApp::PresentVideo() {
             if (iw != width || ih != height) {
                 sr_scaled_.resize(static_cast<std::size_t>(iw) * ih * 4);
                 brp::media::DownscaleRgba(video_frame_.rgba.data(), width, height,
-                                          sr_scaled_.data(), iw, ih, sr_scale_temp_);
+                                          sr_scaled_.data(), iw, ih,
+                                          sr_scale_temp_);
                 input = sr_scaled_.data();
             }
             if (dlss_sr_->Process(input, iw, ih, sr_frame, detail)) {
                 presenter_->SetSourceView(sr_frame.srv.Get(), dlss_sr_->out_width(),
                                           dlss_sr_->out_height(), video_frame_.pq);
                 presenter_->SetSourceFinal(false);
-                presenter_->Render(now_);
-                if (new_frame) {
-                    RecordVideoShown();
-                }
-                return;
+                sr_drawn = true;
+            } else {
+                dlss_failed_ = true;
+                Toast(L"DLSS SR: " + Widen(detail), true);
             }
-            dlss_failed_ = true;
-            Toast(L"DLSS SR: " + Widen(detail), true);
         }
-        presenter_->SetSourceFrame(video_frame_.rgba.data(), width, height,
-                                   video_frame_.pq);
-        presenter_->SetSourceFinal(false);
-        presenter_->Render(now_);
-        if (new_frame) {
-            RecordVideoShown();
+        if (!sr_drawn) {
+            presenter_->SetSourceFrame(video_frame_.rgba.data(), width, height,
+                                       video_frame_.pq);
+            presenter_->SetSourceFinal(false);
         }
-    } else {
-        const float background[4] = {0.015f, 0.017f, 0.022f, 1.0f};
-        presenter_->Clear(background);
+        sr_cpu_ms_ = std::chrono::duration<double, std::milli>(
+                         std::chrono::steady_clock::now() - sr_started)
+                         .count();
+        RecordVideoShown();
     }
+    // Present the standing frame on every swapchain tick, even when the
+    // decoder had nothing new this interval. Presenting a backbuffer that was
+    // never drawn is not a repeat of the last frame: with a flip chain it is
+    // the frame from two presents ago, so a single missed decode tick visibly
+    // jumps backwards. This redraw is one full-screen pass and keeps both
+    // swapchain buffers on the newest image.
+    presenter_->Render(now_);
 }
 
 bool NextApp::EnsureRife() {

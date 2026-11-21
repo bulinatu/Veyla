@@ -58,3 +58,17 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
 - Live snapshots report the actual decoder; Home uses it.
 - Frame generation remains the 2x official runtime with the SM86 proxy optional
   for 3x-6x, fed from the newest frame, capped at 1440p.
+
+## 1.0.3 - smoothness fix
+
+- Watch now presents exactly once per vblank. The previous 8 ms waitable
+  timeout ran the loop twice per refresh on a 240 Hz display; the extra pass
+  presented a backbuffer that was never drawn, which the flip chain shows as
+  the frame from two presents ago. That was the visible "frame skip".
+- The standing frame is redrawn on every tick, including ticks with no new
+  decoded frame, so both swapchain buffers always contain the newest image.
+- The CPU area downscale used for DLSS render scales was rewritten: 15.9 ms ->
+  4.0 ms for 1080p -> 1688x950.
+- Presentation and decode threads run above normal priority.
+- DLSS-G + SR skips a GPU fence wait when feeding the worker.
+- Diagnostics shows measured scanout, present misses and loop p99.

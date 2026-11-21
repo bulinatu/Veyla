@@ -25,6 +25,11 @@ These are the defects still open in 1.0. They are not hidden behind the UI.
 
 ## Medium impact
 
+- The DLSS-G worker presents in its **own top-level window**, so its output
+  cadence is owned by that process. At 2x from 30 fps (60 fps out) it measures
+  59.9-60.1 fps here; rates that do not divide the monitor refresh (for example
+  90 fps on a 240 Hz panel) cannot be made perfectly even by the parent app.
+  The parent path itself now measures 0 present misses/s.
 - DLSS-G uses the closed NeuralScreen worker with **flat depth and estimated
   optical flow**. Video has no engine motion vectors; fast parallax, HUD edges
   and disocclusions can look "painted". This is a model limitation, not frame

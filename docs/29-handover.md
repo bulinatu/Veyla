@@ -609,3 +609,71 @@ input-to-camera delay.
   `EB3E957FD9FFB6CB22EF927F665794A11FD0B5E222E7AF21D61B09283F525445`
 - Patch 1.0.1 -> 1.0.2 verified: `version=1.0.2`, 0 markers,
   `files_differ=0`.
+
+## 1.0.3 - real-time presentation fix (the "frame skip" pass)
+
+The 1.0.2 decoder and cadence were fine; the presentation loop was not. Two
+faults combined into exactly the "it skips even though the FPS counter is
+right" feeling:
+
+1. **Two presents per vblank.** Watch waited on the swapchain waitable with a
+   fixed 8 ms timeout. On a 240 Hz display one vblank is 4.17 ms, so the loop
+   ran twice per refresh. The second iteration had no new decoded frame and
+   called `Present()` without drawing. With a flip chain that is not a repeat
+   of the current image: it is the backbuffer from two presents ago. Every
+   other vblank showed an older frame.
+2. **No redraw on an empty tick.** Even at 60 Hz the old path returned before
+   `Presenter::Render()` when the decoder had nothing new, so the same
+   stale-backbuffer flip happened on every missed decode tick.
+
+Both are fixed by presenting once per vblank and redrawing the standing frame
+on every tick. The loop now uses `clamp(2000/refresh_hz, 8, 40)` ms as the
+waitable timeout, exactly like the reference app, instead of a fixed 8 ms.
+
+Also in this pass:
+
+- `DownscaleRgba` rewritten from two passes with per-pixel integer divisions
+  and a 14 MB intermediate to a one-pass row accumulator with precomputed spans
+  and reciprocal-table rounding. The 1080p -> 1688x950 (66%) step measured
+  **15.9 ms -> 4.0 ms** of presentation-thread CPU.
+- The presentation thread runs `THREAD_PRIORITY_ABOVE_NORMAL`; the decode
+  thread does the same, so a decoded frame is not delayed by background work.
+- DLSS-G + SR no longer waits for the just-submitted NGX evaluation before the
+  readback. `ReadbackCompleted()` copies the already-finished slot, removing a
+  GPU fence wait from every generated frame (measured 8.5 ms total CPU per
+  source frame for SR -> 1440p readback -> worker submit).
+- Diagnostics and the overlay Performance page now show the **measured scanout
+  rate**, `present misses/s` and the loop p99, so a stutter can be separated
+  from a low frame rate instead of guessed.
+- `BRP_NEXT_FRAME_PROBE=1` prints the same numbers once per second to stderr.
+
+Measured live on the reference machine (RTX 4090, 2560x1440 @ 240 Hz,
+1080p HEVC, DLSS SR Quality 66% -> 1440p):
+
+```
+60 fps source: cadence p50 16.7  p99 16.9 ms | scanout 240.0 Hz | present misses 0/s
+30 fps source: cadence p50 33.3  p99 38.2 ms | scanout 240.0 Hz | present misses 0/s
+SR CPU per frame: 3.9-4.3 ms (was 15.6-16.1 ms)
+DLSS-G worker: 59.9-60.1 fps displayed, 2x, 30 fps source
+```
+
+### 1.0.3 package
+
+- Standalone: `dist/BetterRemotePlay-1.0.3-standalone.zip`
+  SHA256 `C7DE1022CBA3F971EEEF73A10FA2B76CB31542F2A2B30B3DF22AA68E0EFDCE9F`
+- Update **1.0.2 -> 1.0.3**:
+  `dist/BetterRemotePlay-1.0.2-to-1.0.3-update.exe` (1.35 MB)
+  SHA256 `19A072D36FD59EA539564CCB4C707ECC9EFB24F0340F7A5168F1C340C2D15447`
+- Update **1.0.1 -> 1.0.3**:
+  `dist/BetterRemotePlay-1.0.1-to-1.0.3-update.exe` (1.35 MB)
+  SHA256 `249CF705B6B84E3DF287B17B3E7D4E5975454B8253206759CDB011A963CFC37C`
+- Update **1.0.0 -> 1.0.3**:
+  `dist/BetterRemotePlay-1.0.0-to-1.0.3-update.exe` (1.35 MB)
+  SHA256 `C22C0D7CCE105D051A736DE83D6DD3B37C9BA0D56220E6ED458DF301AAB63FC1`
+- `brpnext.exe` SHA256
+  `62F8A3D841E60536FB789D31B95855559C5A60D23028233E47E6D8F619824ACA`
+- `brp.exe` SHA256
+  `7BBAC7002E9F68800FE2ACF29ABDCCD5193A9C57D7D8CC09D12A5BBB7C0CA482`
+- Patch 1.0.2 -> 1.0.3 verified: `version=1.0.3`, 0 markers,
+  `files_differ=0`.
+- Tests: `brp_next_tests` ALL PASS (82).
