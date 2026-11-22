@@ -63,7 +63,7 @@ bool Win32Window::Create(const wchar_t* title, int width, int height) {
     wc.hInstance = instance;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.lpszClassName = kClassName;
-    if (!RegisterClassExW(&wc)) {
+    if (!RegisterClassExW(&wc) && ::GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
         return false;
     }
 
@@ -196,6 +196,19 @@ void Win32Window::ExitFullscreen() {
 void Win32Window::Minimize() {
     if (hwnd_) {
         ShowWindow(hwnd_, SW_MINIMIZE);
+    }
+}
+
+void Win32Window::Restore() {
+    if (hwnd_) {
+        ShowWindow(hwnd_, SW_RESTORE);
+        SetForegroundWindow(hwnd_);
+    }
+}
+
+void Win32Window::Hide() {
+    if (hwnd_) {
+        ShowWindow(hwnd_, SW_HIDE);
     }
 }
 
@@ -359,13 +372,19 @@ LRESULT CALLBACK Win32Window::WndProcThunk(HWND hwnd, UINT msg, WPARAM wparam, L
 LRESULT Win32Window::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     switch (msg) {
         case WM_CLOSE:
+            if (close_handler_) {
+                close_handler_();
+                return 0;
+            }
             DestroyWindow(hwnd);
             return 0;
 
         case WM_DESTROY:
             quit_ = true;
             hwnd_ = nullptr;
-            PostQuitMessage(0);
+            if (quit_on_destroy_) {
+                PostQuitMessage(0);
+            }
             return 0;
 
         case WM_NCCALCSIZE:

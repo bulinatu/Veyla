@@ -39,7 +39,7 @@ constexpr float kTitleHeight = 40.0f;
 constexpr float kSidebar = 224.0f;
 constexpr float kSidebarCollapsed = 68.0f;
 constexpr float kPad = 28.0f;
-constexpr wchar_t kVersion[] = L"1.0.5";
+constexpr wchar_t kVersion[] = L"1.0.6";
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -238,8 +238,11 @@ int NextApp::Run() {
     ::timeBeginPeriod(1);
     window_->Show();
     while (window_->Pump()) {
-        if (window_->ConsumeResize()) {
+        if (!watching_ && window_->ConsumeResize()) {
             Resize();
+        }
+        if (stream_window_ && stream_window_->ConsumeResize()) {
+            ResizeStream();
         }
         now_ = SecondsNow();
         if (watching_) {
@@ -253,7 +256,7 @@ int NextApp::Run() {
                 } else {
                     std::this_thread::sleep_for(std::chrono::milliseconds(4));
                 }
-            } else if (presenter_->frame_waitable()) {
+            } else if (ActivePresenter() && ActivePresenter()->frame_waitable()) {
                 // One iteration per vblank. A short timeout (the previous 8 ms)
                 // made the loop run twice per refresh: the second pass presented
                 // a backbuffer that had not been drawn, so every other vblank
@@ -262,7 +265,7 @@ int NextApp::Run() {
                 const int hz = RefreshHz();
                 const DWORD timeout =
                     static_cast<DWORD>(std::clamp(2000 / hz, 8, 40));
-                ::WaitForSingleObject(presenter_->frame_waitable(), timeout);
+                ::WaitForSingleObject(ActivePresenter()->frame_waitable(), timeout);
             } else {
                 // No waitable swapchain (old driver): Present(1) blocks on the
                 // vblank, so a short sleep is only there to avoid a spin.
@@ -323,15 +326,9 @@ bool NextApp::Init() {
         return false;
     }
     settings_ = host_->Settings();
-    {
-        EnhanceParams enhance;
-        enhance.active = settings_.video.sharpening > 0;
-        enhance.sharpen =
-            std::clamp(settings_.video.sharpening / 100.0f, 0.0f, 1.0f);
-        presenter_->SetEnhance(enhance);
-        if (auto* logger = dynamic_cast<Logger*>(host_->Log())) {
-            logger->SetLevel(settings_.advanced.log_level);
-        }
+    ApplyEnhance();
+    if (auto* logger = dynamic_cast<Logger*>(host_->Log())) {
+        logger->SetLevel(settings_.advanced.log_level);
     }
     system_ = ProbeSystem();
 
@@ -391,6 +388,143 @@ void NextApp::Resize() {
                  width, height, scale_, logical_width_, logical_height_);
 }
 
+void NextApp::ResizeStream() {
+    if (!watching_ || !stream_window_ || !stream_presenter_) {
+        return;
+    }
+    const int width = stream_window_->width();
+    const int height = stream_window_->height();
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    stream_presenter_->Resize(width, height);
+    ApplyTargetTo(stream_presenter_.get());
+    ApplyEnhance();
+    std::fprintf(stderr, "[next] stream window %dx%d\n", width, height);
+}
+
+brp::Win32Window* NextApp::ActiveWindow() const {
+    if (watching_ && stream_window_) {
+        return stream_window_.get();
+    }
+    return window_.get();
+}
+
+brp::Presenter* NextApp::ActivePresenter() const {
+    if (watching_ && stream_presenter_) {
+        return stream_presenter_.get();
+    }
+    return presenter_.get();
+}
+
+void NextApp::ApplyTargetTo(brp::Presenter* presenter) const {
+    if (!presenter) {
+        return;
+    }
+    const int target = settings_.video.render_target;
+    int width = 0;
+    int height = 0;
+    if (target == 1080) {
+        width = 1920;
+        height = 1080;
+    } else if (target == 1440) {
+        width = 2560;
+        height = 1440;
+    } else if (target == 2160) {
+        width = 3840;
+        height = 2160;
+    }
+    presenter->SetUpscaleTarget(width, height);
+}
+
+void NextApp::ApplyEnhance() {
+    EnhanceParams enhance;
+    enhance.active = settings_.video.sharpening > 0;
+    enhance.sharpen = std::clamp(settings_.video.sharpening / 100.0f, 0.0f, 1.0f);
+    if (presenter_) {
+        presenter_->SetEnhance(enhance);
+    }
+    if (stream_presenter_) {
+        stream_presenter_->SetEnhance(enhance);
+    }
+}
+
+bool NextApp::EnsureStreamSurface() {
+    if (!window_) {
+        return false;
+    }
+    if (!stream_window_) {
+        stream_window_ = std::make_unique<brp::Win32Window>();
+        if (!stream_window_->Create(L"BetterRemotePlay Stream", 1600, 900)) {
+            stream_window_.reset();
+            Toast(L"Cannot create the stream window", true);
+            return false;
+        }
+        stream_window_->SetQuitOnDestroy(false);
+        stream_window_->SetCloseHandler([this]() {
+            if (watching_) {
+                ToggleWatch(false);
+            }
+        });
+        stream_window_->SetFrameMetrics(0, 0);
+    }
+    if (!stream_presenter_) {
+        auto presenter = std::make_unique<brp::Presenter>();
+        brp::PresenterConfig config;
+        config.output_width = stream_window_->width();
+        config.output_height = stream_window_->height();
+        config.source_width = 1920;
+        config.source_height = 1080;
+        config.vsync = false;
+        config.allow_tearing = true;
+        config.hdr = false;
+        if (!presenter->Init(stream_window_->hwnd(), config)) {
+            Toast(L"Cannot create the stream presenter", true);
+            return false;
+        }
+        presenter->SetUpscaleMode(2);
+        stream_presenter_ = std::move(presenter);
+        ApplyTargetTo(stream_presenter_.get());
+        ApplyEnhance();
+    }
+
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    if (!::GetMonitorInfoW(::MonitorFromWindow(window_->hwnd(), MONITOR_DEFAULTTONEAREST),
+                           &monitor)) {
+        return false;
+    }
+    if (settings_.display.fullscreen_on_play) {
+        const int width = monitor.rcMonitor.right - monitor.rcMonitor.left;
+        const int height = monitor.rcMonitor.bottom - monitor.rcMonitor.top;
+        ::SetWindowPos(stream_window_->hwnd(), nullptr, monitor.rcMonitor.left,
+                       monitor.rcMonitor.top, width, height,
+                       SWP_NOZORDER | SWP_NOACTIVATE);
+        if (!stream_window_->fullscreen()) {
+            stream_window_->EnterFullscreen();
+        }
+        watch_fullscreen_ = true;
+    } else {
+        if (stream_window_->fullscreen()) {
+            stream_window_->ExitFullscreen();
+        }
+        const int work_w = monitor.rcWork.right - monitor.rcWork.left;
+        const int work_h = monitor.rcWork.bottom - monitor.rcWork.top;
+        const int width = std::min(1600, work_w);
+        const int height = std::min(900, work_h);
+        const int x = monitor.rcWork.left + (work_w - width) / 2;
+        const int y = monitor.rcWork.top + (work_h - height) / 2;
+        ::SetWindowPos(stream_window_->hwnd(), HWND_TOP, x, y, width, height,
+                       SWP_SHOWWINDOW);
+        stream_window_->Show();
+        ::SetForegroundWindow(stream_window_->hwnd());
+        watch_fullscreen_ = false;
+    }
+    stream_window_->SetCursorHidden(true);
+    ResizeStream();
+    return true;
+}
+
 void NextApp::Frame() {
     ProbeIfNeeded(now_);
     if (bench_active_) {
@@ -426,7 +560,8 @@ void NextApp::Frame() {
             }
         }
     }
-    if (presenter_ && presenter_->device_lost()) {
+    if (presenter_ && (presenter_->device_lost() ||
+                       (stream_presenter_ && stream_presenter_->device_lost()))) {
         watching_ = false;
         StopRifeThread();
         StopDlssFg();
@@ -434,7 +569,7 @@ void NextApp::Frame() {
         Toast(L"GPU device lost; restart the app", true);
     }
     HandlePinInput();
-    const bool app_foreground = ::GetForegroundWindow() == window_->hwnd();
+    const bool app_foreground = ::GetForegroundWindow() == ActiveWindow()->hwnd();
     const bool show_overlay =
         watching_ && app_foreground &&
         (settings_.overlay.enabled || overlay_control_);
@@ -468,11 +603,14 @@ void NextApp::Frame() {
         if (presenter_) {
             const double span = stats_at_ >= 0.0 ? std::max(0.001, now_ - stats_at_) : 1.0;
             stats_at_ = now_;
-            const unsigned long long misses = presenter_->present_misses();
+            brp::Presenter* stats_presenter = ActivePresenter();
+            const unsigned long long misses =
+                stats_presenter ? stats_presenter->present_misses() : 0;
             present_misses_rate_ =
                 misses >= present_misses_seen_ ? misses - present_misses_seen_ : 0;
             present_misses_seen_ = misses;
-            const unsigned refresh = presenter_->present_refresh_count();
+            const unsigned refresh =
+                stats_presenter ? stats_presenter->present_refresh_count() : 0;
             const unsigned refreshes = refresh >= present_refresh_seen_
                                            ? refresh - present_refresh_seen_
                                            : 0;
@@ -515,13 +653,13 @@ void NextApp::Render() {
         PresentVideo();
         if (fg_covering_) {
             // The worker's window is the only visible surface. Presenting the
-            // parent here would cost a full-size DWM composition per vblank.
-            window_->set_hand_cursor(false);
+            // stream window here would cost a full-size DWM composition per
+            // vblank.
+            ActiveWindow()->set_hand_cursor(false);
             return;
         }
-        renderer_->BeginFrame();
-        renderer_->EndFrame();
-        presenter_->PresentNow(true);
+        // Video-only surface: no Direct2D pass, no UI composition.
+        ActivePresenter()->PresentNow(true);
         return;
     }
     const float clear[4] = {theme.background.r / 255.0f, theme.background.g / 255.0f,
@@ -602,7 +740,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  1.0.5", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  1.0.6", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -716,7 +854,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"BetterRemotePlay Next 1.0.5",
+        renderer_->Text(L"BetterRemotePlay Next 1.0.6",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -1848,7 +1986,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"BetterRemotePlay Next 1.0.5  |  stable release", L"STABLE", true);
+               L"BetterRemotePlay Next 1.0.6  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -1857,7 +1995,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay Next", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 1.0.5  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 1.0.6  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -1968,13 +2106,7 @@ bool NextApp::Apply() {
     last_apply_scope_ = scope;
     haptic_strength_.store(settings_.controller.rumble_strength);
     ApplyPresenterTarget();
-    {
-        EnhanceParams enhance;
-        enhance.active = settings_.video.sharpening > 0;
-        enhance.sharpen =
-            std::clamp(settings_.video.sharpening / 100.0f, 0.0f, 1.0f);
-        presenter_->SetEnhance(enhance);
-    }
+    ApplyEnhance();
     if (auto* logger = dynamic_cast<Logger*>(host_->Log())) {
         logger->SetLevel(settings_.advanced.log_level);
     }
@@ -2359,7 +2491,7 @@ void NextApp::BuildOverlayView() {
 
     const float opacity = overlay_control_ ? 1.0f : settings_.overlay.opacity;
     overlay_.Update(view, opacity, settings_.overlay.position,
-                    settings_.overlay.scale / 100.0f, window_->hwnd());
+                    settings_.overlay.scale / 100.0f, ActiveWindow()->hwnd());
 }
 void NextApp::HandleOverlayAction(OverlayAction action) {
     const StreamSnapshot snapshot = streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
@@ -2553,8 +2685,12 @@ void NextApp::ProbeIfNeeded(double now) {
 }
 
 void NextApp::HandlePinInput() {
-    const int key = window_->ConsumeKey();
-    const int character = window_->ConsumeChar();
+    brp::Win32Window* input_window = ActiveWindow();
+    if (!input_window) {
+        return;
+    }
+    const int key = input_window->ConsumeKey();
+    const int character = input_window->ConsumeChar();
     if (overlay_control_) {
         if (key == VK_F10) {
             SetOverlayControl(false);
@@ -2660,6 +2796,8 @@ void NextApp::PresentVideo() {
     if (!streaming_) {
         return;
     }
+    brp::Presenter* video = ActivePresenter();
+
     const double content =
         std::clamp(static_cast<double>(settings_.streaming.fps), 24.0, 240.0);
     const bool fg_mode = settings_.ai.frame_generation &&
@@ -2687,19 +2825,19 @@ void NextApp::PresentVideo() {
             // before looking for the window or the first frame never arrives
             // and the window never becomes visible.
             dlss_fg_->Submit(std::move(rgba), width, height);
-            dlss_fg_->FrameWindow(window_->hwnd(), now_);
+            dlss_fg_->FrameWindow(ActiveWindow()->hwnd(), now_);
             RecordVideoShown();
             return true;
         };
 
         auto show_standing = [&]() {
             if (have_frame_ && !video_frame_.rgba.empty()) {
-                presenter_->SetSourceFrame(video_frame_.rgba.data(), video_frame_.width,
+                video->SetSourceFrame(video_frame_.rgba.data(), video_frame_.width,
                                            video_frame_.height, video_frame_.pq);
-                presenter_->SetSourceFinal(false);
-                presenter_->Render(now_);
+                video->SetSourceFinal(false);
+                video->Render(now_);
             } else {
-                presenter_->Clear(background);
+                video->Clear(background);
             }
         };
 
@@ -2762,7 +2900,7 @@ void NextApp::PresentVideo() {
             return;
         }
 
-        dlss_fg_->FrameWindow(window_->hwnd(), now_);
+        dlss_fg_->FrameWindow(ActiveWindow()->hwnd(), now_);
         fg_covering_ = dlss_fg_->covering();
         fg_fps_ = dlss_fg_->displayed_fps();
         fg_actual_mult_ = dlss_fg_->actual_multiplier();
@@ -2815,10 +2953,10 @@ void NextApp::PresentVideo() {
         if (have_shown) {
             rife_last_shown_ = std::move(shown.frame);
             rife_have_shown_ = true;
-            presenter_->SetSourceFrame(rife_last_shown_.rgba.data(),
+            video->SetSourceFrame(rife_last_shown_.rgba.data(),
                                        rife_last_shown_.width, rife_last_shown_.height,
                                        rife_last_shown_.pq);
-            presenter_->SetSourceFinal(false);
+            video->SetSourceFinal(false);
             RecordVideoShown();
         }
         if (rife_have_shown_ && !rife_last_shown_.rgba.empty()) {
@@ -2826,10 +2964,10 @@ void NextApp::PresentVideo() {
             // redraw made the flip chain alternate between the new frame and
             // the backbuffer contents from earlier in the queue, which reads
             // as a backwards skip even though the decode cadence was perfect.
-            presenter_->Render(now_);
+            video->Render(now_);
         } else {
             const float background[4] = {0.015f, 0.017f, 0.022f, 1.0f};
-            presenter_->Clear(background);
+            video->Clear(background);
         }
         return;
     }
@@ -2861,7 +2999,7 @@ void NextApp::PresentVideo() {
     }
     if (!have_frame_ || video_frame_.rgba.empty()) {
         const float background[4] = {0.015f, 0.017f, 0.022f, 1.0f};
-        presenter_->Clear(background);
+        video->Clear(background);
         return;
     }
 
@@ -2884,9 +3022,9 @@ void NextApp::PresentVideo() {
                 input = sr_scaled_.data();
             }
             if (dlss_sr_->Process(input, iw, ih, sr_frame, detail)) {
-                presenter_->SetSourceView(sr_frame.srv.Get(), dlss_sr_->out_width(),
+                video->SetSourceView(sr_frame.srv.Get(), dlss_sr_->out_width(),
                                           dlss_sr_->out_height(), video_frame_.pq);
-                presenter_->SetSourceFinal(false);
+                video->SetSourceFinal(false);
                 sr_drawn = true;
             } else {
                 dlss_failed_ = true;
@@ -2894,9 +3032,9 @@ void NextApp::PresentVideo() {
             }
         }
         if (!sr_drawn) {
-            presenter_->SetSourceFrame(video_frame_.rgba.data(), width, height,
+            video->SetSourceFrame(video_frame_.rgba.data(), width, height,
                                        video_frame_.pq);
-            presenter_->SetSourceFinal(false);
+            video->SetSourceFinal(false);
         }
         sr_cpu_ms_ = std::chrono::duration<double, std::milli>(
                          std::chrono::steady_clock::now() - sr_started)
@@ -2909,7 +3047,7 @@ void NextApp::PresentVideo() {
     // the frame from two presents ago, so a single missed decode tick visibly
     // jumps backwards. This redraw is one full-screen pass and keeps both
     // swapchain buffers on the newest image.
-    presenter_->Render(now_);
+    video->Render(now_);
 }
 
 bool NextApp::EnsureRife() {
@@ -3148,27 +3286,55 @@ void NextApp::ToggleWatch(bool watching) {
         video_intervals_.Reset();
         last_video_shown_at_ = -1.0;
         StopRifeThread();
-        StopDlssFg();
-        dlss_fg_failed_ = false;
-        if (settings_.display.fullscreen_on_play && !window_->fullscreen()) {
-            window_->EnterFullscreen();
-            watch_fullscreen_ = true;
+        // Keep the DLSS-G worker alive between sessions. Starting and stopping
+        // it costs seconds (worker, NGX context and job object); hiding its
+        // window is instant, and the next Watch resumes the same worker.
+        if (dlss_fg_) {
+            dlss_fg_->Hide();
         }
-        window_->SetCursorHidden(true);
-        presenter_->SetUpscaleMode(2);
-        ApplyPresenterTarget();
-        Resize();
+        fg_covering_ = false;
+        fg_fps_ = 0.0;
+        fg_actual_mult_ = 0;
+        dlss_fg_failed_ = false;
+        // DLSS SR is bound to the D3D11 device of the presenter. The stream
+        // window has its own device, so the feature must be created again.
+        if (dlss_sr_) {
+            dlss_sr_->Shutdown();
+        }
+        dlss_ready_ = false;
+        dlss_failed_ = false;
+        dlss_in_w_ = 0;
+        dlss_in_h_ = 0;
+        if (!EnsureStreamSurface()) {
+            watching_ = false;
+            window_->Show();
+            return;
+        }
+        // The app window steps out of the way: the stream window is the only
+        // video surface, with no D2D UI, no menu swapchain and no title bar.
+        window_->SetCursorHidden(false);
+        window_->Minimize();
     } else {
         watching_ = false;
         have_frame_ = false;
         SetOverlayControl(false);
         StopRifeThread();
-        StopDlssFg();
-        if (watch_fullscreen_) {
-            window_->ExitFullscreen();
-            watch_fullscreen_ = false;
+        if (dlss_fg_) {
+            dlss_fg_->Hide();
         }
-        window_->SetCursorHidden(false);
+        fg_covering_ = false;
+        fg_fps_ = 0.0;
+        fg_actual_mult_ = 0;
+        if (stream_window_) {
+            if (stream_window_->fullscreen()) {
+                stream_window_->ExitFullscreen();
+            }
+            stream_window_->SetCursorHidden(false);
+            stream_window_->Hide();
+        }
+        watch_fullscreen_ = false;
+        window_->Restore();
+        window_->Show();
         Resize();
     }
 }
@@ -3334,7 +3500,7 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
         }
     }
     std::string detail;
-    if (!dlss_sr_->Initialize(presenter_->device(), presenter_->context(), in_w,
+    if (!dlss_sr_->Initialize(ActivePresenter()->device(), ActivePresenter()->context(), in_w,
                               in_h, out_w, out_h, 12, quality, detail)) {
         dlss_failed_ = true;
         Toast(L"DLSS SR: " + Widen(detail), true);
@@ -3456,17 +3622,19 @@ void NextApp::DisconnectStream() {
 }
 
 void NextApp::ToggleBorderlessFullscreen() {
+    if (watching_ && stream_window_) {
+        stream_window_->ToggleFullscreen();
+        watch_fullscreen_ = stream_window_->fullscreen();
+        ResizeStream();
+        return;
+    }
     if (!window_) {
         return;
     }
     if (window_->fullscreen()) {
         window_->ExitFullscreen();
-        watch_fullscreen_ = false;
     } else {
         window_->EnterFullscreen();
-        if (watching_) {
-            watch_fullscreen_ = true;
-        }
     }
     Resize();
 }
@@ -3512,23 +3680,14 @@ void NextApp::ApplyPresenterTarget() {
     if (!presenter_) {
         return;
     }
+    // The stream presenter is created later than the main one; apply the target
+    // to it every time so a newly created surface is never left at 1:1.
+    ApplyTargetTo(stream_presenter_.get());
     const int target = settings_.video.render_target;
     if (target == applied_render_target_) {
         return;
     }
-    int width = 0;
-    int height = 0;
-    if (target == 1080) {
-        width = 1920;
-        height = 1080;
-    } else if (target == 1440) {
-        width = 2560;
-        height = 1440;
-    } else if (target == 2160) {
-        width = 3840;
-        height = 2160;
-    }
-    presenter_->SetUpscaleTarget(width, height);
+    ApplyTargetTo(presenter_.get());
     applied_render_target_ = target;
 }
 void NextApp::StartBenchmark() {

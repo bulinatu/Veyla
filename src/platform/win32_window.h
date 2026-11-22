@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <functional>
+
 namespace brp {
 
 struct MouseState {
@@ -58,9 +60,19 @@ public:
 
     // Window commands used by the app's own title bar.
     void Minimize();
+    void Restore();
+    void Hide();
     void ToggleMaximize();
     void Close();
     bool maximized() const;
+
+    // Secondary windows (the dedicated stream window) must not terminate the
+    // process when they are hidden or closed. The handler runs instead of
+    // DestroyWindow; WM_DESTROY only posts WM_QUIT when quit_on_destroy is set.
+    void SetQuitOnDestroy(bool enabled) { quit_on_destroy_ = enabled; }
+    void SetCloseHandler(std::function<void()> handler) {
+        close_handler_ = std::move(handler);
+    }
 
     // Borderless fullscreen: covers the monitor, no frame, no taskbar space.
     // Keeping the WS_POPUP style for the duration avoids a flash of the framed
@@ -112,6 +124,8 @@ private:
     WINDOWPLACEMENT saved_placement_{};
     bool dwm_corners_ = false;
     bool hidden_test_ = false;
+    bool quit_on_destroy_ = true;
+    std::function<void()> close_handler_;
     HMONITOR monitor_ = nullptr;
     int refresh_hz_ = 60;
 };

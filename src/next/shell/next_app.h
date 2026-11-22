@@ -50,6 +50,12 @@ public:
 private:
     bool Init();
     void Resize();
+    void ResizeStream();
+    bool EnsureStreamSurface();
+    brp::Win32Window* ActiveWindow() const;
+    brp::Presenter* ActivePresenter() const;
+    void ApplyTargetTo(brp::Presenter* presenter) const;
+    void ApplyEnhance();
     void Frame();
     void Render();
     void RenderTitleBar(Widgets& widgets);
@@ -111,6 +117,8 @@ private:
 
     std::unique_ptr<brp::Win32Window> window_;
     std::unique_ptr<brp::Presenter> presenter_;
+    std::unique_ptr<brp::Win32Window> stream_window_;
+    std::unique_ptr<brp::Presenter> stream_presenter_;
     std::unique_ptr<brp::ui::Renderer> renderer_;
     std::unique_ptr<AppHost> host_;
     std::shared_ptr<StreamingService> streaming_;

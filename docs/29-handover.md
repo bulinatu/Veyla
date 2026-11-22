@@ -771,3 +771,61 @@ feed: 60 frames/s held, worker 1920x1080, 2x
 - Patch 1.0.4 -> 1.0.5 verified: `version=1.0.5`, 0 markers,
   `files_differ=0`.
 - Tests: `brp_next_tests` ALL PASS (82).
+
+## 1.0.6 - dedicated stream window
+
+The stream no longer shares the application window. Watch now creates a
+separate top-level window with its own D3D11 presenter and swapchain; the main
+application window minimizes for the duration of the session and returns when
+Watch ends.
+
+- `Win32Window` can create more than one window. The class registration is now
+  idempotent (`ERROR_CLASS_ALREADY_EXISTS` is not a failure).
+- The stream window is video-only: no Direct2D pass, no menu swapchain, no
+  custom title bar, borderless fullscreen by default (or a centred window when
+  `fullscreen_on_play` is off).
+- DLSS SR is created on the stream presenter's device. On entering Watch the
+  old feature is shut down and rebuilt for that device.
+- DLSS-G keeps its own presenter window, now fitted to the stream window; the
+  overlay anchors to the stream window and F10/F11/Esc are read from it.
+- Closing the stream window (Alt+F4) exits Watch and restores the main window;
+  it never terminates the process. `Esc` exits Watch, a second `Esc` within
+  2.5 s disconnects.
+- The main window keeps its own presenter/renderer for the menus, so returning
+  from a session does not rebuild the UI.
+
+Verified live: main window minimized (`IsIconic=true`), separate
+`BetterRemotePlay Stream` window visible at 2560x1440, 60 fps source, DLAA,
+DLSS-G 2x; Esc restored the main window and hid the stream window.
+
+### 1.0.6 follow-up details
+
+- Entering Watch creates the stream surface once. Exiting hides it and keeps the
+  DLSS-G worker alive; the next Watch resumes the same worker instead of paying
+  the worker start/stop cost. Re-entry measured ~0.3 s to the stream window.
+- `NvDlssnr::ReadExact()` now waits on the worker process handle as well as the
+  pipe. A terminated worker wakes a blocked `Process()` immediately instead of
+  spinning until the 4 s timeout.
+- `NvDlssnr::Stop()` gives the worker 100 ms and then terminates it; the old
+  5 s wait was the reason leaving Watch could freeze the UI.
+- The stream window closes with Alt+F4/WM_CLOSE by exiting Watch, not by
+  terminating the app (`quit_on_destroy=false` + close handler).
+
+Measured: Watch -> Esc -> main window restored and stream hidden in **339 ms**
+(previous build 2853 ms), with the worker process intentionally left running.
+
+### 1.0.6 package
+
+- Standalone: `dist/BetterRemotePlay-1.0.6-standalone.zip`
+  SHA256 `CD1C965B04877387961E6CB724C4B596C515F7A695B0248F2A830B5484A1F0D9`
+- Update **1.0.5 -> 1.0.6**:
+  `dist/BetterRemotePlay-1.0.5-to-1.0.6-update.exe` (1.35 MB)
+  SHA256 `420AD361C2CAF49CC001107693C9D23B0BD6C7FE69D6BB0AD2E49AE8E265E103`
+- Update **1.0.4 -> 1.0.6**:
+  `dist/BetterRemotePlay-1.0.4-to-1.0.6-update.exe` (1.35 MB)
+  SHA256 `2CF3188F799209BE9FA5E2205FFB89A24BF8C813A365EA90F94A0529FE91930B`
+- `brpnext.exe` SHA256
+  `AB4C033488CC69BE07F4D2D8E074E66D4DF62B04F2C57C10FFE875280BD1D261`
+- Patch 1.0.5 -> 1.0.6 verified: `version=1.0.6`, 0 markers,
+  `files_differ=0`.
+- Tests: `brp_next_tests` ALL PASS (82).

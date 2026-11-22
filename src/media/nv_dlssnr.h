@@ -58,9 +58,7 @@ public:
     void DisablePresent();
 
     // DLSS Frame Generation inside the worker: 0 off, else the multiplier.
-    void SetFrameGeneration(int multiplier) { fg_multiplier_ = multiplier; }
-
-    // FRAME_FLAG_BYPASS: the worker presents the raw frame (FG can still run).
+    void SetFrameGeneration(int multiplier) { fg_multiplier_ = multiplier; }    // FRAME_FLAG_BYPASS: the worker presents the raw frame (FG can still run).
     void SetNeuralBypass(bool bypass) { nr_bypass_ = bypass; }
 
     bool Process(const uint8_t* rgba, int width, int height, std::vector<uint8_t>& out,
@@ -78,6 +76,11 @@ public:
     bool present_mode() const { return present_mode_; }
 
     void Stop();
+
+    // Terminates the child immediately without closing the pipe handles. Safe
+    // to call while another thread is blocked in Process(); the failed read
+    // wakes it, then Stop() can join and release the handles.
+    void TerminateWorker();
 
 private:
     bool ReadExact(void* data, size_t bytes, DWORD timeout_ms, std::string& detail);

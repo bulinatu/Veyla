@@ -134,6 +134,11 @@ void DlssFg::Stop() {
         pending_.reset();
     }
     cv_.notify_all();
+    // Wake a Process() call that is waiting for the worker's reply before
+    // joining the feed thread.
+    if (nr_) {
+        nr_->TerminateWorker();
+    }
     if (thread_.joinable()) {
         thread_.join();
     }

@@ -207,18 +207,32 @@ void NvDlssnr::CloseHandles() {
     }
 }
 
+void NvDlssnr::TerminateWorker() {
+    if (!process_) {
+        return;
+    }
+    if (job_) {
+        ::TerminateJobObject(job_, 1);
+    } else {
+        ::TerminateProcess(process_, 1);
+    }
+}
+
 void NvDlssnr::Stop() {
     if (stdin_write_) {
         ::CloseHandle(stdin_write_);
         stdin_write_ = nullptr;
     }
     if (process_) {
-        if (::WaitForSingleObject(process_, 5000) != WAIT_OBJECT_0) {
+        // A live worker can be inside a long present/NGX call. It has no state
+        // worth saving, so give it a short grace period and then terminate.
+        if (::WaitForSingleObject(process_, 100) != WAIT_OBJECT_0) {
             if (job_) {
                 ::TerminateJobObject(job_, 1);
             } else {
                 ::TerminateProcess(process_, 1);
             }
+            ::WaitForSingleObject(process_, 1000);
         }
     }
     CloseHandles();
@@ -267,9 +281,16 @@ bool NvDlssnr::ReadExact(void* data, size_t bytes, DWORD timeout_ms, std::string
             detail = "NR worker timed out";
             return false;
         }
-        // Wait on the pipe (signaled when bytes are there) instead of Sleep(1):
-        // the default Windows timer granularity is 15.6 ms.
-        ::WaitForSingleObject(stdout_read_, 1);
+        // Wait on the pipe (signaled when bytes are there) and on the process,
+        // so a terminated worker wakes this loop immediately instead of
+        // spinning until the timeout.
+        HANDLE waits[2] = {stdout_read_, process_};
+        const DWORD count = process_ ? 2 : 1;
+        const DWORD wait = ::WaitForMultipleObjects(count, waits, FALSE, 1);
+        if (process_ && wait == WAIT_OBJECT_0 + 1) {
+            detail = "NR worker exited";
+            return false;
+        }
     }
     return true;
 }

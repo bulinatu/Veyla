@@ -91,3 +91,11 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
 - The DLSS-G worker's stderr goes to NUL by default, removing its per-second
   disk write; `BRP_FG_LOG=1` restores the log.
 - GPU/monitor probing no longer runs during Watch.
+
+## 1.0.6 - dedicated stream window
+
+- Streaming now uses its own top-level window and presenter. The main
+  application window minimizes while playing and returns on exit.
+- The stream surface is video-only: no UI composition, no menu swapchain.
+- DLSS SR rebuilds on the stream device; DLSS-G and the overlay follow the
+  stream window. F10/F11/Esc and Alt+F4 are handled there.
