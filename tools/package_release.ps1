@@ -11,7 +11,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $release = Join-Path $root "build\Release"
 $distRoot = Join-Path $root "dist"
 $dest = Join-Path $distRoot "BetterRemotePlay"
-$version = "1.2.0"
+$version = "2.0.0"
 
 function Require-File([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -41,7 +41,11 @@ New-Item -ItemType Directory -Path (Join-Path $dest "fonts") -Force | Out-Null
 
 # --- core executable and FFmpeg runtime ------------------------------------
 Copy-Required (Join-Path $release "brp.exe") $dest
-Copy-Required (Join-Path $release "brpnext.exe") $dest
+# 2.0 shell (Rust/GPUI) plus the headless engine it starts.
+$uiRelease = Join-Path $root "ui\target\release\brpnext-ui.exe"
+Copy-Required $uiRelease (Join-Path $dest "brpnext.exe")
+Copy-Required (Join-Path $release "brpnext-engine.exe") $dest
+Copy-Required (Join-Path $release "brpnext.exe") (Join-Path $dest "brpnext-classic.exe")
 
 # Updater: lets a small patch zip replace only the files that changed.
 $updater = Join-Path $release "brp_update.exe"
@@ -128,137 +132,102 @@ if (Test-Path $rife) {
 }
 # --- readme -----------------------------------------------------------------
 $readme = @"
-BetterRemotePlay $version - standalone build
-=============================================
+BetterRemotePlay 2.0 - standalone build
+=======================================
 
-Run brpnext.exe for the 1.0 application. No installer, no console window, no
-network service. brp.exe remains available as the reference pipeline.
+Run brpnext.exe. No installer, no console window, no background service.
 
-Two executables
----------------
-- brp.exe: the reference product. Full feature set, including DLSS Frame
-  Generation 60 -> 120 and the proven RIFE path.
-- brpnext.exe: the 1.0 release. New UI, live interactive overlay, real
-  streaming, full-window video, audio, controller, DLSS Super Resolution
-  (including DLAA), DLSS-G 2x through the NVIDIA worker, RIFE 30 -> 60, typed
-  settings, profiles and diagnostics.
-  The two apps share the runtimes but keep separate profiles:
-  %APPDATA%\BetterRemotePlay and %APPDATA%\BetterRemotePlayNext.
-
-brpnext quick start
+What changed in 2.0
 -------------------
-1. Run brpnext.exe. It imports the legacy session once, if present.
-2. Console: Discover or enter the address, PSN login / PIN pairing if needed.
-3. Connect. The Watch view opens automatically in its own window; the main app minimizes. Alt+F4 (or F10 > Leave Watch) returns to the app.
-4. AI Video Engine: DLSS SR/DLAA and DLSS-G or RIFE live.
-5. In Watch: F11 borderless fullscreen, F10 side control center, Esc arms
-   disconnect; Esc again disconnects. Alt+F4 leaves Watch.
-6. Settings > Overlay configures the separate compact stats window.
+- New shell built in Rust with GPUI, the GPU-accelerated UI framework the new
+  Discord client is being ported to (same platform family: Rust + GPUI).
+- Inter for text and JetBrains Mono for numbers, at larger sizes than 1.2.
+- Animated violet aurora backdrop, boot animation, and a real connect animation
+  driven by the engine state, not a fake timer.
+- Top navigation with a Basic/Advanced switch. Every setting from 1.2 is here,
+  grouped by concern, and still stored in the same next-settings.json.
+- The stream window and all media work stay in the C++ engine. The shell
+  minimizes itself while you play so it cannot add composition jitter.
+
+Executables
+-----------
+- brpnext.exe: the 2.0 shell (Rust/GPUI). Start here.
+- brpnext-engine.exe: headless stream engine, started by the shell with
+  --engine --bridge-port. Do not run it by hand.
+- brpnext-classic.exe: the previous 1.2 C++ shell, kept as a fallback.
+- brp.exe: the reference product, unchanged.
+
+First run
+---------
+1. Windows may ask to allow brpnext-engine.exe on the network. Click Allow:
+   the console discovery and the video/control streams need it. The shell
+   itself only talks to the engine over 127.0.0.1.
+2. Home shows the configured console. Connect & Play signs in to the PS5 and
+   opens the stream automatically.
+3. Esc arms disconnect (banner), Esc again disconnects. F10 opens the
+   side-docked control center. Alt+F4 leaves the stream.
+
+Connection and pairing
+----------------------
+- The address and credentials are read from
+  %APPDATA%\BetterRemotePlayNext (the same file the 1.2 shell used), so an
+  existing pairing keeps working.
+- If the console is missing: Stream > Address. Pairing uses the 8-digit code
+  from the PS5 under Settings > System > Remote Play > Link Device.
+
+Video and AI
+------------
+- Streaming: resolution, fps, codec, decoder, bitrate, frame buffer, HDR.
+- Video: output resolution, render target, VSync, VRR, colour space,
+  sharpening, display, bit depth, fullscreen on play.
+- Neural: DLSS Super Resolution (including DLAA), temporal history, DLSS
+  Frame Generation 2x/3x/4x, RIFE, occlusion and motion safety, blend.
+- Neural Render is the real depth + optical-flow path. Until its runtime is
+  installed the toggles are labelled and do not claim to be active.
+- DLSS 5 is shown as unavailable: it is 3D-guided and needs the game's depth,
+  motion vectors and camera matrices inside the renderer. A Remote Play stream
+  is an already-rendered 2D image, so it cannot run there.
+
+Audio, controller, overlay
+--------------------------
+- Audio: device, buffer, volume, mute.
+- Controller: DualSense haptics, adaptive triggers, rumble, lightbar, poll rate
+  125/250/500/1000 Hz.
+- Overlay: side (left/right), vertical anchor, scale, opacity, refresh interval,
+  compact mode and which sections are shown. F10 toggles it in the stream.
 
 Requirements
 ------------
 - Windows 10/11 64-bit.
-- A PS5 or PS4 on the same LAN.
-- Optional: an NVIDIA RTX GPU for DLSS Super Resolution, Neural Rendering and
-  DLSS Frame Generation. Without one the app still streams with the regular
-  upscalers.
-
-First run
----------
-1. Open the gear icon (Settings) on Home, then the Connection category.
-2. PSN account: click "Sign in with PSN", sign in in the browser, copy the
-   redirect URL from the blank page, paste it into the app and save. This stores
-   only your PSN account id in %APPDATA%\BetterRemotePlay\session.json.
-3. Console address: usually found automatically at startup. If it is not:
-   Settings > Connection > Address > Find console, press Discover, or enter the
-   IP shown on the PS5 under Settings > Network > View Connection Status.
-   Then Save address.
-4. On the console: Settings > System > Remote Play > Link Device. Type the
-   8-digit code into Pairing PIN, then click Pair.
-5. Go back to Home and click Connect.
+- A PS5 or PS4 on the same LAN with Remote Play enabled.
+- Optional: an NVIDIA RTX GPU for DLSS SR and DLSS Frame Generation. Without
+  one the app still streams and upscales.
 
 Updating
 --------
-- New versions also ship as a small patch (for example
-  BetterRemotePlay-0.4-update.zip). Close the app, extract the patch into this
-  folder and run update.exe. It copies only the changed files, removes obsolete
-  ones, writes version.txt and starts the app again.
-- Use the full standalone zip when you want a clean install.
+- Close the app, extract the patch into this folder and run update.exe. It
+  copies only changed files, removes obsolete ones, writes version.txt and
+  starts the app again.
+- Use the full standalone zip for a clean install.
 
-Your profile is stored in %APPDATA%\BetterRemotePlay\session.json, NOT in this
-folder. You can copy the folder to another PC and it starts with a clean profile.
-This build contains no pairing credentials or personal session data.
+Your profile
+------------
+%APPDATA%\BetterRemotePlay holds the legacy profile and session.json for
+brp.exe. %APPDATA%\BetterRemotePlayNext holds the Next settings. Neither is
+copied into this folder, and this build contains no pairing credentials.
 
-Features and runtimes
----------------------
-- FFmpeg DLLs are included for video/audio decoding.
-- fonts\ contains the Noto Sans / Noto Sans Display pairing (SIL OFL, see
-  fonts\OFL.txt). Sony's SST is proprietary and is not included.
-- nr\native\ contains the NeuralScreen NGX worker used for DLSSNR and the
-  DLSS Frame Generation presenter.
-- nvngx_dlss.dll is the DLSS Super Resolution feature runtime.
-- nvidia-vfx\runtime\ contains the optional legacy NVIDIA VFG runtime. RTX VSR
-  has been removed from the client; DLSS SR/DLAA, DLSS NR and DLSS Frame
-  Generation are the supported neural paths.
-- rife\ holds both RIFE models (Lite 4.25 and Heavy 4.26), the matching CUDA 13
-  runtime (cudart64_13.dll) and an engine built for the GPU of the machine this
-  package came from. Press "Set up RIFE" on Home to fetch TensorRT 10.16
-  automatically (1.9 GB) and build an engine for the local GPU. An engine built
-  for another GPU will not load: delete it and press the button again. The
-  Heavy model builds its own engine the first time it is selected.
-- The app is not affiliated with Sony Interactive Entertainment. No Sony
-  artwork, code, keys or fonts are included.
-
-Giving this to someone else
----------------------------
-- Copy the whole folder. Nothing is installed, no admin rights, no service.
-  The Visual C++ runtime and FFmpeg DLLs are already inside.
-- Each person signs in to PSN and pairs their own console; session.json is not
-  included and holds your own credentials, so keep it in %APPDATA%.
-- NVIDIA RTX GPU + a current driver are needed for DLSS SR, Neural Rendering
-  and DLSS Frame Generation. Without one the app still streams and upscales
-  with FSR1/Lanczos, and RIFE is unavailable.
-- RIFE is optional. "Set up RIFE" on Home downloads TensorRT 10.16 from NVIDIA
-  and builds the engine for that PC (about 1.9 GB download, 3 GB free during
-  setup, 2-4 minutes). If a TensorRT 10.16 install already exists, it is reused.
-  Without it the app falls back to NVIDIA frame generation and says so.
-- The console must be on the same LAN with Remote Play enabled.
-
-Settings worth knowing
-----------------------
-- Settings > Color: sharpening plus exposure, contrast, highlights, shadows,
-  saturation, vibrance, hue, temperature, tint and gamma. The in-stream overlay
-  (Tab) has the most used controls and applies them live.
-- Settings > Performance > Launch presets: "Launch" is DLSS SR Ultra Quality +
-  DLSS Frame Generation 2x at 1440p; also SR only and Low latency. Presets are
-  saved and applied at the start of the next session (reconnect), never while
-  streaming.
-- Home, top right: "Set up RIFE". One click: finds a TensorRT 10.16 install or
-  downloads the official 1.9 GB Windows zip, extracts it under rife\tensorrt,
-  downloads the RIFE model, and builds the engine for this GPU. Needs about
-  6 GB free during setup (the zip plus the extracted SDK). Without TensorRT,
-  RIFE stays unavailable and NVIDIA
-  frame generation is used.
-- Settings > Upscaling > Interpolation engine: NVIDIA DLSS FG (fast) or RIFE
-  (TensorRT). RIFE model: Lite 4.25 (fast, default) or Heavy 4.26 (about twice
-  the GPU time, cleaner on fast motion). RIFE output is 60 fps (one generated
-  frame per pair, so a 30 fps game plays at 60) or pass-through. With the NVIDIA
-  engine, 60 fps content becomes 120 (DLSS-G is 2x); 30 fps content becomes 60.
-  The output frame rate control only appears for that engine.
-- Health log: %APPDATA%\BetterRemotePlay\health.log, one line every 30 seconds
-  (worker fps, frame timing, source cadence, drops, decode, audio, handles,
-  VRAM). Rotates at 2 MB.
-- DualSense: native HID works over USB and Bluetooth, including rumble, LEDs
-  and adaptive triggers. On Bluetooth a 250 Hz report rate is plenty; 500/1000
-  Hz are for USB.
+Runtimes
+--------
+- FFmpeg DLLs for video/audio decoding.
+- fonts\ for the engine's own text rendering.
+- nr\native\ for the NeuralScreen NGX worker (DLSS NR and DLSS-G presenter).
+- nvngx_dlss.dll for DLSS Super Resolution.
+- The app is not affiliated with Sony Interactive Entertainment.
 
 Credits
 -------
-- Chiaki/chiaki-ng session layer and PSN OAuth client constants (GPL).
-- NVIDIA NGX / DLSS / VFX runtimes, subject to NVIDIA's terms.
-- NeuralScreen DLSSNR/DLSSG worker components.
-- FFmpeg (https://ffmpeg.org), GPL build by gyan.dev.
-- Noto Sans, SIL Open Font License 1.1.
+GPUI by Zed Industries (Apache-2.0). Inter and JetBrains Mono under the SIL
+Open Font License.
 "@
 Set-Content -LiteralPath (Join-Path $dest "README.txt") -Value $readme -Encoding UTF8
 

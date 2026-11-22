@@ -63,3 +63,6 @@ third_party/neuralscreen/
 
 # User-provided mod archives (not redistributed)
 *.rar
+
+# Rust build output
+ui/target/

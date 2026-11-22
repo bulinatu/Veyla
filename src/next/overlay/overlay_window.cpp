@@ -34,10 +34,13 @@ void FillRound(HDC dc, const RECT& rect, int radius, COLORREF fill, COLORREF bor
 
 void DrawTextLine(HDC dc, const std::wstring& text, const RECT& rect, int size,
                   int weight, COLORREF color, UINT flags = DT_LEFT) {
-    HFONT font = ::CreateFontW(-size, 0, 0, 0, weight, FALSE, FALSE, FALSE,
+    // Slightly larger than the old shell and the same family as the GPUI
+    // shell's Windows fallback, so the in-stream panel reads at TV distance.
+    const int height = size < 16 ? size + 1 : size;
+    HFONT font = ::CreateFontW(-height, 0, 0, 0, weight, FALSE, FALSE, FALSE,
                                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                                CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                               DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+                               DEFAULT_PITCH | FF_SWISS, L"Segoe UI Variable Text");
     const HGDIOBJ old = ::SelectObject(dc, font);
     ::SetTextColor(dc, color);
     RECT target = rect;

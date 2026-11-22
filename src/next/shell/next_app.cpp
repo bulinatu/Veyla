@@ -48,7 +48,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"1.2.0";
+constexpr wchar_t kVersion[] = L"2.0.0";
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -224,7 +224,8 @@ bool PickFile(HWND owner, bool save, std::wstring& path, const wchar_t* filter) 
 
 }  // namespace
 
-NextApp::NextApp() {
+NextApp::NextApp(bool engine_mode, unsigned short bridge_port)
+    : engine_mode_(engine_mode), bridge_port_(bridge_port) {
     overlay_.SetActionHandler(
         [this](OverlayAction action) { HandleOverlayAction(action); });
     paths_ = AppPaths::Default();
@@ -248,7 +249,15 @@ int NextApp::Run() {
     g_hook_app = this;
     keyboard_hook_ = ::SetWindowsHookExW(WH_KEYBOARD_LL, &NextApp::LowLevelKeyboardProc,
                                               ::GetModuleHandleW(nullptr), 0);
-    window_->Show();
+    if (engine_mode_) {
+        // Headless shell: the Rust/GPUI window is the only UI. Start the
+        // bridge and keep the legacy window hidden but alive for its message
+        // pump, presenters and the stream surface.
+        bridge_.Start(bridge_port_);
+        ::ShowWindow(window_->hwnd(), SW_HIDE);
+    } else {
+        window_->Show();
+    }
     while (window_->Pump()) {
         if (!watching_ && window_->ConsumeResize()) {
             Resize();
@@ -290,6 +299,7 @@ int NextApp::Run() {
         }
     }
     ::timeEndPeriod(1);
+    bridge_.Stop();
     if (keyboard_hook_) {
         ::UnhookWindowsHookEx(keyboard_hook_);
         keyboard_hook_ = nullptr;
@@ -580,6 +590,24 @@ bool NextApp::EnsureStreamSurface() {
 }
 
 void NextApp::Frame() {
+    static int frame_probe = 0;
+    if (engine_mode_ && (frame_probe++ % 300) == 0) {
+        FILE* dbg = nullptr;
+        if (fopen_s(&dbg, "C:\\Users\\Cosmin\\Desktop\\BetterRemotePlay\\build\\engine-frame.log", "a") == 0 && dbg) {
+            std::fprintf(dbg, "frame engine_mode=%d watching=%d now=%.2f\\n", engine_mode_ ? 1 : 0, watching_ ? 1 : 0, now_);
+            std::fclose(dbg);
+        }
+    }
+    if (engine_mode_) {
+        std::string command;
+        while (bridge_.TakeCommand(command)) {
+            HandleBridgeCommand(command);
+        }
+        if (bridge_status_at_ < 0.0 || now_ - bridge_status_at_ >= 0.25) {
+            PublishBridgeStatus();
+            bridge_status_at_ = now_;
+        }
+    }
     ProbeIfNeeded(now_);
     if (bench_active_) {
         TickBenchmark();
@@ -704,7 +732,9 @@ void NextApp::Frame() {
             }
         }
     }
-    Render();
+    if (!engine_mode_ || watching_) {
+        Render();
+    }
     const double delta = std::max(0.0, now_ - last_frame_);
     last_frame_ = now_;
     if (delta > 0.0 && delta < 1.0) {
@@ -845,7 +875,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  1.2.0", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  2.0.0", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -959,7 +989,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"BetterRemotePlay Next 1.2.0",
+        renderer_->Text(L"BetterRemotePlay Next 2.0.0",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -2104,7 +2134,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"BetterRemotePlay Next 1.2.0  |  stable release", L"STABLE", true);
+               L"BetterRemotePlay Next 2.0.0  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -2113,7 +2143,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay Next", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 1.2.0  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 2.0.0  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -3661,7 +3691,9 @@ void NextApp::ToggleWatch(bool watching) {
         HideNvidiaOverlay();
         if (!EnsureStreamSurface()) {
             watching_ = false;
-            window_->Show();
+            if (!engine_mode_) {
+                window_->Show();
+            }
             return;
         }
         // The app window steps out of the way: the stream window is the only
@@ -3688,7 +3720,9 @@ void NextApp::ToggleWatch(bool watching) {
         }
         watch_fullscreen_ = false;
         window_->Restore();
-        window_->Show();
+        if (!engine_mode_) {
+            window_->Show();
+        }
         Resize();
     }
 }
@@ -3983,6 +4017,128 @@ void NextApp::DisconnectStream() {
     stream_restart_pending_ = false;
     esc_at_ = -1.0;
     Toast(L"Disconnected");
+}
+
+void NextApp::HandleBridgeCommand(const std::string& command) {
+    if (command == "connect") {
+        if (!streaming_ || !streaming_->Connected()) {
+            ConnectStream();
+        }
+    } else if (command == "watch") {
+        if (streaming_ && streaming_->Connected() && !watching_) {
+            ToggleWatch(true);
+        }
+    } else if (command == "stop_watch") {
+        if (watching_) {
+            ToggleWatch(false);
+        }
+    } else if (command == "disconnect") {
+        DisconnectStream();
+    } else if (command == "apply") {
+        ReloadSettingsFromDisk();
+    } else if (command == "shutdown") {
+        if (window_) {
+            ::PostMessageW(window_->hwnd(), WM_CLOSE, 0, 0);
+        }
+    } else if (command == "fullscreen") {
+        ToggleBorderlessFullscreen();
+    } else if (command == "ping") {
+        if (window_) {
+            bridge_.Publish(std::string("S {\"state\":\"pong\"}"));
+        }
+    }
+}
+
+void NextApp::ReloadSettingsFromDisk() {
+    AppSettings fresh;
+    std::vector<std::string> warnings;
+    if (host_->Config() && host_->Config()->Load(fresh, warnings).ok()) {
+        settings_ = fresh;
+        Apply();
+    }
+}
+
+void NextApp::PublishBridgeStatus() {
+    const StreamSnapshot stream = streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
+    const bool streaming_now = watching_ && stream.connected;
+    std::string json;
+    json.reserve(512);
+    json += "S {";
+    auto text = [&json](const char* key, const std::string& value, bool comma) {
+        json += '"';
+        json += key;
+        json += "\":\"";
+        for (const char ch : value) {
+            if (ch == '"' || ch == '\\') {
+                json += '\\';
+                json += ch;
+            } else if (static_cast<unsigned char>(ch) >= 0x20) {
+                json += ch;
+            } else {
+                json += ' ';
+            }
+        }
+        json += '"';
+        if (comma) {
+            json += ',';
+        }
+    };
+    auto number = [&json](const char* key, double value, bool comma) {
+        char buffer[64];
+        std::snprintf(buffer, sizeof(buffer), "%s\":%.3f", key, value);
+        json += '"';
+        json += buffer;
+        if (comma) {
+            json += ',';
+        }
+    };
+    auto integer = [&json](const char* key, long long value, bool comma) {
+        char buffer[64];
+        std::snprintf(buffer, sizeof(buffer), "%s\":%lld", key, value);
+        json += '"';
+        json += buffer;
+        if (comma) {
+            json += ',';
+        }
+    };
+    auto flag = [&json](const char* key, bool value, bool comma) {
+        json += '"';
+        json += key;
+        json += value ? "\":true" : "\":false";
+        if (comma) {
+            json += ',';
+        }
+    };
+
+    text("state", stream.state.empty() ? "idle" : stream.state, true);
+    flag("connected", stream.connected, true);
+    flag("streaming", streaming_now, true);
+    flag("connecting", stream.connecting, true);
+    text("message", stream.message, true);
+    text("console_name", settings_.console.name, true);
+    text("codec", stream.codec, true);
+    integer("width", stream.source_width, true);
+    integer("height", stream.source_height, true);
+    number("fps", stream.source_fps, true);
+    number("bitrate", stream.bitrate_kbps, true);
+    number("loss", stream.loss_percent, true);
+    number("jitter", stream.jitter_ms, true);
+    number("decode_ms", stream.decode_ms, true);
+    integer("drops", stream.decoder_drops, true);
+    number("cadence_p50", cadence_p50_, true);
+    number("cadence_p99", cadence_p99_, true);
+    number("scanout_hz", present_refresh_hz_, true);
+    number("present_misses", static_cast<double>(present_misses_rate_), true);
+    number("shown_fps", static_cast<double>(display_rate_), true);
+    flag("restart_pending", stream_restart_pending_, true);
+    number("sr_ms", dlss_sr_ ? dlss_sr_->last_ms() : 0.0, true);
+    number("fg_ms", 0.0, true);
+    integer("generated", static_cast<long long>(rife_generated_.load()), true);
+    text("gpu", system_.gpu.name, true);
+    text("driver", system_.gpu.driver, true);
+    integer("vram_mb", static_cast<long long>(system_.gpu.vram_mb), false);
+    json += '}';
+    bridge_.Publish(std::move(json));
 }
 
 void NextApp::ToggleBorderlessFullscreen() {

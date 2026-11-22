@@ -143,3 +143,19 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
   own their controls.
 - The overlay is a side-docked panel with Stream/Audio/Pad tabs and restart
   badges; the NVIDIA App overlay is hidden while streaming.
+
+## 2.0.0
+
+- New Rust/GPUI shell (same platform family as the next Discord client), with
+  a top-tab layout, Basic/Advanced switch, Inter + JetBrains Mono at larger
+  sizes, animated aurora background, boot splash and a state-driven connect
+  animation.
+- The C++ engine now runs headless (`--engine --bridge-port`) and is driven
+  over loopback TCP; the stream window, audio, input, DLSS and the in-stream
+  overlay are unchanged.
+- The shell minimizes while streaming, removing its animated surface from DWM
+  composition, and the engine skips its hidden Direct2D pass when headless.
+- Live telemetry now includes frame cadence p50/p99, scanout, present misses
+  and shown fps.
+- DLSS 5 is documented as unavailable for a 2D stream; Neural Render is the
+  real depth + optical-flow path.

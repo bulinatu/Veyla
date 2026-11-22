@@ -1,0 +1,18 @@
+[package]
+name = "brpnext-ui"
+version = "2.0.0"
+edition = "2021"
+rust-version = "1.90"
+description = "BetterRemotePlay Next - GPUI shell"
+publish = false
+
+[dependencies]
+gpui = "0.2.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

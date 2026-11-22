@@ -1045,3 +1045,67 @@ needs a good host (DSX reaches 1000 Hz).
   `files_differ=0`.
 - Tests: `brp_next_tests` ALL PASS (82).
 - Final profile: 30 fps, frame buffer 1, DLAA, DLSS-G 2x, controller 1000 Hz.
+
+## 2.0.0 - Rust/GPUI shell, headless C++ engine
+
+- **Platform move.** The shell is now Rust + GPUI (`ui/`, crate `brpnext-ui`),
+  the same Rust/GPU-accelerated UI family the new Discord client is being
+  ported to. Streaming, decode, audio, input, DLSS and the in-stream overlay
+  stay in C++: correctness and pacing are unchanged, only the front-end is new.
+- **Process split.** `brpnext.exe` (shell) spawns `brpnext-engine.exe --engine
+  --bridge-port N`. The engine hides its legacy window, keeps its message pump,
+  stream window and overlay, and talks to the shell over a loopback TCP line
+  protocol (port chosen by the shell, so no fixed port and no firewall prompt
+  for the bridge). `brpnext-classic.exe` keeps the 1.2 C++ shell as a fallback.
+- **Single settings file.** The shell reads and writes the same flat
+  `next-settings.json` (dotted keys). Unknown keys are preserved, so the engine
+  never loses a setting the shell does not know about.
+- **UI.** Top tabs (Home, Stream, Video, Audio, Controller, Neural, Overlay,
+  Advanced), Basic/Advanced switch, Inter + JetBrains Mono at 15/13.5/11.5 px,
+  animated violet aurora backdrop, boot splash and a connect overlay driven by
+  real engine state. Stream presets write real settings bundles.
+- **Pacing.** The shell minimizes itself while `streaming` is true, so the
+  animated shell stops driving DWM composition behind the fullscreen stream
+  window. That removes a second animating surface from the last-percent judder
+  budget. The engine skips Direct2D rendering entirely when it is headless and
+  not watching.
+- **Telemetry.** Status snapshots now carry cadence p50/p99, scanout, present
+  misses, shown fps, decode, loss, jitter and SR time; Home shows them live.
+- **DLSS 5.** Displayed as unavailable with the reason (3D-guided; needs depth,
+  motion vectors and camera matrices from the renderer). The Neural Render
+  section is the honest path: monocular depth + optical flow + temporal pass,
+  to be wired to TensorRT/NVOFA in the next milestone.
+- **Overlay.** Font family moved to Segoe UI Variable Text with slightly larger
+  sizes; colours already match the shell.
+- **Neural Render is marked Preview.** The depth/optical-flow runtime is not
+  wired yet, so the page states that the values are stored for the next
+  milestone instead of pretending the toggles do something.
+
+### 2.0.0 notes
+
+- Bridge: `S <json>` status at 4 Hz, commands `connect`, `watch`,
+  `stop_watch`, `disconnect`, `apply`, `fullscreen`, `shutdown`.
+- `BRP_BRIDGE_LOG=1` enables `%APPDATA%\BetterRemotePlayNext\bridge.log`.
+- The shell logs to `%APPDATA%\BetterRemotePlayNext\ui.log`.
+- Engine path resolution: `BRP_ENGINE` env override, then
+  `brpnext-engine.exe` next to the shell, then the development build tree.
+
+### 2.0.0 package
+
+- Standalone: `dist/BetterRemotePlay-2.0.0-standalone.zip` (921.6 MB)
+  SHA256 `BFFB1AADFEAA487A626CEBBAED3D32693F1098B7BFD48385C5B08062E8DED5CD`
+- Update **1.2.0 -> 2.0.0**: `dist/BetterRemotePlay-1.2.0-to-2.0.0-update.exe`
+  (5.18 MB) SHA256
+  `5AC98C864FA1D32A10E90FCB7A2E6C82F6980C2D426A2CACCFB1E839957BA81E`
+- `brpnext.exe` (Rust/GPUI shell)
+  `0D6834E52DA3DB951719DF7AFB7CEA40629D8319AE82EADFFABFC14E90770FF2`
+- `brpnext-engine.exe` (headless C++ engine)
+  `79B91897F7BCBAD72A351F840F3AF25D5A10777FDA56ECA297CC0F96E0B07725`
+- `brpnext-classic.exe` (1.2 C++ shell)
+  `3956F223EC26C83D416ECE09EC0076A0C06CACD01C22AD7B24164E757A6F45DA`
+- Patch 1.2.0 -> 2.0.0 verified: `version=2.0.0`, 0 markers,
+  `files_differ=0`. Added 2 files (engine, classic), changed 2 (shell, version).
+- Packaged smoke test: `dist/BetterRemotePlay/brpnext.exe` starts
+  `brpnext-engine.exe --engine --bridge-port`, the bridge connects, the
+  engine reaches `connecting` and opens the stream window.
+- Tests: `brp_next_tests` ALL PASS (82).

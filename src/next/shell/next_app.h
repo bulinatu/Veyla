@@ -9,6 +9,7 @@
 #include "overlay/overlay_window.h"
 #include "platform/gamepad.h"
 #include "platform/system_info.h"
+#include "shell/ui_bridge.h"
 #include "ui/theme.h"
 #include "ui/widgets.h"
 
@@ -43,7 +44,7 @@ class DlssFg;
 
 class NextApp {
 public:
-    NextApp();
+    explicit NextApp(bool engine_mode = false, unsigned short bridge_port = 0);
     ~NextApp();
 
     int Run();
@@ -179,6 +180,15 @@ private:
     int fg_actual_mult_ = 0;
     double fg_fps_ = 0.0;
     unsigned long long fg_dropped_ = 0;
+    // Engine mode: no legacy shell window, commands from the Rust shell over
+    // the named pipe. The stream window and the in-game overlay stay here.
+    bool engine_mode_ = false;
+    unsigned short bridge_port_ = 0;
+    UiBridge bridge_;
+    double bridge_status_at_ = -1.0;
+    void HandleBridgeCommand(const std::string& command);
+    void PublishBridgeStatus();
+    void ReloadSettingsFromDisk();
     OverlayWindow overlay_;
     double last_overlay_update_ = -1.0;
     bool overlay_control_ = false;
