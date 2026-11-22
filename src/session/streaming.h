@@ -66,6 +66,7 @@ public:
     // the frame generator so it wakes on a frame instead of polling.
     bool WaitForFrame(int timeout_ms);
     int buffer_target() const { return buffer_target_.load(); }
+    int queue_depth();
     int buffer_drops() const { return buffer_drops_.load(); }
     int video_queue_drops() const { return video_queue_drops_.load(); }
 

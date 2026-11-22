@@ -275,7 +275,12 @@ int NextApp::Run() {
                 // decoder queues one, and the timeout only keeps the overlay
                 // and window fit alive when the source is idle.
                 if (streaming_) {
+                    // WaitForFrame returns at once while frames are queued, so
+                    // without a pause the loop spins until the next slot is due.
+                    // The timer is at 1 ms (timeBeginPeriod), so this adds at most
+                    // about one millisecond of pickup jitter.
                     streaming_->WaitForFrame(4);
+                    std::this_thread::sleep_for(std::chrono::microseconds(500));
                 } else {
                     std::this_thread::sleep_for(std::chrono::milliseconds(4));
                 }
@@ -772,14 +777,15 @@ void NextApp::Frame() {
                              "p99 %.1f  |  scanout %.1f Hz  |  present misses %llu  |  "
                              "shown %d  |  holds 7:%u 8:%u 9:%u 10:%u 16:%u  |  sr submit %.2f ms  |  "
                              "sr cpu %.2f ms  |  dec %.2f/%.2f ms  |  "
-                             "net jitter %.2f ms loss %.2f%% drops %d\n",
+                             "net jitter %.2f ms loss %.2f%% drops %d  |  queue %d  trim %+.3f%%\n",
                              loop_intervals_.Percentile(0.50), loop_p99_,
                              loop_intervals_.Max(), cadence_p50_, cadence_p99_,
                              present_refresh_hz_, present_misses_rate_, display_rate_,
                              h7, h8, h9, h10, h16,
                              dlss_sr_ ? dlss_sr_->last_ms() : 0.0, sr_cpu_ms_,
                              probe.decode_ms, probe.decode_ms_max,
-                             probe.jitter_ms, probe.loss_percent, probe.decoder_drops);
+                             probe.jitter_ms, probe.loss_percent, probe.decoder_drops,
+                             playout_depth_, playout_trim_ * 100.0);
             }
         }
     }
@@ -3212,9 +3218,15 @@ bool NextApp::PullFrame(media::DecodedFrame& out) {
     // own tick grid. The decoded queue is primed and keeps one spare, so a
     // frame that arrives a few milliseconds late is covered instead of
     // shifting the whole cadence.
-    const double source_fps =
+    const double nominal_fps =
         std::clamp(static_cast<double>(settings_.streaming.fps), 24.0, 240.0);
-    video_phase_ += source_fps / static_cast<double>(RefreshHz());
+    // Phase advances with real elapsed time, not with the number of loop
+    // iterations: the loop runs at ~244 Hz on a 240 Hz panel, so counting calls
+    // ran every frame about 2 % fast and drained the queue.
+    const double source_fps = nominal_fps * (1.0 + playout_trim_);
+    const double elapsed = playout_clock_ < 0.0 ? 0.0 : std::clamp(now_ - playout_clock_, 0.0, 0.1);
+    playout_clock_ = now_;
+    video_phase_ += elapsed * source_fps;
     if (video_phase_ < 1.0 - 1e-9) {
         if (video_phase_ < 0.0) {
             video_phase_ = 0.0;
@@ -3222,7 +3234,22 @@ bool NextApp::PullFrame(media::DecodedFrame& out) {
         return false;
     }
     video_phase_ -= 1.0;
-    return streaming_->TakeFrame(out, frame_buffer, false);
+    if (video_phase_ > 1.0) {
+        // A long stall must not turn into a fast-forward burst: one frame per call.
+        video_phase_ = 1.0;
+    }
+    if (!streaming_->TakeFrame(out, frame_buffer, false)) {
+        return false;
+    }
+    // Once per frame: the queue error moves the consumer rate toward the
+    // producer's real rate (29.7 fps streams used to drain and refill the
+    // buffer, which read as repeats and skips). Clamped to +-2 %.
+    playout_depth_ = streaming_->QueueDepth();
+    const double target = static_cast<double>(streaming_->BufferTarget());
+    const double error = static_cast<double>(playout_depth_) - target;
+    playout_integral_ = std::clamp(playout_integral_ + 0.00005 * error, -0.02, 0.02);
+    playout_trim_ = std::clamp(0.001 * error + playout_integral_, -0.02, 0.02);
+    return true;
 }
 
 void NextApp::PresentVideo() {

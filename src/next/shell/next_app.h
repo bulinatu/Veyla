@@ -161,6 +161,12 @@ private:
     media::DecodedFrame video_frame_;
     bool have_frame_ = false;
     double video_phase_ = 0.0;
+    // Playout clock trim: the consumer follows the producer's real rate. A
+    // proportional-integral loop on the decoded queue depth keeps it at target.
+    double playout_trim_ = 0.0;
+    double playout_integral_ = 0.0;
+    double playout_clock_ = -1.0;
+    int playout_depth_ = 0;
     bool watching_ = false;
     bool watch_on_connect_ = false;
     bool watch_fullscreen_ = false;

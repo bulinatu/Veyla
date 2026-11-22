@@ -438,6 +438,14 @@ bool StreamingService::WaitForFrame(int timeout_ms) {
     return streaming_.WaitForFrame(timeout_ms);
 }
 
+int StreamingService::QueueDepth() {
+    return streaming_.queue_depth();
+}
+
+int StreamingService::BufferTarget() const {
+    return streaming_.buffer_target();
+}
+
 void StreamingService::SendController(const brp::PadState& state) {
     streaming_.SendController(state);
 }

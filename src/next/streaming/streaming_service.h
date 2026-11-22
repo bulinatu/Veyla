@@ -59,6 +59,8 @@ public:
     bool TakeNewestFrame(media::DecodedFrame& out);
     bool TakeFrameOrdered(media::DecodedFrame& out, int max_queue);
     bool WaitForFrame(int timeout_ms);
+    int QueueDepth();
+    int BufferTarget() const;
     void SendController(const brp::PadState& state);
     brp::PadConsoleFeedback Feedback() const;
     bool TakeHaptics(std::uint16_t& left, std::uint16_t& right);

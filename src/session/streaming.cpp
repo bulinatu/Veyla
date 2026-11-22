@@ -718,6 +718,11 @@ bool Streaming::WaitForFrame(int timeout_ms) {
     return frame_cv_.wait_for(lock, std::chrono::milliseconds(std::max(1, timeout_ms)),
                               [this]() { return !frames_.empty(); });
 }
+int Streaming::queue_depth() {
+    std::lock_guard<std::mutex> lock(frame_mutex_);
+    return static_cast<int>(frames_.size());
+}
+
 bool Streaming::TakeNewestFrame(media::DecodedFrame& out) {
     std::lock_guard<std::mutex> lock(frame_mutex_);
     if (frames_.empty()) {
@@ -834,7 +839,7 @@ bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, bool paced) {
     // Bound latency: drop at most one frame per presentation tick, and only
     // when the queue is a full frame past target. One extra frame of queue is
     // normal decode jitter; dropping on it is what read as a skip.
-    if (static_cast<int>(frames_.size()) > wanted + 1) {
+    if (static_cast<int>(frames_.size()) > wanted + 2) {
         frames_.pop_front();
         buffer_drops_.fetch_add(1);
     }
