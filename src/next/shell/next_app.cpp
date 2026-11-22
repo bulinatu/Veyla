@@ -39,7 +39,8 @@ constexpr float kTitleHeight = 40.0f;
 constexpr float kSidebar = 224.0f;
 constexpr float kSidebarCollapsed = 68.0f;
 constexpr float kPad = 28.0f;
-constexpr wchar_t kVersion[] = L"1.0.8";
+NextApp* g_hook_app = nullptr;
+constexpr wchar_t kVersion[] = L"1.0.9";
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -236,6 +237,9 @@ int NextApp::Run() {
     // decode or the OS. The reference app does the same.
     ::SetThreadPriority(::GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
     ::timeBeginPeriod(1);
+    g_hook_app = this;
+    keyboard_hook_ = ::SetWindowsHookExW(WH_KEYBOARD_LL, &NextApp::LowLevelKeyboardProc,
+                                              ::GetModuleHandleW(nullptr), 0);
     window_->Show();
     while (window_->Pump()) {
         if (!watching_ && window_->ConsumeResize()) {
@@ -278,6 +282,11 @@ int NextApp::Run() {
         }
     }
     ::timeEndPeriod(1);
+    if (keyboard_hook_) {
+        ::UnhookWindowsHookEx(keyboard_hook_);
+        keyboard_hook_ = nullptr;
+    }
+    g_hook_app = nullptr;
     StopPadThread();
     StopRifeThread();
     StopDlssFg();
@@ -291,6 +300,41 @@ int NextApp::Run() {
     return 0;
 }
 
+LRESULT CALLBACK NextApp::LowLevelKeyboardProc(int code, WPARAM wparam, LPARAM lparam) {
+    if (code == HC_ACTION && (wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN)) {
+        const auto* info = reinterpret_cast<KBDLLHOOKSTRUCT*>(lparam);
+        if (info && info->vkCode == VK_ESCAPE && g_hook_app &&
+            g_hook_app->ShouldCaptureEsc()) {
+            if (brp::Win32Window* window = g_hook_app->ActiveWindow()) {
+                window->InjectKey(VK_ESCAPE);
+            }
+            return 1;
+        }
+    }
+    return ::CallNextHookEx(nullptr, code, wparam, lparam);
+}
+
+bool NextApp::ShouldCaptureEsc() const {
+    // Only steal Esc while the user is in, or arming, a session, and only when
+    // the foreground window belongs to this process or to the DLSS-G worker.
+    // Alt-Tabbing to another application keeps Esc there.
+    if (!watching_ && !disconnect_armed_) {
+        return false;
+    }
+    const HWND foreground = ::GetForegroundWindow();
+    if (!foreground) {
+        return false;
+    }
+    DWORD pid = 0;
+    ::GetWindowThreadProcessId(foreground, &pid);
+    if (pid == ::GetCurrentProcessId()) {
+        return true;
+    }
+    if (dlss_fg_ && dlss_fg_->worker_pid() == pid) {
+        return true;
+    }
+    return false;
+}
 bool NextApp::Init() {
     window_ = std::make_unique<brp::Win32Window>();
     if (!window_->Create(L"BetterRemotePlay Next", 1600, 900)) {
@@ -352,6 +396,7 @@ bool NextApp::Init() {
     started_ = SecondsNow();
     last_frame_ = started_;
     haptic_strength_.store(settings_.controller.rumble_strength);
+    pad_rate_hz_.store(std::clamp(settings_.controller.poll_hz, 60, 1000));
     StartPadThread();
     if (std::getenv("BRP_NEXT_BENCH")) {
         bench_exit_ = true;
@@ -572,7 +617,13 @@ void NextApp::Frame() {
     const bool app_foreground = ::GetForegroundWindow() == ActiveWindow()->hwnd();
     const bool show_overlay =
         watching_ && app_foreground &&
-        (settings_.overlay.enabled || overlay_control_);
+        (settings_.overlay.enabled || overlay_control_ || disconnect_armed_);
+    if (std::getenv("BRP_OVERLAY_PROBE")) {
+        std::fprintf(stderr, "[next] overlay show=%d watching=%d fg=%d active=%p foreground=%p\n",
+                     show_overlay ? 1 : 0, watching_ ? 1 : 0, app_foreground ? 1 : 0,
+                     reinterpret_cast<void*>(ActiveWindow()->hwnd()),
+                     reinterpret_cast<void*>(::GetForegroundWindow()));
+    }
     if (show_overlay) {
         const double interval =
             std::max(0.05, settings_.overlay.interval_ms / 1000.0);
@@ -714,6 +765,30 @@ void NextApp::Render() {
         case Page::About: RenderAboutPage(widgets); break;
     }
 
+    if (disconnect_armed_ && !watching_) {
+        const float bw = 680.0f;
+        const float bh = 84.0f;
+        const D2D1_RECT_F rect = Rect((logical_width_ - bw) * 0.5f, 54,
+                                      (logical_width_ + bw) * 0.5f, 54 + bh);
+        const Color color = theme.warning;
+        renderer_->FillRounded(rect, 14.0f, ToD2D(theme.surface_alt));
+        renderer_->StrokeRounded(rect, 14.0f, ToD2D(color), 1.4f);
+        renderer_->Text(L"DISCONNECT ARMED", Rect(rect.left + 20, 64, rect.right - 20, 88),
+                        13.0f, ToD2D(color), DWRITE_FONT_WEIGHT_BOLD);
+        renderer_->Text(L"Press Esc again at any time, or click Disconnect.",
+                        Rect(rect.left + 20, 88, rect.right - 20, 108), 11.0f,
+                        ToD2D(theme.text_dim));
+        if (widgets.Button(7791, Rect(rect.right - 300, 104, rect.right - 170, 130),
+                           L"Disconnect")) {
+            disconnect_armed_ = false;
+            DisconnectStream();
+        }
+        if (widgets.Button(7792, Rect(rect.right - 160, 104, rect.right - 20, 130),
+                           L"Cancel", false)) {
+            disconnect_armed_ = false;
+        }
+    }
+
     if (now_ < toast_until_ && !toast_text_.empty()) {
         const float width = 460.0f;
         const D2D1_RECT_F rect = Rect((logical_width_ - width) * 0.5f,
@@ -761,7 +836,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  1.0.8", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  1.0.9", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -875,7 +950,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"BetterRemotePlay Next 1.0.8",
+        renderer_->Text(L"BetterRemotePlay Next 1.0.9",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -1970,13 +2045,13 @@ void NextApp::RenderDiagnostics(Widgets& widgets) {
 }
 
 void NextApp::RenderSettings(Widgets& widgets) {
+    const ThemeTokens& theme = widgets.Tokens();
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"Settings", L"Central configuration, validated and saved on every change");
 
     static const wchar_t* categories[] = {
-        L"General", L"Streaming", L"Video", L"AI Video Engine", L"GPU", L"Display",
-        L"Overlay", L"Audio", L"Controller", L"Advanced"};
+        L"General", L"Audio", L"Controller", L"Advanced"};
     const float list_w = 238.0f;
     float y = 138.0f;
     for (int i = 0; i < static_cast<int>(std::size(categories)); ++i) {
@@ -1986,6 +2061,15 @@ void NextApp::RenderSettings(Widgets& widgets) {
         }
         y += 40.0f;
     }
+    renderer_->Text(L"Streaming, AI, Display and Overlay",
+                    Rect(x, y + 10, x + list_w, y + 28), 10.0f,
+                    ToD2D(theme.text_faint));
+    renderer_->Text(L"now keep their own pages. This page",
+                    Rect(x, y + 28, x + list_w, y + 46), 10.0f,
+                    ToD2D(theme.text_faint));
+    renderer_->Text(L"holds only the extras.",
+                    Rect(x, y + 46, x + list_w, y + 64), 10.0f,
+                    ToD2D(theme.text_faint));
 
     const float px = x + list_w + 24.0f;
     const float pw = x + w - px;
@@ -1995,15 +2079,9 @@ void NextApp::RenderSettings(Widgets& widgets) {
     float cy = 156.0f;
     switch (settings_category_) {
         case 0: cy = controls.General(px + 18, cy, pw - 36); break;
-        case 1: cy = controls.Streaming(px + 18, cy, pw - 36); break;
-        case 2: cy = controls.Video(px + 18, cy, pw - 36); break;
-        case 3: cy = controls.Ai(px + 18, cy, pw - 36); break;
-        case 4: cy = controls.Gpu(px + 18, cy, pw - 36); break;
-        case 5: cy = controls.Display(px + 18, cy, pw - 36); break;
-        case 6: cy = controls.Overlay(px + 18, cy, pw - 36); break;
-        case 7: cy = controls.Audio(px + 18, cy, pw - 36); break;
-        case 8: cy = controls.Controller(px + 18, cy, pw - 36); break;
-        case 9: cy = controls.Advanced(px + 18, cy, pw - 36); break;
+        case 1: cy = controls.Audio(px + 18, cy, pw - 36); break;
+        case 2: cy = controls.Controller(px + 18, cy, pw - 36); break;
+        case 3: cy = controls.Advanced(px + 18, cy, pw - 36); break;
         default: break;
     }
     if (controls.Changed()) {
@@ -2017,7 +2095,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"BetterRemotePlay Next 1.0.8  |  stable release", L"STABLE", true);
+               L"BetterRemotePlay Next 1.0.9  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -2026,7 +2104,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay Next", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 1.0.8  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 1.0.9  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -2136,6 +2214,7 @@ bool NextApp::Apply() {
     settings_ = host_->Settings();
     last_apply_scope_ = scope;
     haptic_strength_.store(settings_.controller.rumble_strength);
+    pad_rate_hz_.store(std::clamp(settings_.controller.poll_hz, 60, 1000));
     ApplyPresenterTarget();
     ApplyEnhance();
     if (auto* logger = dynamic_cast<Logger*>(host_->Log())) {
@@ -2217,6 +2296,33 @@ void NextApp::BuildOverlayView() {
     view.palette.success = RgbOf(theme.success);
     view.palette.warning = RgbOf(theme.warning);
     view.palette.error = RgbOf(theme.error);
+
+    if (disconnect_armed_ && !overlay_control_) {
+        OverlayView banner;
+        banner.expanded = false;
+        banner.live = true;
+        banner.palette = view.palette;
+        banner.compact_title = L"DISCONNECT ARMED";
+        banner.subtitle = L"Press Esc again to disconnect";
+        banner.status = L"F10 cancels";
+        OverlayPage page;
+        page.title = L"Disconnect";
+        OverlayRow again;
+        again.label = L"ESC AGAIN";
+        again.value = L"DISCONNECT";
+        again.enabled = false;
+        OverlayRow cancel;
+        cancel.label = L"F10";
+        cancel.value = L"CANCEL";
+        cancel.enabled = false;
+        page.rows.push_back(std::move(again));
+        page.rows.push_back(std::move(cancel));
+        banner.pages.push_back(std::move(page));
+        overlay_.Update(banner, settings_.overlay.opacity, settings_.overlay.position,
+                        settings_.overlay.side, settings_.overlay.scale / 100.0f,
+                        ActiveWindow()->hwnd());
+        return;
+    }
 
     const StreamSnapshot snapshot =
         streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
@@ -2310,7 +2416,7 @@ void NextApp::BuildOverlayView() {
     wchar_t buffer[220] = {};
 
     OverlayPage overview;
-    overview.title = L"Overview";
+    overview.title = L"Info";
     std::swprintf(buffer, 220, L"%dx%d @ %.1f fps", snapshot.source_width,
                   snapshot.source_height, snapshot.source_fps);
     overview.rows.push_back(info(L"INPUT", buffer, L"decoded source"));
@@ -2357,7 +2463,7 @@ void NextApp::BuildOverlayView() {
     view.pages.push_back(std::move(overview));
 
     OverlayPage sr;
-    sr.title = L"Super resolution";
+    sr.title = L"SR";
     sr.rows.push_back(toggle(L"Super resolution", sr_on, OverlayAction::ToggleSr,
                              L"DLSS Super Resolution (NGX)", system_.dlss_sr));
     sr.rows.push_back(stepper(L"Quality", QualityLabel(settings_.ai.sr_quality),
@@ -2399,7 +2505,7 @@ void NextApp::BuildOverlayView() {
     view.pages.push_back(std::move(sr));
 
     OverlayPage fg;
-    fg.title = L"Frame generation";
+    fg.title = L"FG";
     fg.rows.push_back(toggle(L"Frame generation", fg_on, OverlayAction::ToggleFg,
                              L"generator owns presentation", system_.dlss_fg ||
                                  system_.rife_lite));
@@ -2435,7 +2541,7 @@ void NextApp::BuildOverlayView() {
     view.pages.push_back(std::move(fg));
 
     OverlayPage display;
-    display.title = L"Display";
+    display.title = L"Video";
     display.rows.push_back(toggle(L"Borderless fullscreen",
                                   window_ && window_->fullscreen(),
                                   OverlayAction::ToggleFullscreen,
@@ -2450,9 +2556,17 @@ void NextApp::BuildOverlayView() {
     display.rows.push_back(stepper(
         L"Scale", std::to_wstring(settings_.overlay.scale) + L"%",
         OverlayAction::ScaleDown, OverlayAction::ScaleUp, L"75-200%"));
-    display.rows.push_back(action_row(L"Position",
-                                      OverlayPositionLabel(settings_.overlay.position),
-                                      OverlayAction::PositionNext, L"cycles corners"));
+    display.rows.push_back(stepper(
+        L"Sharpening", std::to_wstring(settings_.video.sharpening) + L"%",
+        OverlayAction::SharpnessPrev, OverlayAction::SharpnessNext, L"live"));
+    display.rows.push_back(action_row(
+        L"Overlay side", settings_.overlay.side == 0 ? L"Left" : L"Right",
+        OverlayAction::SideNext, L"side-docked panel"));
+    display.rows.push_back(action_row(
+        L"Vertical", settings_.overlay.position == 0
+                        ? L"Top"
+                        : (settings_.overlay.position == 1 ? L"Middle" : L"Bottom"),
+        OverlayAction::VerticalNext, L"overlay anchor"));
     display.rows.push_back(action_row(
         L"Theme", settings_.general.theme == Theme::Dark ? L"Dark" : L"Light",
         OverlayAction::ToggleTheme, L"applies to the whole application"));
@@ -2462,7 +2576,7 @@ void NextApp::BuildOverlayView() {
     view.pages.push_back(std::move(display));
 
     OverlayPage performance;
-    performance.title = L"Performance";
+    performance.title = L"Perf";
     std::swprintf(buffer, 220, L"%.1f fps", snapshot.source_fps);
     performance.rows.push_back(info(L"SOURCE", buffer));
     performance.rows.push_back(info(
@@ -2496,6 +2610,52 @@ void NextApp::BuildOverlayView() {
                                           L"source, generated and cadence counters"));
     view.pages.push_back(std::move(performance));
 
+    OverlayPage stream;
+    stream.title = L"Stream";
+    stream.rows.push_back(stepper(
+        L"Source fps", std::to_wstring(settings_.streaming.fps) + L" fps",
+        OverlayAction::FpsPrev, OverlayAction::FpsNext,
+        L"STREAM RESTART required"));
+    stream.rows.push_back(stepper(
+        L"Bitrate",
+        std::to_wstring(settings_.streaming.bitrate_kbps / 1000) + L" Mbps",
+        OverlayAction::BitratePrev, OverlayAction::BitrateNext,
+        L"STREAM RESTART required"));
+    stream.rows.push_back(stepper(
+        L"Decoder", Widen(settings_.streaming.decoder), OverlayAction::DecoderPrev,
+        OverlayAction::DecoderNext, L"STREAM RESTART required"));
+    stream.rows.push_back(stepper(
+        L"Frame buffer",
+        settings_.streaming.frame_buffer == 0
+            ? std::wstring(L"Off")
+            : std::to_wstring(settings_.streaming.frame_buffer) + L" frame(s)",
+        OverlayAction::FrameBufferPrev, OverlayAction::FrameBufferNext,
+        settings_.streaming.fps <= 30 ? L"live; 1 = even 8-refresh cadence"
+                                       : L"live; 1 = one spare frame"));
+    stream.rows.push_back(info(L"TRANSPORT", L"Reconnect to apply",
+                               L"fps, bitrate and decoder are session options"));
+    view.pages.push_back(std::move(stream));
+
+    OverlayPage audio_page;
+    audio_page.title = L"Audio";
+    audio_page.rows.push_back(stepper(
+        L"Buffer", std::to_wstring(settings_.audio.buffer_ms) + L" ms",
+        OverlayAction::AudioBufferPrev, OverlayAction::AudioBufferNext,
+        L"NEXT SESSION"));
+    audio_page.rows.push_back(info(L"OUTPUT", L"Windows default",
+                                   L"volume follows the Windows mixer"));
+    view.pages.push_back(std::move(audio_page));
+
+    OverlayPage pad_page;
+    pad_page.title = L"Pad";
+    pad_page.rows.push_back(stepper(
+        L"Rumble", std::to_wstring(settings_.controller.rumble_strength) + L" / 5",
+        OverlayAction::RumblePrev, OverlayAction::RumbleNext, L"live"));
+    pad_page.rows.push_back(stepper(
+        L"Poll rate", std::to_wstring(settings_.controller.poll_hz) + L" Hz",
+        OverlayAction::PadRatePrev, OverlayAction::PadRateNext,
+        L"live; USB is the most consistent at 1000 Hz"));
+    view.pages.push_back(std::move(pad_page));
     OverlayPage profile;
     profile.title = L"Profile";
     profile.rows.push_back(stepper(L"Profile", profile_name, OverlayAction::ProfilePrev,
@@ -2508,6 +2668,12 @@ void NextApp::BuildOverlayView() {
     profile.rows.push_back(action_row(L"Save configuration", L"New profile",
                                       OverlayAction::SaveProfile,
                                       L"captures the effective settings"));
+    profile.rows.push_back(action_row(L"Leave Watch", L"Back to app",
+                                      OverlayAction::LeaveWatch,
+                                      L"Alt+F4 also leaves without disconnecting"));
+    profile.rows.push_back(action_row(L"Disconnect", L"Disconnect",
+                                      OverlayAction::DisconnectNow,
+                                      L"ends the console session"));
     profile.rows.push_back(info(L"AVAILABLE",
                                 std::to_wstring(profiles_.size()) + L" profile(s)"));
     profile.rows.push_back(info(L"STREAM CHANGE",
@@ -2522,7 +2688,8 @@ void NextApp::BuildOverlayView() {
 
     const float opacity = overlay_control_ ? 1.0f : settings_.overlay.opacity;
     overlay_.Update(view, opacity, settings_.overlay.position,
-                    settings_.overlay.scale / 100.0f, ActiveWindow()->hwnd());
+                    settings_.overlay.side, settings_.overlay.scale / 100.0f,
+                    ActiveWindow()->hwnd());
 }
 void NextApp::HandleOverlayAction(OverlayAction action) {
     const StreamSnapshot snapshot = streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
@@ -2680,6 +2847,97 @@ void NextApp::HandleOverlayAction(OverlayAction action) {
             overlay_status_error_ = false;
             last_overlay_update_ = -1.0;
             break;
+        case OverlayAction::FpsPrev:
+        case OverlayAction::FpsNext:
+            settings_.streaming.fps = settings_.streaming.fps == 30 ? 60 : 30;
+            changed();
+            break;
+        case OverlayAction::BitratePrev:
+            settings_.streaming.bitrate_kbps =
+                std::clamp(settings_.streaming.bitrate_kbps - 10000, 5000, 200000);
+            changed();
+            break;
+        case OverlayAction::BitrateNext:
+            settings_.streaming.bitrate_kbps =
+                std::clamp(settings_.streaming.bitrate_kbps + 10000, 5000, 200000);
+            changed();
+            break;
+        case OverlayAction::DecoderPrev:
+        case OverlayAction::DecoderNext: {
+            static const char* kDecoders[] = {"auto", "d3d11va", "d3d12va",
+                                              "vulkan", "cuda", "software"};
+            int index = 0;
+            for (int i = 0; i < 6; ++i) {
+                if (settings_.streaming.decoder == kDecoders[i]) {
+                    index = i;
+                }
+            }
+            index = (index + (action == OverlayAction::DecoderNext ? 1 : 5)) % 6;
+            settings_.streaming.decoder = kDecoders[index];
+            changed();
+            break;
+        }
+        case OverlayAction::FrameBufferPrev:
+            settings_.streaming.frame_buffer =
+                std::clamp(settings_.streaming.frame_buffer - 1, 0, 3);
+            changed();
+            break;
+        case OverlayAction::FrameBufferNext:
+            settings_.streaming.frame_buffer =
+                std::clamp(settings_.streaming.frame_buffer + 1, 0, 3);
+            changed();
+            break;
+        case OverlayAction::RumblePrev:
+            settings_.controller.rumble_strength =
+                std::clamp(settings_.controller.rumble_strength - 1, 0, 5);
+            haptic_strength_.store(settings_.controller.rumble_strength);
+            changed();
+            break;
+        case OverlayAction::RumbleNext:
+            settings_.controller.rumble_strength =
+                std::clamp(settings_.controller.rumble_strength + 1, 0, 5);
+            haptic_strength_.store(settings_.controller.rumble_strength);
+            changed();
+            break;
+        case OverlayAction::PadRatePrev:
+        case OverlayAction::PadRateNext: {
+            static const int kRates[4] = {125, 250, 500, 1000};
+            int index = 0;
+            for (int i = 0; i < 4; ++i) {
+                if (settings_.controller.poll_hz >= kRates[i]) {
+                    index = i;
+                }
+            }
+            index = (index + (action == OverlayAction::PadRateNext ? 1 : 3)) % 4;
+            settings_.controller.poll_hz = kRates[index];
+            pad_rate_hz_.store(kRates[index]);
+            changed();
+            break;
+        }
+        case OverlayAction::AudioBufferPrev:
+            settings_.audio.buffer_ms = std::clamp(settings_.audio.buffer_ms - 5, 5, 200);
+            changed();
+            break;
+        case OverlayAction::AudioBufferNext:
+            settings_.audio.buffer_ms = std::clamp(settings_.audio.buffer_ms + 5, 5, 200);
+            changed();
+            break;
+        case OverlayAction::SharpnessPrev:
+            settings_.video.sharpening = std::clamp(settings_.video.sharpening - 5, 0, 100);
+            changed();
+            break;
+        case OverlayAction::SharpnessNext:
+            settings_.video.sharpening = std::clamp(settings_.video.sharpening + 5, 0, 100);
+            changed();
+            break;
+        case OverlayAction::SideNext:
+            settings_.overlay.side = settings_.overlay.side == 0 ? 1 : 0;
+            changed();
+            break;
+        case OverlayAction::VerticalNext:
+            settings_.overlay.position = (std::clamp(settings_.overlay.position, 0, 2) + 1) % 3;
+            changed();
+            break;
         default:
             break;
     }
@@ -2727,12 +2985,21 @@ void NextApp::HandlePinInput() {
             SetOverlayControl(false);
             return;
         }
+        if (key == VK_ESCAPE) {
+            SetOverlayControl(false);
+            disconnect_armed_ = true;
+            last_overlay_update_ = -1.0;
+            return;
+        }
         if (key != 0) {
             overlay_.Key(key);
         }
         return;
     }
     if (key == VK_F10 && watching_) {
+        if (disconnect_armed_) {
+            disconnect_armed_ = false;
+        }
         SetOverlayControl(true);
         return;
     }
@@ -2745,19 +3012,20 @@ void NextApp::HandlePinInput() {
             pin_focus_ = false;
             return;
         }
-        if (watching_) {
-            // First Esc leaves Watch and arms the disconnect shortcut.
-            ToggleWatch(false);
-            esc_at_ = now_;
-            Toast(L"Esc again to disconnect");
-            return;
-        }
-        if (esc_at_ >= 0.0 && now_ - esc_at_ <= 2.5) {
-            esc_at_ = -1.0;
+        // Esc is a two-step, persistent action: the first press arms the
+        // disconnect and shows a banner over the stream; the second press, at
+        // any time later, disconnects. No 2.5 s timeout, so Alt-Tab and coming
+        // back does not lose the second press.
+        if (disconnect_armed_) {
+            disconnect_armed_ = false;
             DisconnectStream();
             return;
         }
-        esc_at_ = -1.0;
+        if (watching_) {
+            disconnect_armed_ = true;
+            last_overlay_update_ = -1.0;
+            return;
+        }
         return;
     }
     if (!pin_focus_) {
@@ -3318,6 +3586,7 @@ void NextApp::ToggleWatch(bool watching) {
             // Drop pre-watch frames so the first shown frame is current.
         }
         watching_ = true;
+        disconnect_armed_ = false;
         have_frame_ = false;
         video_phase_ = 0.0;
         last_source_refresh_ = 0;
@@ -3396,12 +3665,20 @@ void NextApp::StartPadThread() {
         ::SetThreadPriority(::GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
         HANDLE timer = ::CreateWaitableTimerExW(
             nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
-        if (timer) {
+        int timer_hz = 0;
+        auto apply_rate = [&](int hz) {
+            if (!timer || hz == timer_hz) {
+                return;
+            }
+            timer_hz = hz;
             LARGE_INTEGER due{};
-            due.QuadPart = -40000;  // 4 ms in 100 ns units
-            ::SetWaitableTimer(timer, &due, 4, nullptr, nullptr, FALSE);
-        }
+            due.QuadPart = -static_cast<LONGLONG>(10000000LL / hz);
+            ::SetWaitableTimer(timer, &due, std::max(1, 1000 / hz), nullptr, nullptr,
+                              FALSE);
+        };
         while (pad_run_.load()) {
+            const int poll_hz = std::clamp(pad_rate_hz_.load(), 60, 1000);
+            apply_rate(poll_hz);
             pad_.Poll();
             if (streaming_ && streaming_->Connected()) {
                 streaming_->SendController(pad_.snapshot());
@@ -3453,7 +3730,7 @@ void NextApp::StartPadThread() {
             if (timer) {
                 ::WaitForSingleObject(timer, 8);
             } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(4));
+                std::this_thread::sleep_for(std::chrono::microseconds(1000000 / poll_hz));
             }
         }
         if (timer) {
@@ -3622,6 +3899,7 @@ void NextApp::ConnectStream() {
     if (!streaming_) {
         return;
     }
+    disconnect_armed_ = false;
     ConsoleSettings console = settings_.console;
     console.fps = settings_.streaming.fps;
     if (console.address.empty()) {
@@ -3644,6 +3922,7 @@ void NextApp::ConnectStream() {
 }
 
 void NextApp::DisconnectStream() {
+    disconnect_armed_ = false;
     if (!streaming_) {
         return;
     }

@@ -32,6 +32,27 @@ enum class OverlayAction {
     ScaleDown,
     ScaleUp,
     ResetFrameStats,
+    LeaveWatch,
+    DisconnectNow,
+    CancelDisconnect,
+    FpsPrev,
+    FpsNext,
+    BitratePrev,
+    BitrateNext,
+    DecoderPrev,
+    DecoderNext,
+    FrameBufferPrev,
+    FrameBufferNext,
+    RumblePrev,
+    RumbleNext,
+    PadRatePrev,
+    PadRateNext,
+    AudioBufferPrev,
+    AudioBufferNext,
+    SharpnessPrev,
+    SharpnessNext,
+    SideNext,
+    VerticalNext,
 };
 
 struct OverlayRow {
@@ -75,6 +96,7 @@ struct OverlayView {
     std::vector<OverlayPage> pages;
     int tab = 0;
     std::wstring title = L"Control center";
+    std::wstring compact_title;
     std::wstring subtitle;
     std::wstring status;
     bool status_error = false;

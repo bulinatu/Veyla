@@ -38,6 +38,8 @@ public:
 
     // Last WM_KEYDOWN virtual-key code, or 0. Consumes the value.
     int ConsumeKey();
+    // Injects a key into the same queue as WM_KEYDOWN (global Esc hook).
+    void InjectKey(int virtual_key) { last_key_ = virtual_key; }
 
     // Last WM_CHAR character, or 0. Consumes the value.
     int ConsumeChar();

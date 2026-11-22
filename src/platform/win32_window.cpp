@@ -516,6 +516,15 @@ LRESULT Win32Window::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) 
             last_key_ = static_cast<int>(wparam);
             return 0;
 
+        case WM_SYSKEYDOWN:
+            // F10 is a system key: Windows sends WM_SYSKEYDOWN, not
+            // WM_KEYDOWN. Without this, the control center never saw F10.
+            if (wparam == VK_F10 || wparam == VK_F11 || wparam == VK_F12) {
+                last_key_ = static_cast<int>(wparam);
+                return 0;
+            }
+            break;
+
         case WM_CHAR:
             last_char_ = static_cast<int>(wparam);
             return 0;

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cwchar>
+#include <cstdio>
 
 namespace brp::next {
 namespace {
@@ -11,8 +12,8 @@ namespace {
 constexpr wchar_t kClass[] = L"BetterRemotePlayNextOverlay";
 constexpr int kCompactW = 400;
 constexpr int kCompactH = 150;
-constexpr int kExpandedW = 640;
-constexpr int kExpandedH = 486;
+constexpr int kExpandedW = 480;
+constexpr int kExpandedH = 520;
 constexpr int kMargin = 22;
 
 COLORREF ToColor(std::uint32_t rgb) {
@@ -69,6 +70,8 @@ bool OverlayWindow::Create() {
         kClass, L"BetterRemotePlay control center", WS_POPUP, 0, 0, kCompactW,
         kCompactH, nullptr, nullptr, wc.hInstance, this);
     if (!hwnd_) {
+        std::fprintf(stderr, "[overlay] CreateWindowEx failed %lu\n",
+                     static_cast<unsigned long>(::GetLastError()));
         return false;
     }
     width_ = kCompactW;
@@ -130,8 +133,24 @@ void OverlayWindow::SetTab(int tab) {
     }
 }
 
+namespace {
+bool WorkArea(HWND anchor, RECT& work) {
+    work = RECT{};
+    if (anchor && ::IsWindow(anchor)) {
+        MONITORINFO monitor{};
+        monitor.cbSize = sizeof(monitor);
+        if (::GetMonitorInfoW(::MonitorFromWindow(anchor, MONITOR_DEFAULTTONEAREST),
+                              &monitor)) {
+            work = monitor.rcWork;
+            return true;
+        }
+    }
+    ::SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+    return true;
+}
+}  // namespace
 void OverlayWindow::Update(const OverlayView& view, float opacity, int position,
-                           float scale, HWND anchor) {
+                           int side, float scale, HWND anchor) {
     anchor_ = anchor;
     if (!Create()) {
         return;
@@ -142,10 +161,17 @@ void OverlayWindow::Update(const OverlayView& view, float opacity, int position,
     }
     opacity_ = std::clamp(opacity, 0.1f, 1.0f);
     position_ = std::clamp(position, 0, 3);
+    side_ = std::clamp(side, 0, 1);
     scale_ = std::clamp(scale, 0.75f, 2.0f);
 
+    RECT work{};
+    WorkArea(anchor_, work);
+    const int work_h = std::max(400, static_cast<int>(work.bottom - work.top));
     const int want_w = static_cast<int>((view_.expanded ? kExpandedW : kCompactW) * scale_);
-    const int want_h = static_cast<int>((view_.expanded ? kExpandedH : kCompactH) * scale_);
+    const int want_h = view_.expanded
+                            ? std::max(static_cast<int>(kExpandedH * scale_),
+                                       work_h - static_cast<int>(kMargin * 2 * scale_))
+                            : static_cast<int>(kCompactH * scale_);
     if (want_w != width_ || want_h != height_) {
         width_ = want_w;
         height_ = want_h;
@@ -159,7 +185,7 @@ void OverlayWindow::Update(const OverlayView& view, float opacity, int position,
         ::SetLayeredWindowAttributes(hwnd_, RGB(0, 0, 0), alpha,
                                      LWA_ALPHA | LWA_COLORKEY);
     }
-    Reposition(position_);
+    Reposition(position_, side_);
     if (!visible_) {
         ::ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
         visible_ = true;
@@ -167,26 +193,16 @@ void OverlayWindow::Update(const OverlayView& view, float opacity, int position,
     ::InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-void OverlayWindow::Reposition(int position) {
+void OverlayWindow::Reposition(int position, int side) {
     RECT work{};
-    if (anchor_ && ::IsWindow(anchor_)) {
-        MONITORINFO monitor{};
-        monitor.cbSize = sizeof(monitor);
-        if (::GetMonitorInfoW(::MonitorFromWindow(anchor_, MONITOR_DEFAULTTONEAREST),
-                              &monitor)) {
-            work = monitor.rcWork;
-        }
-    } else {
-        ::SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
-    }
+    WorkArea(anchor_, work);
     const int area_w = work.right - work.left;
     const int area_h = work.bottom - work.top;
-    int x = work.left + kMargin;
+    int x = side == 0 ? work.left + kMargin : work.left + area_w - width_ - kMargin;
     int y = work.top + kMargin;
-    if ((position & 1) != 0) {
-        x = work.left + area_w - width_ - kMargin;
-    }
-    if (position >= 2) {
+    if (position == 1) {
+        y = work.top + (area_h - height_) / 2;
+    } else if (position >= 2) {
         y = work.top + area_h - height_ - kMargin;
     }
     if (x == last_x_ && y == last_y_) {
@@ -394,8 +410,10 @@ void OverlayWindow::PaintCompact(HDC dc, const RECT& client) {
     FillRound(dc, panel, 16, ToColor(p.panel), ToColor(p.border));
 
     const int s = static_cast<int>(scale_ * 10.0f);
-    DrawTextLine(dc, L"BetterRemotePlay", RECT{16, 8, 230, 32}, std::max(10, 13 * s / 10),
-                 FW_SEMIBOLD, ToColor(p.text));
+    DrawTextLine(dc, view_.compact_title.empty() ? L"BetterRemotePlay"
+                                                        : view_.compact_title.c_str(),
+                 RECT{16, 8, 300, 32}, std::max(10, 13 * s / 10), FW_SEMIBOLD,
+                 ToColor(p.text));
     DrawTextLine(dc, view_.live ? L"LIVE" : L"IDLE",
                  RECT{client.right - 74, 8, client.right - 14, 32},
                  std::max(8, 9 * s / 10), FW_BOLD,
@@ -428,7 +446,10 @@ void OverlayWindow::PaintCompact(HDC dc, const RECT& client) {
                      RECT{16, y, client.right - 14, y + 18}, 10, FW_NORMAL,
                      ToColor(p.text_faint));
     }
-    DrawTextLine(dc, L"F10  control center",
+    const wchar_t* compact_footer = view_.compact_title.empty()
+                                        ? L"F10  control center"
+                                        : (view_.status.empty() ? L"" : view_.status.c_str());
+    DrawTextLine(dc, compact_footer,
                  RECT{16, client.bottom - 26, client.right - 14, client.bottom - 8},
                  std::max(7, 8 * s / 10), FW_NORMAL, ToColor(p.text_faint), DT_RIGHT);
 }
@@ -494,9 +515,13 @@ void OverlayWindow::PaintExpanded(HDC dc, const RECT& client) {
             DrawTextLine(dc, row.label, RECT{r.left + P(10), r.top, label_right, r.top + P(22)},
                          P(12), FW_SEMIBOLD, label_color);
             if (!row.detail.empty()) {
+                const bool restart_badge =
+                    row.detail.find(L"RESTART") != std::wstring::npos ||
+                    row.detail.find(L"NEXT SESSION") != std::wstring::npos;
                 DrawTextLine(dc, row.detail,
                              RECT{r.left + P(10), r.top + P(20), label_right, r.top + P(38)},
-                             P(9), FW_NORMAL, ToColor(p.text_dim));
+                             P(9), restart_badge ? FW_BOLD : FW_NORMAL,
+                             ToColor(restart_badge ? p.warning : p.text_dim));
             }
 
             if (row.stepper) {

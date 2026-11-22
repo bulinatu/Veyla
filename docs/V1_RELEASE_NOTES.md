@@ -118,3 +118,16 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
 - 4x DLSS-G at 1080p measured 92-94 fps on a 240 Hz panel, so 2x (60 fps) is
   the stable choice for 30 fps games; DLAA is the recommended generator input.
 - Diagnostics keeps showing the dominant hold (`holds 8v 100%`).
+
+## 1.0.9 - control center, Esc and input
+
+- F10 works: system keys (F10/F11/F12) are read from WM_SYSKEYDOWN. The control
+  center had never opened before.
+- Esc arms disconnect with a visible banner and persists across Alt-Tab; a
+  global Esc hook catches it even when the worker window has focus. Second Esc
+  disconnects; F10 cancels; Alt+F4 leaves Watch.
+- Controller poll rate up to 1000 Hz, live.
+- Settings shows only General/Audio/Controller/Advanced; the other pages own
+  their controls.
+- The overlay is a side-docked panel on the chosen side, with Stream, Audio and
+  Pad tabs and restart badges for session-only changes.

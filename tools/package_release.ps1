@@ -11,7 +11,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $release = Join-Path $root "build\Release"
 $distRoot = Join-Path $root "dist"
 $dest = Join-Path $distRoot "BetterRemotePlay"
-$version = "1.0.8"
+$version = "1.0.9"
 
 function Require-File([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -149,10 +149,10 @@ brpnext quick start
 -------------------
 1. Run brpnext.exe. It imports the legacy session once, if present.
 2. Console: Discover or enter the address, PSN login / PIN pairing if needed.
-3. Connect. The Watch view opens automatically; Esc returns to Console.
+3. Connect. The Watch view opens automatically in its own window; the main app minimizes. Alt+F4 (or F10 > Leave Watch) returns to the app.
 4. AI Video Engine: DLSS SR/DLAA and DLSS-G or RIFE live.
-5. In Watch: F11 borderless fullscreen, F10 live control center, Esc twice to
-   disconnect.
+5. In Watch: F11 borderless fullscreen, F10 side control center, Esc arms
+   disconnect; Esc again disconnects. Alt+F4 leaves Watch.
 6. Settings > Overlay configures the separate compact stats window.
 
 Requirements

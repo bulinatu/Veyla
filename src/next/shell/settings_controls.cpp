@@ -490,11 +490,18 @@ float SettingsControls::Overlay(float x, float y, float width) {
     }
     y += kRow + kGap;
 
-    int position = settings_.overlay.position;
-    if (widgets_.Choice(Next(), Row(x, y, width), L"Position",
-                        {L"Top left", L"Top right", L"Bottom left", L"Bottom right"},
-                        position)) {
-        settings_.overlay.position = position;
+    int side = settings_.overlay.side;
+    if (widgets_.Choice(Next(), Row(x, y, width), L"Screen side",
+                        {L"Left", L"Right"}, side)) {
+        settings_.overlay.side = side;
+        Touch();
+    }
+    y += kRow + kGap;
+
+    int vertical = std::clamp(settings_.overlay.position, 0, 2);
+    if (widgets_.Choice(Next(), Row(x, y, width), L"Vertical anchor",
+                        {L"Top", L"Middle", L"Bottom"}, vertical)) {
+        settings_.overlay.position = vertical;
         Touch();
     }
     y += kRow + kGap;
@@ -555,11 +562,26 @@ float SettingsControls::Controller(float x, float y, float width) {
         Touch();
     }
     y += kRow + kGap;
-    widgets_.Label(Rect(x, y, x + width, y + 42),
-                   L"DualSense input, haptics and adaptive triggers follow the session. "
-                   L"Rumble strength scales console feedback.",
-                   widgets_.Tokens().text_faint, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
-    return y + 46.0f;
+    static const int kRates[4] = {125, 250, 500, 1000};
+    int rate = 1;
+    for (int i = 0; i < 4; ++i) {
+        if (settings_.controller.poll_hz >= kRates[i]) {
+            rate = i;
+        }
+    }
+    if (widgets_.Choice(Next(), Row(x, y, width), L"Poll rate",
+                        {L"125 Hz", L"250 Hz", L"500 Hz", L"1000 Hz"}, rate)) {
+        settings_.controller.poll_hz = kRates[rate];
+        Touch();
+    }
+    y += kRow + kGap;
+    widgets_.Label(Rect(x, y, x + width, y + 46),
+                   L"1000 Hz is only as fast as the controller and its HID stack; a "
+                   L"DualSense on USB is the most consistent. Bluetooth can reach "
+                   L"1000 Hz with a good host (DSX does), but the console still sees "
+                   L"the network send rate.",
+                   widgets_.Tokens().text_faint, 10.0f, DWRITE_FONT_WEIGHT_MEDIUM);
+    return y + 50.0f;
 }
 float SettingsControls::Advanced(float x, float y, float width) {
     int level = static_cast<int>(settings_.advanced.log_level);

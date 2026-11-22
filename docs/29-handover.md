@@ -941,3 +941,63 @@ measuring.
   `files_differ=0`.
 - Tests: `brp_next_tests` ALL PASS (82).
 - Profile: 30 fps, buffer 1, DLAA, DLSS-G 2x.
+
+## 1.0.9 - control center, Esc, input rate and settings cleanup
+
+The F10 control center never opened from 1.0.0 through 1.0.8. The cause was in
+`Win32Window`: F10 is a system key and arrives as `WM_SYSKEYDOWN`, while the
+message handler only recorded `WM_KEYDOWN`. F10, F11 and F12 are now accepted
+from `WM_SYSKEYDOWN`; the panel opens in every build after this.
+
+### Esc / disconnect
+
+- The first Esc **arms** disconnect and shows a compact banner over the stream
+  (`DISCONNECT ARMED`, `ESC AGAIN / DISCONNECT`, `F10 / CANCEL`). It no longer
+  leaves Watch, so the banner is visible in the picture.
+- The second Esc disconnects, with **no 2.5 s timeout**. Alt-Tab and returning
+  cannot lose the arm.
+- A `WH_KEYBOARD_LL` Esc hook is active while watching or armed. It consumes
+  Esc only when the foreground window is ours or the DLSS-G worker, so Esc in
+  another application is untouched. This fixes the case where the worker's
+  topmost window owns the keyboard focus.
+- Esc while the control center is open closes the panel **and arms** disconnect
+  in the same press.
+- F10 cancels the arm and opens the panel. Leave Watch without disconnecting
+  with **Alt+F4** or `Profile > Leave Watch`.
+
+### Controller rate
+
+`controller.poll_hz` is selectable 125 / 250 / 500 / 1000 Hz in
+Settings > Controller and in the overlay Pad tab. The pad thread uses a
+high-resolution waitable timer whose period is recomputed live. 1000 Hz is
+bounded by the controller/HID stack; USB is the most consistent, Bluetooth
+needs a good host (DSX reaches 1000 Hz).
+
+### Settings and overlay
+
+- Settings now contains only the application-wide extras: **General, Audio,
+  Controller, Advanced**. Streaming, AI Video Engine, Display and Overlay live
+  on their own pages, so the same control no longer appears twice.
+- The control center is a **side-docked full-height panel** on the chosen side
+  (`overlay.side`: Left/Right) and vertical anchor (Top/Middle/Bottom). Compact
+  mode and the disconnect banner use the same side.
+- Tabs: Info, SR, FG, Video, Perf, Stream, Audio, Pad, Profile. New live rows:
+  sharpening, overlay side/anchor, source fps, bitrate, decoder, frame buffer,
+  audio buffer, rumble, poll rate. Rows that cannot apply mid-session are
+  marked in warning colour with `STREAM RESTART required` or `NEXT SESSION`.
+- 30 fps SR uses the synchronous evaluation from 1.0.8; the frame buffer keeps
+  the 8-refresh cadence.
+
+### 1.0.9 package
+
+- Standalone: `dist/BetterRemotePlay-1.0.9-standalone.zip`
+  SHA256 `A2B2A8B0DBFD9B0DED807805647BD2C2547057242F1D8245C013FE28551AA044`
+- Update **1.0.8 -> 1.0.9**:
+  `dist/BetterRemotePlay-1.0.8-to-1.0.9-update.exe` (1.36 MB)
+  SHA256 `6EE0551312D8058F2DDD7DFA51758D886DB4359B11B9924D11E3A6CC223129DD`
+- `brpnext.exe` SHA256
+  `A5C6734B292091A4B1E1C9DE7555CE368180664BD4C2ECB56849DDE65E039CCE`
+- Patch 1.0.8 -> 1.0.9 verified: `version=1.0.9`, 0 markers,
+  `files_differ=0`.
+- Tests: `brp_next_tests` ALL PASS (82).
+- Profile: 30 fps, frame buffer 1, DLAA, DLSS-G 2x, controller poll 1000 Hz.

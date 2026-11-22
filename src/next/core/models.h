@@ -91,7 +91,8 @@ struct OverlaySettings {
     bool enabled = false;
     bool compact = false;
     float opacity = 0.85f;
-    int position = 1;     // 0 top-left .. 3 bottom-right
+    int position = 1;     // 0 top, 1 middle, 2 bottom (vertical)
+    int side = 1;         // 0 left, 1 right
     int scale = 125;      // 75..200 percent
     int interval_ms = 250;
     bool show_performance = true;
@@ -113,6 +114,7 @@ struct ControllerSettings {
     bool haptics = true;
     bool adaptive_triggers = true;
     int rumble_strength = 5;  // 0..5
+    int poll_hz = 250;        // 125..1000
     int lightbar = 0;
 };
 

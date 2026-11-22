@@ -112,6 +112,8 @@ private:
     void Toast(const std::wstring& text, bool error = false);
     void ProbeIfNeeded(double now);
     void HandlePinInput();
+    static LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wparam, LPARAM lparam);
+    bool ShouldCaptureEsc() const;
     std::wstring ClipboardText() const;
     std::wstring W(const std::string& text) const;
     std::wstring Summary(const Profile& profile) const;
@@ -153,6 +155,7 @@ private:
     std::thread pad_thread_;
     std::atomic<bool> pad_run_{false};
     std::atomic<int> haptic_strength_{3};
+    std::atomic<int> pad_rate_hz_{250};
     media::DecodedFrame video_frame_;
     bool have_frame_ = false;
     double video_phase_ = 0.0;
@@ -160,6 +163,8 @@ private:
     bool watch_on_connect_ = false;
     bool watch_fullscreen_ = false;
     double esc_at_ = -1.0;
+    bool disconnect_armed_ = false;
+    HHOOK keyboard_hook_ = nullptr;
     std::wstring audio_note_;
     std::unique_ptr<brp::media::NvDlssSr> dlss_sr_;
     bool dlss_ready_ = false;

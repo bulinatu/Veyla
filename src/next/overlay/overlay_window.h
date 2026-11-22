@@ -27,7 +27,7 @@ public:
 
     bool Create();
     void Destroy();
-    void Update(const OverlayView& view, float opacity, int position, float scale,
+    void Update(const OverlayView& view, float opacity, int position, int side, float scale,
                 HWND anchor);
     void Raise();
     void Hide();
@@ -44,7 +44,7 @@ private:
     void Paint(HDC dc);
     void PaintCompact(HDC dc, const RECT& client);
     void PaintExpanded(HDC dc, const RECT& client);
-    void Reposition(int position);
+    void Reposition(int position, int side);
     void SetInteractive(bool interactive);
     void Activate(OverlayAction action);
     int HitTest(int x, int y) const;
@@ -56,6 +56,7 @@ private:
     bool interactive_state_ = false;
     float opacity_ = 0.85f;
     int position_ = 1;
+    int side_ = 1;
     float scale_ = 1.0f;
     int width_ = 0;
     int height_ = 0;

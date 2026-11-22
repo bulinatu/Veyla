@@ -128,6 +128,9 @@ void AppSettings::Validate(std::vector<std::string>& warnings,
     if (overlay.position < 0 || overlay.position > 3) {
         errors.push_back("overlay.position must be 0..3");
     }
+    if (overlay.side < 0 || overlay.side > 1) {
+        errors.push_back("overlay.side must be 0..1");
+    }
     if (overlay.scale < 75 || overlay.scale > 200) {
         errors.push_back("overlay.scale must be 75..200");
     }
@@ -136,6 +139,9 @@ void AppSettings::Validate(std::vector<std::string>& warnings,
     }
     if (audio.volume < 0 || audio.volume > 100) {
         errors.push_back("audio.volume must be 0..100");
+    }
+    if (controller.poll_hz < 60 || controller.poll_hz > 1000) {
+        errors.push_back("controller.poll_hz must be 60..1000");
     }
     if (controller.rumble_strength < 0 || controller.rumble_strength > 5) {
         errors.push_back("controller.rumble_strength must be 0..5");
@@ -236,6 +242,7 @@ FlatMap SettingsToFlat(const AppSettings& s) {
     FlatJson::PutBool(f, "overlay.compact", s.overlay.compact);
     FlatJson::PutDouble(f, "overlay.opacity", s.overlay.opacity);
     FlatJson::PutInt(f, "overlay.position", s.overlay.position);
+    FlatJson::PutInt(f, "overlay.side", s.overlay.side);
     FlatJson::PutInt(f, "overlay.scale", s.overlay.scale);
     FlatJson::PutInt(f, "overlay.interval_ms", s.overlay.interval_ms);
     FlatJson::PutBool(f, "overlay.show_performance", s.overlay.show_performance);
@@ -253,6 +260,7 @@ FlatMap SettingsToFlat(const AppSettings& s) {
     FlatJson::PutBool(f, "controller.haptics", s.controller.haptics);
     FlatJson::PutBool(f, "controller.adaptive_triggers", s.controller.adaptive_triggers);
     FlatJson::PutInt(f, "controller.rumble_strength", s.controller.rumble_strength);
+    FlatJson::PutInt(f, "controller.poll_hz", s.controller.poll_hz);
     FlatJson::PutInt(f, "controller.lightbar", s.controller.lightbar);
 
     FlatJson::PutBool(f, "advanced.experimental", s.advanced.experimental);
@@ -366,6 +374,8 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
         FlatJson::GetDouble(f, "overlay.opacity", s.overlay.opacity), 0.1, 1.0));
     s.overlay.position =
         ClampInt(FlatJson::GetInt(f, "overlay.position", s.overlay.position), 0, 3);
+    s.overlay.side =
+        ClampInt(FlatJson::GetInt(f, "overlay.side", s.overlay.side), 0, 1);
     s.overlay.scale =
         ClampInt(FlatJson::GetInt(f, "overlay.scale", s.overlay.scale), 75, 200);
     s.overlay.interval_ms = ClampInt(
@@ -396,6 +406,8 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
     s.controller.rumble_strength = ClampInt(
         FlatJson::GetInt(f, "controller.rumble_strength", s.controller.rumble_strength), 0,
         5);
+    s.controller.poll_hz = ClampInt(
+        FlatJson::GetInt(f, "controller.poll_hz", s.controller.poll_hz), 60, 1000);
     s.controller.lightbar =
         ClampInt(FlatJson::GetInt(f, "controller.lightbar", s.controller.lightbar), 0, 4);
 
