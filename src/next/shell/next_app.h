@@ -167,6 +167,8 @@ private:
     double playout_integral_ = 0.0;
     double playout_clock_ = -1.0;
     int playout_depth_ = 0;
+    double probe_wait_ms_ = 0.0;
+    double probe_frame_ms_ = 0.0;
     bool watching_ = false;
     bool watch_on_connect_ = false;
     bool watch_fullscreen_ = false;

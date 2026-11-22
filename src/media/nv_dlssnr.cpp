@@ -219,6 +219,7 @@ void NvDlssnr::TerminateWorker() {
 }
 
 void NvDlssnr::Stop() {
+    pending_ = false;
     if (stdin_write_) {
         ::CloseHandle(stdin_write_);
         stdin_write_ = nullptr;
@@ -643,14 +644,17 @@ bool NvDlssnr::Reconfigure(const Options& options, std::string& detail) {
     return true;
 }
 
-bool NvDlssnr::Process(const uint8_t* rgba, int width, int height, std::vector<uint8_t>& out,
-                       std::string& detail) {
+bool NvDlssnr::Submit(const uint8_t* rgba, int width, int height, std::string& detail) {
     if (!ready_ || !rgba || width != full_w_ || height != full_h_ || !in_view_ || !out_view_) {
         detail = "NR is not initialized for this frame size";
         return false;
     }
+    if (pending_) {
+        detail = "NR already has a frame in flight";
+        return false;
+    }
     const size_t color_bytes = static_cast<size_t>(width) * height * 4;
-    const double started = NowMs();
+    submitted_at_ = NowMs();
     std::memcpy(in_view_, rgba, color_bytes);
 
     FrameCommand frame{};
@@ -673,10 +677,22 @@ bool NvDlssnr::Process(const uint8_t* rgba, int width, int height, std::vector<u
     }
     frame.flags = flags;
     frame.pts = static_cast<int64_t>(frame_index_);
+    ++frame_index_;
     if (!WriteAll(&frame, sizeof(frame), detail)) {
         ready_ = false;
         return false;
     }
+    pending_ = true;
+    return true;
+}
+
+bool NvDlssnr::Collect(std::vector<uint8_t>& out, std::string& detail) {
+    if (!pending_) {
+        detail = "NR has no frame in flight";
+        return false;
+    }
+    pending_ = false;
+    const size_t color_bytes = static_cast<size_t>(full_w_) * full_h_ * 4;
 
     uint32_t magic = 0;
     if (!ReadExact(&magic, sizeof(magic), 4000, detail)) {
@@ -701,8 +717,7 @@ bool NvDlssnr::Process(const uint8_t* rgba, int width, int height, std::vector<u
     }
     if (present_mode_) {
         // WNDO: the worker shows the frame (and generated ones) itself.
-        last_ms_ = NowMs() - started;
-        ++frame_index_;
+        last_ms_ = NowMs() - submitted_at_;
         ++frames_;
         return true;
     }
@@ -736,11 +751,35 @@ bool NvDlssnr::Process(const uint8_t* rgba, int width, int height, std::vector<u
         return false;
     }
 
-    last_ms_ = NowMs() - started;
-    ++frame_index_;
+    last_ms_ = NowMs() - submitted_at_;
     ++frames_;
     status_ = "NR running";
     return true;
+}
+
+bool NvDlssnr::Process(const uint8_t* rgba, int width, int height, std::vector<uint8_t>& out,
+                       std::string& detail) {
+    if (pending_ && !Collect(out, detail)) {
+        return false;
+    }
+    if (!Submit(rgba, width, height, detail)) {
+        return false;
+    }
+    return Collect(out, detail);
+}
+
+int NvDlssnr::ProcessPipelined(const uint8_t* rgba, int width, int height,
+                               std::vector<uint8_t>& out, std::string& detail) {
+    if (!pending_) {
+        // First frame: nothing is in flight yet, so there is no output to return.
+        return Submit(rgba, width, height, detail) ? 0 : -1;
+    }
+    // The worker computed the previous frame while the loop did the rest of
+    // its work, so this collect does not wait. Then the current frame goes out.
+    if (!Collect(out, detail)) {
+        return -1;
+    }
+    return Submit(rgba, width, height, detail) ? 1 : -1;
 }
 
 }  // namespace brp::media

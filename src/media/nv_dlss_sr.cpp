@@ -587,6 +587,14 @@ bool NvDlssSr::Readback(std::vector<uint8_t>& out, std::string& detail) {
     return ReadbackSlot(last_output_slot_, out, detail);
 }
 
+bool NvDlssSr::ReadbackCompleted(std::vector<uint8_t>& out, std::string& detail) {
+    if (!have_output_) {
+        detail = "DLSS SR has no completed output yet";
+        return false;
+    }
+    return ReadbackSlot(last_output_slot_, out, detail);
+}
+
 bool NvDlssSr::ReadbackSlot(int slot, std::vector<uint8_t>& out, std::string& detail) {
     if (!initialized_ || slot < 0 || slot >= kOutputSlots || !output11_[slot] || !context_ ||
         !device_) {

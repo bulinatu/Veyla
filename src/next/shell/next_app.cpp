@@ -268,6 +268,7 @@ int NextApp::Run() {
             ResizeStream();
         }
         now_ = SecondsNow();
+        const auto wait_started = std::chrono::steady_clock::now();
         if (watching_) {
             if (fg_covering_) {
                 // The generator owns presentation. Wake on a decoded frame
@@ -300,7 +301,15 @@ int NextApp::Run() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(4));
             }
         }
+        const auto frame_started = std::chrono::steady_clock::now();
+        probe_wait_ms_ = std::max(
+            probe_wait_ms_,
+            std::chrono::duration<double, std::milli>(frame_started - wait_started).count());
         Frame();
+        probe_frame_ms_ = std::max(
+            probe_frame_ms_,
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frame_started)
+                .count());
         if (!watching_) {
             std::this_thread::sleep_for(std::chrono::milliseconds(15));
         }
@@ -777,7 +786,8 @@ void NextApp::Frame() {
                              "p99 %.1f  |  scanout %.1f Hz  |  present misses %llu  |  "
                              "shown %d  |  holds 7:%u 8:%u 9:%u 10:%u 16:%u  |  sr submit %.2f ms  |  "
                              "sr cpu %.2f ms  |  dec %.2f/%.2f ms  |  "
-                             "net jitter %.2f ms loss %.2f%% drops %d  |  queue %d  trim %+.3f%%\n",
+                             "net jitter %.2f ms loss %.2f%% drops %d  |  queue %d  trim %+.3f%%  |  "
+                             "wait max %.1f ms  frame max %.1f ms\n",
                              loop_intervals_.Percentile(0.50), loop_p99_,
                              loop_intervals_.Max(), cadence_p50_, cadence_p99_,
                              present_refresh_hz_, present_misses_rate_, display_rate_,
@@ -785,7 +795,10 @@ void NextApp::Frame() {
                              dlss_sr_ ? dlss_sr_->last_ms() : 0.0, sr_cpu_ms_,
                              probe.decode_ms, probe.decode_ms_max,
                              probe.jitter_ms, probe.loss_percent, probe.decoder_drops,
-                             playout_depth_, playout_trim_ * 100.0);
+                             playout_depth_, playout_trim_ * 100.0, probe_wait_ms_,
+                             probe_frame_ms_);
+                probe_wait_ms_ = 0.0;
+                probe_frame_ms_ = 0.0;
             }
         }
     }
@@ -3212,7 +3225,11 @@ std::wstring NextApp::Summary(const Profile& profile) const {
 bool NextApp::PullFrame(media::DecodedFrame& out) {
     const int frame_buffer = std::clamp(settings_.streaming.frame_buffer, 0, 3);
     if (frame_buffer <= 0) {
-        return streaming_->TakeNewestFrame(out);
+        // Lowest latency without skipping: every decoded frame is delivered in
+        // order. TakeNewestFrame used to throw away the whole queue on each
+        // tick, which is what read as frames being deleted. Only a backlog past
+        // four frames is trimmed, so latency stays bounded.
+        return streaming_->TakeFrameOrdered(out, 4);
     }
     // Phase-locked pull: one source frame per source interval, on the display's
     // own tick grid. The decoded queue is primed and keeps one spare, so a
@@ -3245,7 +3262,9 @@ bool NextApp::PullFrame(media::DecodedFrame& out) {
     // producer's real rate (29.7 fps streams used to drain and refill the
     // buffer, which read as repeats and skips). Clamped to +-2 %.
     playout_depth_ = streaming_->QueueDepth();
-    const double target = static_cast<double>(streaming_->BufferTarget());
+    // Setpoint one frame above the pop target: with a single spare the queue
+    // ran empty about a quarter of the time, and each empty slot is a repeat.
+    const double target = static_cast<double>(streaming_->BufferTarget() + 1);
     const double error = static_cast<double>(playout_depth_) - target;
     playout_integral_ = std::clamp(playout_integral_ + 0.00005 * error, -0.02, 0.02);
     playout_trim_ = std::clamp(0.001 * error + playout_integral_, -0.02, 0.02);
@@ -3360,7 +3379,7 @@ void NextApp::PresentVideo() {
                         input = sr_scaled_.data();
                     }
                     if (dlss_sr_->Process(input, iw, ih, sr_frame, detail) &&
-                        dlss_sr_->Readback(rgba, detail)) {
+                        dlss_sr_->ReadbackCompleted(rgba, detail)) {
                         feed_w = dlss_sr_->out_width();
                         feed_h = dlss_sr_->out_height();
                         have_rgba = true;
@@ -3644,15 +3663,20 @@ void NextApp::EnhanceNeural(media::DecodedFrame& frame) {
     }
     std::vector<std::uint8_t> out;
     std::string detail;
-    if (dlssnr_->Process(frame.rgba.data(), frame.width, frame.height, out, detail) &&
-        !out.empty()) {
-        frame.rgba = std::move(out);
-        nr_ms_ = dlssnr_->last_ms();
-    } else {
+    // One frame in flight: the output is the previous frame's enhancement, so
+    // the loop only copies data and never waits for the NR worker.
+    const int result = dlssnr_->ProcessPipelined(frame.rgba.data(), frame.width,
+                                                 frame.height, out, detail);
+    if (result < 0) {
         Toast(L"Neural render stopped: " + Widen(detail), true);
         nr_failed_ = true;
         StopNr();
+        return;
     }
+    if (result == 1 && !out.empty()) {
+        frame.rgba = std::move(out);
+    }
+    nr_ms_ = dlssnr_->last_ms();
 }
 
 bool NextApp::EnsureRife() {

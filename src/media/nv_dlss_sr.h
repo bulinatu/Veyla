@@ -53,6 +53,10 @@ public:
     // Copies the last SR output back to CPU RGBA (target resolution). Waits for
     // the submission that is still in flight first.
     bool Readback(std::vector<uint8_t>& out, std::string& detail);
+    // Reads the output that completed before the latest Process() call. Never
+    // waits for the submission still in flight, so the presentation loop does
+    // not stall on the GPU every frame.
+    bool ReadbackCompleted(std::vector<uint8_t>& out, std::string& detail);
     // synchronous=true waits for the evaluation just submitted and returns its
     // output (one source frame less latency). false returns the previous
     // completed output and overlaps the GPU work with the display interval.
