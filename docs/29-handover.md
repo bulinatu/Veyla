@@ -1382,3 +1382,5 @@ stopped presenting them as if they did something.
 - `brpnext.exe`
   `84771956BBB27AA186DF0F395E91616A5746290D1D83686E4DA063E171747A18`
 - Patch verified: `version=2.4.5`, 0 markers, `files_differ=0`.
+
+3.x forward handover: docs/33-handover-3x.md (architecture decisions, workstreams, release checklist, open decisions).
