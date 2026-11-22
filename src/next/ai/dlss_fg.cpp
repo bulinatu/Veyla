@@ -91,7 +91,7 @@ bool DlssFg::Start(const std::wstring& runtime_dir, int width, int height, int m
         nr_.reset();
         return false;
     }
-    nr_->SetNeuralBypass(true);
+    nr_->SetNeuralBypass(!neural_in_worker_);
     multiplier_.store(std::clamp(multiplier, 2, 6));
     nr_->SetFrameGeneration(multiplier_.load());
     if (!nr_->EnablePresent(width, height, detail)) {

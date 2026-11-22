@@ -45,6 +45,10 @@ public:
 
     // Applies on the worker thread, never from the UI thread.
     void SetMultiplier(int multiplier);
+    // true: the worker runs Neural Render on the frames it presents, so NR sits
+    // after generation in its pipeline. false: the worker presents raw frames.
+    void SetNeuralInWorker(bool on) { neural_in_worker_ = on; }
+    bool neural_in_worker() const { return neural_in_worker_; }
 
     // Moves the frame into the one-slot queue; the newest frame wins. Moving
     // avoids a second 8 MB copy on the presentation thread.
@@ -97,6 +101,7 @@ private:
 
     std::atomic<bool> failed_{false};
     std::atomic<int> multiplier_{2};
+    bool neural_in_worker_ = false;
     std::atomic<unsigned long long> dropped_{0};
     bool ready_ = false;
     bool proxy_runtime_ = false;

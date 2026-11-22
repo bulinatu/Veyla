@@ -197,6 +197,7 @@ private:
     bool EnsureNr(int width, int height);
     void StopNr();
     void EnhanceNeural(media::DecodedFrame& frame);
+    bool NeuralInWorkerWanted() const;
     bool dlss_fg_failed_ = false;
     bool fg_covering_ = false;
     int fg_actual_mult_ = 0;

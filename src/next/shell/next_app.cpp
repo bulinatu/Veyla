@@ -3676,7 +3676,16 @@ void NextApp::StopNr() {
     nr_h_ = 0;
 }
 
+bool NextApp::NeuralInWorkerWanted() const {
+    return settings_.ai.neural_render && settings_.ai.frame_generation &&
+           settings_.ai.fg_backend == AiBackend::DlssFg;
+}
+
 void NextApp::EnhanceNeural(media::DecodedFrame& frame) {
+    if (dlss_fg_ && dlss_fg_->ready() && dlss_fg_->neural_in_worker()) {
+        // The DLSS-G worker runs NR on the frames it presents.
+        return;
+    }
     if (!settings_.ai.neural_render || nr_failed_ || frame.rgba.empty() || frame.pq) {
         // HDR frames go straight through: the worker's video mode is 8-bit.
         return;
@@ -4218,6 +4227,7 @@ bool NextApp::EnsureDlssFg(int width, int height) {
         return false;
     }
     dlss_fg_ = std::make_unique<DlssFg>();
+    dlss_fg_->SetNeuralInWorker(NeuralInWorkerWanted());
     std::string detail;
     if (!dlss_fg_->Start(system_.nr_dir, width, height, multiplier, detail)) {
         dlss_fg_.reset();
