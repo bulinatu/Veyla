@@ -855,12 +855,24 @@ impl Root {
                 format!("{}x", self.settings.i("ai.fg_multiplier", 2)),
             ));
         }
-        fg_rows.push(self.toggle_row(
-            "ai.motion_safety",
-            "Motion safety",
-            "Fall back to real frames on fast cuts",
-            cx,
-        ));
+        if rife_backend {
+            fg_rows.push(self.toggle_row(
+                "ai.motion_safety",
+                "Motion safety",
+                "Fall back to real frames on fast cuts",
+                cx,
+            ));
+        } else {
+            fg_rows.push(self.disabled_row(
+                "Motion safety",
+                "Only with the RIFE backend",
+                if self.settings.b("ai.motion_safety", true) {
+                    "On"
+                } else {
+                    "Off"
+                },
+            ));
+        }
         if rife_backend {
             fg_rows.push(self.seg_int_row(
                 "ai.rife_model",
