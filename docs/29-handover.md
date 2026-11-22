@@ -1407,3 +1407,16 @@ stopped presenting them as if they did something.
 - Known open: DLSS-G interpolation artefacts on fast pans (no real motion
   vectors on a video stream), freeze during fast pans not reproduced,
   `frame_buffer=0` cadence weaker than 1, DLSS-G worker phase wobble.
+
+## 2.4.7 - NR inside the DLSS-G worker
+
+- Neural Render runs inside the DLSS-G worker when NR, FG and DLSS-G are on;
+  loop p99 16 ms -> 2.3 ms, frames over 10 ms per second 121/151 -> 1/141.
+- Head-disappearing artefact on fast pans gone with this setting (user-confirmed).
+- Standalone: dist/BetterRemotePlay-2.4.7-standalone.zip (922.0 MB)
+  SHA256 718EC19F82419E43F999EB3240C1209E34723D6FEC43FBDAFF1E666636314EA8
+- Update 2.4.6 -> 2.4.7: dist/BetterRemotePlay-2.4.6-to-2.4.7-update.exe (5.3 MB)
+  SHA256 F708C39C0DF679C96B3E8991DE23288B5888CFF4708C412FC42FF5EEC8B502D8
+- brpnext.exe 1C2C38F829C72F446F1F166063BAE3D8604EA85ED2C1BC445F8D6D8CAF9D056A
+- brpnext-engine.exe D69F5E2C45158EA8F0AC0A306D4E92FAA1B758A3B17BD9F8AD3F36B51D296E4D
+- Patch verified: version=2.4.7, 0 markers, files_differ=0. Shell subsystem 2 (GUI). Smoke: shell alive after 6 s.

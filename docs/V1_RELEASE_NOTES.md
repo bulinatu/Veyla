@@ -224,3 +224,7 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
 
 - Smoother pacing (time-based playout, queue trim), lower frame age (84 -> 37 ms at buffer 1), no spin in the presentation loop.
 - Motion safety is RIFE-only; the control is dimmed on DLSS-G.
+
+## 2.4.7
+
+- Neural Render runs inside the DLSS-G worker when NR and FG are on: smoother engine (loop p99 2 ms) and the head-disappearing artefact on fast pans is gone.

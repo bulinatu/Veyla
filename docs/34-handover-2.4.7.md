@@ -1,8 +1,7 @@
 # 34 - Handover: pacing, latency and neural order (2.4.6 -> 2.4.7)
 
-Status: 2.4.6 is released (`639f4ba`). 2.4.7 is in progress: the version bump
-is uncommitted and the release build was still running when this was written.
-Nothing below is released until the checklist at the end is done.
+Status: 2.4.7 is released. Standalone and update are built and verified; hashes
+are in docs/29-handover.md under 2.4.7.
 
 ## 1. Where things stand
 

@@ -1,6 +1,6 @@
 [package]
 name = "brpnext-ui"
-version = "2.4.6"
+version = "2.4.7"
 edition = "2021"
 rust-version = "1.90"
 description = "BetterRemotePlay Next - GPUI shell"
