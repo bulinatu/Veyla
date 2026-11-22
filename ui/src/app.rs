@@ -3,10 +3,11 @@
 use std::time::Duration;
 
 use gpui::{
-    div, prelude::*, point, px, relative, rgba, rgb, size, Animation, AnimationExt as _, AnyElement,
-    AnyWindowHandle, App, Bounds, Context, FocusHandle, Focusable, FontWeight, InteractiveElement,
-    IntoElement, MouseButton, Render, SharedString, StatefulInteractiveElement, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
+    div, hsla, point, prelude::*, px, relative, rgba, rgb, size, Animation, AnimationExt as _,
+    AnyElement, AnyWindowHandle, App, Bounds, BoxShadow, Context, FocusHandle, Focusable,
+    FontWeight, InteractiveElement, IntoElement, MouseButton, Render, SharedString,
+    StatefulInteractiveElement, Window, WindowBackgroundAppearance, WindowBounds, WindowKind,
+    WindowOptions,
 };
 
 use crate::model::{Preset, Settings, Status};
@@ -1266,12 +1267,38 @@ impl Render for Root {
                             .child(
                                 div()
                                     .w_full()
-                                    .max_w(px(1180.0))
+                                    .max_w(px(1220.0))
                                     .mx_auto()
-                                    .px(px(26.0))
-                                    .pt(px(26.0))
-                                    .pb(px(44.0))
-                                    .child(page),
+                                    .px(px(18.0))
+                                    .pt(px(16.0))
+                                    .pb(px(40.0))
+                                    .child(
+                                        // Frosted sheet: a translucent slab over
+                                        // the aurora with a wide gaussian shadow,
+                                        // so the content area reads as glass
+                                        // instead of floating on hard blobs.
+                                        div()
+                                            .rounded(px(26.0))
+                                            .border_1()
+                                            .border_color(rgba(0xFFFFFF0D))
+                                            .bg(rgba(0x08080FB8)).relative()
+                                            .shadow(vec![
+                                                BoxShadow {
+                                                    color: hsla(0.0, 0.0, 0.0, 0.55),
+                                                    offset: point(px(0.0), px(24.0)),
+                                                    blur_radius: px(70.0),
+                                                    spread_radius: px(-16.0),
+                                                },
+                                                BoxShadow {
+                                                    color: hsla(0.72, 0.70, 0.60, 0.05),
+                                                    offset: point(px(0.0), px(0.0)),
+                                                    blur_radius: px(90.0),
+                                                    spread_radius: px(-30.0),
+                                                },
+                                            ])
+                                            .p(px(22.0))
+                                            .child(page),
+                                    ),
                             ),
                     ),
             )

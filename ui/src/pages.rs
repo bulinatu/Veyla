@@ -362,7 +362,7 @@ impl Root {
                 div()
                     .text_size(theme::tiny())
                     .text_color(theme::muted())
-                    .child("BetterRemotePlay Next 2.4 · GPUI shell"),
+                    .child("BetterRemotePlay Next 2.4.1 · GPUI shell"),
             )
             .child(
                 div()

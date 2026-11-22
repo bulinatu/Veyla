@@ -195,3 +195,9 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
   live status in Settings and in the F10 control center.
 - HDR frames bypass the 8-bit worker; the worker stops on Leave Watch and on
   neural setting changes.
+
+## 2.4.1
+
+- Frosted-glass composition in the shell: translucent content sheet, soft
+  gaussian card/top-bar shadows, softer aurora. GPUI has no true backdrop blur;
+  this is a layered approximation, documented as such.

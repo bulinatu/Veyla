@@ -1266,3 +1266,35 @@ stopped presenting them as if they did something.
   `Neural render on · 10.1 ms`, cadence 33.4/49.7 ms.
 - Note: the user's settings had `ai.neural_render` enabled during the test and
   were left enabled on purpose; it is the feature they asked for.
+
+## 2.4.1 - frosted glass composition
+
+- **No backdrop blur in GPUI 0.2.** The framework has no filter/backdrop pass; the
+  only GPU blur available is the gaussian used by box shadows. The look is
+  therefore a composition, not a filter, and the code says so.
+- **Frosted content sheet.** The page column now sits on a translucent slab
+  (`rgba(8,8,15,0.72)`, 26 px radius, 1 px highlight) with a two-layer wide
+  shadow: a neutral 70 px gaussian and a faint violet 90 px halo. The aurora
+  stays animated around and softly through it.
+- **Card edges.** `widgets::card()` uses a vertical gradient plus the same
+  two-layer shadow (40 px dark, 60 px violet) instead of a flat rectangle, so
+  cards melt into the sheet rather than cutting hard holes.
+- **Aurora softening.** 16 concentric layers per blob (was 8), gentler alpha
+  falloff and a sixth 1500 px wash blob; per-blob alpha reduced so the field
+  reads as one smooth glow instead of separate circles.
+- **Top bar** gets a soft 26 px shadow to separate it from the sheet.
+- The stream, overlay panel and engine are untouched.
+
+### 2.4.1 package
+
+- Standalone: `dist/BetterRemotePlay-2.4.1-standalone.zip` (922.0 MB)
+  SHA256 `8EDC228BA505561C539CB9CBC1B03A9FB4930530CFE4A315B15AB601592E993C`
+- Update **2.4.0 -> 2.4.1**:
+  `dist/BetterRemotePlay-2.4.0-to-2.4.1-update.exe` (5.3 MB)
+  SHA256 `02A25B9AB754979BDB60385E467FC807D46128AC48F4382C7538479D09DA9B19`
+- `brpnext.exe`
+  `11287F92B3FE90155D274EBBF6B87877969C4138EB1B90DAA3920EDB75986D47`
+- `brpnext-engine.exe`
+  `623B7D7222E491D23722575C99DA98DA5273AF219A92289E36268C7A9EBB69C7`
+- Patch verified: `version=2.4.1`, 0 markers, `files_differ=0`.
+- Packaged visual check: frosted sheet, soft card halos, aurora in the gutters.

@@ -1,8 +1,8 @@
 //! Small styled building blocks shared by every page.
 
 use gpui::{
-    div, prelude::*, px, rgba, rgb, Div, FontWeight, InteractiveElement, IntoElement, SharedString,
-    StatefulInteractiveElement,
+    div, hsla, point, prelude::*, px, rgba, rgb, BoxShadow, Div, FontWeight, InteractiveElement,
+    IntoElement, SharedString, StatefulInteractiveElement,
 };
 use gpui::{AnyElement, App, ClickEvent, Window};
 
@@ -12,8 +12,29 @@ pub fn card() -> Div {
     div()
         .rounded(px(18.0))
         .border_1()
-        .border_color(rgba(theme::BORDER))
-        .bg(rgba(theme::PANEL))
+        .border_color(rgba(0xFFFFFF12))
+        .bg(gpui::linear_gradient(
+            165.0,
+            gpui::linear_color_stop(rgba(0x16161FF2), 0.0),
+            gpui::linear_color_stop(rgba(0x090910F7), 1.0),
+        ))
+        // The shadow is a real GPU gaussian pass. A wide, weak shadow plus a
+        // violet halo melts the card edge into the aurora instead of cutting a
+        // hard rectangle out of it.
+        .shadow(vec![
+            BoxShadow {
+                color: hsla(0.0, 0.0, 0.0, 0.45),
+                offset: point(px(0.0), px(14.0)),
+                blur_radius: px(40.0),
+                spread_radius: px(-10.0),
+            },
+            BoxShadow {
+                color: hsla(0.72, 0.72, 0.62, 0.06),
+                offset: point(px(0.0), px(0.0)),
+                blur_radius: px(60.0),
+                spread_radius: px(-18.0),
+            },
+        ])
 }
 
 pub fn card_pad() -> Div {

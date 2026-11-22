@@ -23,13 +23,13 @@ struct Blob {
     drift: f32,
 }
 
-const BLOBS: [Blob; 5] = [
+const BLOBS: [Blob; 6] = [
     Blob {
         color: 0x7C3AED,
         size: 780.0,
         x: -180.0,
         y: -220.0,
-        alpha: 78.0,
+        alpha: 54.0,
         phase: 0.0,
         seconds: 34.0,
         drift: 46.0,
@@ -39,7 +39,7 @@ const BLOBS: [Blob; 5] = [
         size: 640.0,
         x: 900.0,
         y: -160.0,
-        alpha: 62.0,
+        alpha: 42.0,
         phase: 1.7,
         seconds: 41.0,
         drift: 38.0,
@@ -49,7 +49,7 @@ const BLOBS: [Blob; 5] = [
         size: 560.0,
         x: 520.0,
         y: 560.0,
-        alpha: 34.0,
+        alpha: 22.0,
         phase: 3.1,
         seconds: 47.0,
         drift: 30.0,
@@ -59,7 +59,7 @@ const BLOBS: [Blob; 5] = [
         size: 520.0,
         x: -120.0,
         y: 520.0,
-        alpha: 30.0,
+        alpha: 20.0,
         phase: 4.6,
         seconds: 39.0,
         drift: 34.0,
@@ -69,10 +69,22 @@ const BLOBS: [Blob; 5] = [
         size: 420.0,
         x: 760.0,
         y: 260.0,
-        alpha: 26.0,
+        alpha: 10.0,
         phase: 5.9,
         seconds: 29.0,
         drift: 26.0,
+    },
+    // Very large, very weak wash: fills the middle so the background reads as
+    // one soft field instead of separate circles.
+    Blob {
+        color: 0x6D28D9,
+        size: 1500.0,
+        x: 120.0,
+        y: -140.0,
+        alpha: 10.0,
+        phase: 2.2,
+        seconds: 58.0,
+        drift: 18.0,
     },
 ];
 
@@ -84,11 +96,11 @@ fn blob_stack(blob: &Blob) -> Div {
         .w(px(blob.size))
         .h(px(blob.size));
 
-    for step in 0..8 {
-        let scale = 1.0 - step as f32 * 0.085;
+    for step in 0..16 {
+        let scale = 1.0 - step as f32 * 0.044;
         let inner = blob.size * scale;
         let offset = (blob.size - inner) * 0.5;
-        let alpha = (blob.alpha * (1.0 - step as f32 * 0.105)).max(2.0) as u32;
+        let alpha = (blob.alpha * (1.0 - step as f32 * 0.058)).max(1.0) as u32;
         stack = stack.child(
             div()
                 .absolute()
