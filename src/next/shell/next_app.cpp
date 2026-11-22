@@ -39,7 +39,7 @@ constexpr float kTitleHeight = 40.0f;
 constexpr float kSidebar = 224.0f;
 constexpr float kSidebarCollapsed = 68.0f;
 constexpr float kPad = 28.0f;
-constexpr wchar_t kVersion[] = L"1.0.4";
+constexpr wchar_t kVersion[] = L"1.0.5";
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -602,7 +602,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  1.0.4", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  1.0.5", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -716,7 +716,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"BetterRemotePlay Next 1.0.4",
+        renderer_->Text(L"BetterRemotePlay Next 1.0.5",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -1753,10 +1753,18 @@ void NextApp::RenderDiagnostics(Widgets& widgets) {
                       present_refresh_hz_, present_misses_rate_, loop_p99_,
                       static_cast<double>(RefreshHz()));
     } else if (stream.connected && fg_covering_) {
-        std::swprintf(scanout, 240,
-                      L"Scanout: generator window  |  %.1f fps shown  |  source %.1f fps  |  "
-                      L"target %.1f Hz",
-                      fg_fps_, stream.source_fps, static_cast<double>(RefreshHz()));
+        if (fg_fps_ > 0.5) {
+            std::swprintf(scanout, 240,
+                          L"Scanout: generator window  |  %.1f fps shown  |  source %.1f fps  |  "
+                          L"target %.1f Hz",
+                          fg_fps_, stream.source_fps, static_cast<double>(RefreshHz()));
+        } else {
+            std::swprintf(scanout, 240,
+                          L"Scanout: generator window  |  DLSS-G %dx  |  source %.1f fps  |  "
+                          L"target %.1f Hz",
+                          settings_.ai.fg_multiplier, stream.source_fps,
+                          static_cast<double>(RefreshHz()));
+        }
     } else if (stream.connected) {
         std::swprintf(scanout, 240,
                       L"Scanout: %.1f Hz desktop  |  not in Watch  |  target %.1f Hz",
@@ -1840,7 +1848,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"BetterRemotePlay Next 1.0.4  |  stable release", L"STABLE", true);
+               L"BetterRemotePlay Next 1.0.5  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -1849,7 +1857,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay Next", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 1.0.4  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 1.0.5  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -2167,7 +2175,9 @@ void NextApp::BuildOverlayView() {
                                    std::to_wstring(settings_.ai.fg_multiplier) + L"x"
                              : std::wstring(L"RIFE"))
                   : L"Off",
-            dlss_fg ? std::to_wstring(static_cast<int>(fg_fps_)) + L" shown fps"
+            dlss_fg ? (fg_fps_ > 0.5
+                           ? std::to_wstring(static_cast<int>(fg_fps_)) + L" shown fps"
+                           : std::to_wstring(OutputFps(settings_)) + L" fps requested")
                     : (rife_fg ? std::to_wstring(rife_generated_rate_) + L" generated/s"
                                : L"source cadence only")));
     }
@@ -2252,7 +2262,9 @@ void NextApp::BuildOverlayView() {
                 : L""));
     fg.rows.push_back(info(L"DISPLAYED",
                            std::to_wstring(static_cast<int>(
-                               dlss_fg ? fg_fps_ : static_cast<double>(display_rate_))) +
+                               dlss_fg ? (fg_fps_ > 0.5 ? fg_fps_
+                                                       : static_cast<double>(OutputFps(settings_)))
+                                       : static_cast<double>(display_rate_))) +
                                L" fps",
                            L"measured, not requested"));
     fg.rows.push_back(info(L"NOTE", dlss_fg ? L"flat depth + estimated motion" : L"",
@@ -2292,8 +2304,10 @@ void NextApp::BuildOverlayView() {
     performance.rows.push_back(info(L"SOURCE", buffer));
     performance.rows.push_back(info(
         L"DISPLAYED",
-        std::to_wstring(static_cast<int>(dlss_fg ? fg_fps_
-                                                : static_cast<double>(display_rate_))) +
+        std::to_wstring(static_cast<int>(
+            dlss_fg ? (fg_fps_ > 0.5 ? fg_fps_
+                                    : static_cast<double>(OutputFps(settings_)))
+                    : static_cast<double>(display_rate_))) +
             L" fps"));
     std::swprintf(buffer, 220, L"%.2f ms", snapshot.decode_ms);
     performance.rows.push_back(info(L"DECODE", buffer));
@@ -2526,6 +2540,12 @@ void NextApp::Toast(const std::wstring& text, bool error) {
 }
 
 void NextApp::ProbeIfNeeded(double now) {
+    // Enumerating adapters and monitors can take tens of milliseconds. Never do
+    // it while a stream is presenting: a full system probe on the presentation
+    // thread is a visible hitch, and the startup snapshot is already complete.
+    if (watching_) {
+        return;
+    }
     if (last_probe_ < 0.0 || now - last_probe_ > 30.0) {
         system_ = ProbeSystem();
         last_probe_ = now;

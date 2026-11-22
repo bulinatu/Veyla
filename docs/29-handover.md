@@ -730,3 +730,44 @@ DLSS-G 2x:    fed 16.6 ms avg | worker 119.7 fps displayed | 0 feed drops
   scanout 239.8 Hz, 0 present misses/s. 30 fps source + DLSS-G 2x: worker
   59.9-60.1 fps steady. 60 fps source + DLSS-G 2x: worker 118-120 fps; the
   dips are the worker at the edge, not the parent presenter.
+
+## 1.0.5 - once-per-second hitch pass
+
+The reported symptom was one hitch roughly every second, not continuous
+jitter. Three 1 Hz operations were sharing a thread with presentation or with
+the generator feed:
+
+- `DlssFg::FrameWindow()` polled `nr-worker.log` once per second **on the
+  presentation/feed thread** (`last_write_time`, open, seek, read 8 KB). The
+  read now runs on its own monitor thread and only publishes atomics.
+- The worker's stderr was `nr-worker.log`, so the worker itself wrote to a
+  growing text file once per second (`[fg] displayed ...`), plus a
+  `[video] delivered frame` line twice per second. By default stderr now goes
+  to `NUL`; set `BRP_FG_LOG=1` to restore `nr-worker.log` for diagnostics.
+  With the log on, the worker measured 120.0/119.6 fps; the UI falls back to
+  the requested output when no log is present.
+- `ProbeIfNeeded()` enumerated the GPU/monitors every 30 seconds on the
+  presentation thread. It is now skipped for the whole Watch session.
+
+Measured after the change (60 fps source, DLAA, DLSS-G 2x, 1440p window):
+
+```
+parent loop: p50 1.7 ms, p99 20.4 ms (SR frame), max 20.8 ms, no 1 Hz spike
+feed: 60 frames/s held, worker 1920x1080, 2x
+```
+
+### 1.0.5 package
+
+- Standalone: `dist/BetterRemotePlay-1.0.5-standalone.zip`
+  SHA256 `2C81F8E3E7325216EC53FB19CC7F0EE1B00EAAA7C4CF95C53F3D7853F0CE8382`
+- Update **1.0.4 -> 1.0.5**:
+  `dist/BetterRemotePlay-1.0.4-to-1.0.5-update.exe` (1.35 MB)
+  SHA256 `6E153FD4D143022C39774F35E99E80D31EB60858C98D15BABEF092EBE6A1B131`
+- Update **1.0.3 -> 1.0.5**:
+  `dist/BetterRemotePlay-1.0.3-to-1.0.5-update.exe` (1.35 MB)
+  SHA256 `9DBA28BF88E4B06CD84B6D0AEACBE15DDD1E5475E8DBAEBCA3E2EC256702E247`
+- `brpnext.exe` SHA256
+  `7437A124F5DE2ADD69631D43A490CF64CD090F093CB74901A56C3D81CAFB2C7E`
+- Patch 1.0.4 -> 1.0.5 verified: `version=1.0.5`, 0 markers,
+  `files_differ=0`.
+- Tests: `brp_next_tests` ALL PASS (82).

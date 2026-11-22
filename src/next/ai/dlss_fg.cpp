@@ -109,9 +109,8 @@ bool DlssFg::Start(const std::wstring& runtime_dir, int width, int height, int m
     worker_window_ = nullptr;
     last_x_ = last_y_ = last_w_ = last_h_ = 0;
     next_attach_ = 0.0;
-    next_log_ = 0.0;
-    displayed_fps_ = 0.0;
-    actual_multiplier_ = 0;
+    displayed_fps_.store(0.0);
+    actual_multiplier_.store(0);
     {
         std::lock_guard<std::mutex> lock(note_mutex_);
         note_ = L"DLSS-G " + std::to_wstring(multiplier_.load()) + L"x at " +
@@ -120,6 +119,8 @@ bool DlssFg::Start(const std::wstring& runtime_dir, int width, int height, int m
 
     run_ = true;
     thread_ = std::thread([this]() { WorkerMain(); });
+    log_run_.store(true);
+    log_thread_ = std::thread([this]() { LogMain(); });
     std::fprintf(stderr, "[next] DLSS-G worker %dx%d %dx pid %lu\n", width, height,
                  multiplier_.load(),
                  static_cast<unsigned long>(nr_->worker_pid()));
@@ -136,6 +137,17 @@ void DlssFg::Stop() {
     if (thread_.joinable()) {
         thread_.join();
     }
+    // The log reader does synchronous file I/O. It must never share a thread
+    // with presentation or with the frame feed: a 1 Hz disk stall there is
+    // exactly one held frame per second.
+    {
+        std::lock_guard<std::mutex> lock(log_mutex_);
+        log_run_.store(false);
+    }
+    log_cv_.notify_all();
+    if (log_thread_.joinable()) {
+        log_thread_.join();
+    }
     if (nr_) {
         nr_->SetFrameGeneration(0);
         nr_->DisablePresent();
@@ -145,8 +157,8 @@ void DlssFg::Stop() {
     CloseWindow();
     ready_ = false;
     failed_.store(false);
-    displayed_fps_ = 0.0;
-    actual_multiplier_ = 0;
+    displayed_fps_.store(0.0);
+    actual_multiplier_.store(0);
 }
 
 void DlssFg::SetMultiplier(int multiplier) {
@@ -287,11 +299,6 @@ void DlssFg::FrameWindow(HWND app, double now) {
         visible_ = show;
     }
     covering_ = show;
-
-    if (now >= next_log_) {
-        next_log_ = now + 1.0;
-        PollLog(now);
-    }
 }
 
 void DlssFg::Hide() {
@@ -312,13 +319,27 @@ void DlssFg::CloseWindow() {
     last_x_ = last_y_ = last_w_ = last_h_ = 0;
 }
 
+void DlssFg::LogMain() {
+    for (;;) {
+        std::unique_lock<std::mutex> lock(log_mutex_);
+        log_cv_.wait_for(lock, std::chrono::seconds(1),
+                         [this]() { return !log_run_.load(); });
+        if (!log_run_.load()) {
+            return;
+        }
+        lock.unlock();
+        PollLog(0.0);
+    }
+}
+
 void DlssFg::PollLog(double now) {
+    (void)now;
     const std::filesystem::path log = std::filesystem::path(ExeDirectory()) / L"nr-worker.log";
     std::error_code ec;
     const auto modified = std::filesystem::last_write_time(log, ec);
     if (ec || std::filesystem::file_time_type::clock::now() - modified >
                   std::chrono::seconds(3)) {
-        displayed_fps_ = 0.0;
+        displayed_fps_.store(0.0);
         return;
     }
     std::ifstream file(log, std::ios::binary);
@@ -335,19 +356,18 @@ void DlssFg::PollLog(double now) {
     if (pos != std::string::npos) {
         double fps = 0.0;
         if (std::sscanf(text.c_str() + pos, "[fg] displayed %lf FPS", &fps) == 1) {
-            displayed_fps_ = fps;
+            displayed_fps_.store(fps);
         }
         const std::size_t generated = text.find("generated, ", pos);
         if (generated != std::string::npos) {
-            actual_multiplier_ = std::atoi(text.c_str() + generated + 11);
+            actual_multiplier_.store(std::atoi(text.c_str() + generated + 11));
         }
     }
-    (void)now;
 }
 
-int DlssFg::actual_multiplier() const { return actual_multiplier_; }
+int DlssFg::actual_multiplier() const { return actual_multiplier_.load(); }
 
-double DlssFg::displayed_fps() const { return displayed_fps_; }
+double DlssFg::displayed_fps() const { return displayed_fps_.load(); }
 
 DWORD DlssFg::worker_pid() const { return nr_ ? nr_->worker_pid() : 0; }
 

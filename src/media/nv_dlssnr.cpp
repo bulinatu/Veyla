@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 
@@ -330,12 +331,20 @@ bool NvDlssnr::Start(const std::wstring& worker_exe, const std::wstring& working
     ::SetHandleInformation(stdin_write_, HANDLE_FLAG_INHERIT, 0);
     ::SetHandleInformation(stdout_read_, HANDLE_FLAG_INHERIT, 0);
 
-    log_file_ = ::CreateFileW((ExeDirectory() + L"\\nr-worker.log").c_str(), GENERIC_WRITE,
-                              FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, CREATE_ALWAYS,
-                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    // The worker logs once per second. A growing text file on the system drive
+    // can be scanned by antivirus or flushed at exactly that cadence, which
+    // shows up as one held frame per second. Keep the worker quiet by default;
+    // BRP_FG_LOG=1 restores nr-worker.log for diagnostics.
+    const bool want_worker_log = std::getenv("BRP_FG_LOG") != nullptr;
+    if (want_worker_log) {
+        log_file_ = ::CreateFileW((ExeDirectory() + L"\\nr-worker.log").c_str(),
+                                  GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                                  CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    }
     if (log_file_ == INVALID_HANDLE_VALUE || !log_file_) {
         // Never let the worker's log fall through to stdout: that pipe is the
-        // protocol, and a log line there desynchronises every reply.
+        // protocol, and a log line there desynchronises every reply. NUL is a
+        // real sink and keeps the worker's per-second write off the disk.
         log_file_ = ::CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                   &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (log_file_ == INVALID_HANDLE_VALUE) {

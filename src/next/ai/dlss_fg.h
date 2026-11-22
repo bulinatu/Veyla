@@ -79,16 +79,21 @@ private:
     };
 
     void WorkerMain();
+    void LogMain();
     bool Attach(HWND app);
     void PollLog(double now);
     void CloseWindow();
 
     std::unique_ptr<brp::media::NvDlssnr> nr_;
     std::thread thread_;
+    std::thread log_thread_;
     std::mutex mutex_;
     std::condition_variable cv_;
     std::optional<Job> pending_;
     bool run_ = false;
+    std::atomic<bool> log_run_{false};
+    std::mutex log_mutex_;
+    std::condition_variable log_cv_;
 
     std::atomic<bool> failed_{false};
     std::atomic<int> multiplier_{2};
@@ -106,10 +111,9 @@ private:
     int last_w_ = 0;
     int last_h_ = 0;
     double next_attach_ = 0.0;
-    double next_log_ = 0.0;
 
-    double displayed_fps_ = 0.0;
-    int actual_multiplier_ = 0;
+    std::atomic<double> displayed_fps_{0.0};
+    std::atomic<int> actual_multiplier_{0};
     mutable std::mutex note_mutex_;
     std::wstring note_;
 };

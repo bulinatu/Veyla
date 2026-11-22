@@ -83,3 +83,11 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
   content changes on an even refresh grid without a wall-clock timer.
 - The rigid generator feed grid tested in development made the worker slower
   and is not shipped.
+
+## 1.0.5 - once-per-second hitch
+
+- The worker-log poll (1 Hz file I/O) no longer runs on the presentation or
+  generator-feed thread.
+- The DLSS-G worker's stderr goes to NUL by default, removing its per-second
+  disk write; `BRP_FG_LOG=1` restores the log.
+- GPU/monitor probing no longer runs during Watch.
