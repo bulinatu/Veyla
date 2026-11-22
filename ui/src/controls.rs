@@ -270,6 +270,32 @@ impl Root {
             .into_any_element()
     }
 
+    pub fn disabled_row(
+        &self,
+        label: &'static str,
+        hint: &'static str,
+        value: impl Into<SharedString>,
+    ) -> AnyElement {
+        let chip = div()
+            .flex()
+            .items_center()
+            .justify_center()
+            .h(px(30.0))
+            .px(px(12.0))
+            .rounded(px(8.0))
+            .bg(rgba(0xFFFFFF08))
+            .border_1()
+            .border_color(rgba(0xFFFFFF12))
+            .text_size(theme::tiny())
+            .text_color(theme::dim())
+            .child(value.into())
+            .into_any_element();
+        div()
+            .opacity(0.38)
+            .child(widgets::row(label, hint, chip))
+            .into_any_element()
+    }
+
     pub fn stepper_row(
         &self,
         key: &'static str,

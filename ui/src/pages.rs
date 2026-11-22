@@ -823,58 +823,82 @@ impl Root {
             ],
         );
 
+        let rife_backend = self.settings.s("ai.fg_backend", "none") == "rife";
+        let dlss_backend = self.settings.s("ai.fg_backend", "none") == "dlss-fg";
+        let mut fg_rows: Vec<AnyElement> = vec![
+            self.toggle_row(
+                "ai.frame_generation",
+                "Frame generation",
+                "Off for the lowest possible latency",
+                cx,
+            ),
+            self.seg_row(
+                "ai.fg_backend",
+                "Backend",
+                "DLSS-G needs an RTX 40/50; RIFE runs on the app's presenter",
+                &[("None", "none"), ("DLSS-G", "dlss-fg"), ("RIFE", "rife")],
+                cx,
+            ),
+        ];
+        if dlss_backend {
+            fg_rows.push(self.seg_int_row(
+                "ai.fg_multiplier",
+                "Multiplier",
+                "2x is the stable multiplier at 30 fps",
+                &[(2, "2x"), (3, "3x"), (4, "4x")],
+                cx,
+            ));
+        } else {
+            fg_rows.push(self.disabled_row(
+                "Multiplier",
+                "Only with the DLSS-G backend",
+                format!("{}x", self.settings.i("ai.fg_multiplier", 2)),
+            ));
+        }
+        fg_rows.push(self.toggle_row(
+            "ai.motion_safety",
+            "Motion safety",
+            "Fall back to real frames on fast cuts",
+            cx,
+        ));
+        if rife_backend {
+            fg_rows.push(self.seg_int_row(
+                "ai.rife_model",
+                "RIFE model",
+                "Only used by the RIFE backend",
+                &[(0, "Lite"), (1, "Heavy")],
+                cx,
+            ));
+            fg_rows.push(self.stepper_row(
+                "ai.blend",
+                "Blend",
+                "Mix generated and real frames",
+                0,
+                100,
+                5,
+                pct,
+                cx,
+            ));
+        } else {
+            fg_rows.push(self.disabled_row(
+                "RIFE model",
+                "Only with the RIFE backend",
+                if self.settings.i("ai.rife_model", 0) == 0 {
+                    "Lite"
+                } else {
+                    "Heavy"
+                },
+            ));
+            fg_rows.push(self.disabled_row(
+                "Blend",
+                "Only with the RIFE backend",
+                format!("{}%", self.settings.i("ai.blend", 10)),
+            ));
+        }
         let fg = group(
             "Frame generation",
             "Generated frames between decoded ones",
-            vec![
-                self.toggle_row(
-                    "ai.frame_generation",
-                    "Frame generation",
-                    "Off for the lowest possible latency",
-                    cx,
-                ),
-                self.seg_row(
-                    "ai.fg_backend",
-                    "Backend",
-                    "DLSS-G needs an RTX 40/50; RIFE runs on the app's presenter",
-                    &[
-                        ("None", "none"),
-                        ("DLSS-G", "dlss-fg"),
-                        ("RIFE", "rife"),
-                    ],
-                    cx,
-                ),
-                self.seg_int_row(
-                    "ai.fg_multiplier",
-                    "Multiplier",
-                    "2x is the stable multiplier at 30 fps",
-                    &[(2, "2x"), (3, "3x"), (4, "4x")],
-                    cx,
-                ),
-                self.toggle_row(
-                    "ai.motion_safety",
-                    "Motion safety",
-                    "Fall back to real frames on fast cuts",
-                    cx,
-                ),
-                self.seg_int_row(
-                    "ai.rife_model",
-                    "RIFE model",
-                    "Only used by the RIFE backend",
-                    &[(0, "Lite"), (1, "Heavy")],
-                    cx,
-                ),
-                self.stepper_row(
-                    "ai.blend",
-                    "Blend",
-                    "Mix generated and real frames",
-                    0,
-                    100,
-                    5,
-                    pct,
-                    cx,
-                ),
-            ],
+            fg_rows,
         );
 
         let runtime_text = if self.status.nr_runtime {

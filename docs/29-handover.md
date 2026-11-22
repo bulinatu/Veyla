@@ -1362,3 +1362,23 @@ stopped presenting them as if they did something.
   `FF8F0AE46029D6C00002CAA9D64274296B6656A34C841E85E764318E5286761B`
 - Patch verified: `version=2.4.4`, 0 markers, `files_differ=0`.
 - Packaged visual check: dash/square/x buttons and the play mark render.
+
+## 2.4.5 - backend-aware controls
+
+- Neural > Frame generation now dims what the selected backend cannot use:
+  RIFE model and Blend are washed out (opacity 0.38, read-only value chip, no
+  handlers) unless the backend is RIFE; Multiplier is washed out unless the
+  backend is DLSS-G.
+- The dimmed rows still show the stored value, so nothing looks missing, but a
+  click cannot change a setting that would be ignored.
+
+### 2.4.5 package
+
+- Standalone: `dist/BetterRemotePlay-2.4.5-standalone.zip` (922.0 MB)
+  SHA256 `397FC38700A78C383C7DD22AB276E62914DC85B9995460173C2DED57B2163F18`
+- Update **2.4.4 -> 2.4.5**:
+  `dist/BetterRemotePlay-2.4.4-to-2.4.5-update.exe` (5.3 MB)
+  SHA256 `476707D7D36196323808F64E08F972425EAFCD1D5216DC2D0811B63ABA4F7175`
+- `brpnext.exe`
+  `84771956BBB27AA186DF0F395E91616A5746290D1D83686E4DA063E171747A18`
+- Patch verified: `version=2.4.5`, 0 markers, `files_differ=0`.

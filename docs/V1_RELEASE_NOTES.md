@@ -214,3 +214,8 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
 
 - Fixed the broken window-button glyphs and every other mojibake string in the
   shell; the UI sources are ASCII-only with Unicode escapes.
+
+## 2.4.5
+
+- RIFE model/blend are greyed out when DLSS-G is selected; the multiplier is
+  greyed out for RIFE. Dimmed rows are read-only.
