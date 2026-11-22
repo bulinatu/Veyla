@@ -53,7 +53,11 @@ public:
     // Copies the last SR output back to CPU RGBA (target resolution). Waits for
     // the submission that is still in flight first.
     bool Readback(std::vector<uint8_t>& out, std::string& detail);
-    bool Process(const uint8_t* rgba, int width, int height, Frame& out, std::string& detail);
+    // synchronous=true waits for the evaluation just submitted and returns its
+    // output (one source frame less latency). false returns the previous
+    // completed output and overlaps the GPU work with the display interval.
+    bool Process(const uint8_t* rgba, int width, int height, Frame& out, std::string& detail,
+                 bool synchronous = false);
 
     bool runtime_loaded() const { return runtime_loaded_; }
     bool ready() const { return feature_ != nullptr; }

@@ -887,3 +887,57 @@ the dominant hold, e.g. `holds 8v 100%`.
   `files_differ=0`.
 - Tests: `brp_next_tests` ALL PASS (82).
 - Profile after the pass: source 30 fps, frame buffer 1, DLAA, DLSS-G 2x.
+
+## 1.0.8 - SR latency at 30 fps and the SR/FG matrix
+
+With the frame buffer doing the smoothing, the asynchronous SR submit (which
+returns the previous output to avoid blocking) is no longer the right trade at
+30 fps: the buffer already adds one interval, and the async SR adds a second.
+When `frame_buffer > 0` and the source is 30 fps or lower, SR now evaluates and
+waits for the current output (`Process(..., synchronous=true)`). The 10 ms NGX
+wait fits the 33 ms budget, and the hold distribution stays `8:30`.
+
+At 60 fps the synchronous path is not used (the wait would eat most of the
+16.7 ms budget); the two-slot async path stays.
+
+Measured 30 fps / 240 Hz / DLAA / buffer 1 / no generator:
+
+```
+holds 8:30 every second, cadence p99 33.9 ms, present misses 0/s
+SR (synchronous) 10.2-11.0 ms per frame, decode 7.7-8.4 ms
+```
+
+SR/FG matrix measured with the current fixes (1080p HEVC, DLAA, 240 Hz):
+
+| Case | Result |
+| --- | --- |
+| 30 fps + buffer 1, no FG | holds 8:30, even 30 fps |
+| 30 fps + buffer 1 + DLSS-G 2x | worker 59.9-60.2 fps, feed p99 35.7 ms |
+| 30 fps + buffer 1 + DLSS-G 4x (SM86) | worker 92-94 fps, does not divide 240 Hz |
+| 60 fps + buffer 1, no FG | holds 4:30, even 60 fps |
+| 60 fps + buffer 1 + DLSS-G 2x | worker 118-120 fps |
+
+Guidance now encoded in the UI notes: for a 30 fps game use DLSS-G **2x**
+(60 fps out), not 4x; DLAA is the cleanest generator input; keep the frame
+buffer at 1. 4x is only worth it at 1080p on a 120/144 Hz target, where it can
+sustain ~120, and it is not offered as smooth on 240 Hz.
+
+Remaining last-percent judder with DLSS-G comes from the closed worker's own
+presenter (it is compositor-paced, latency 1) on a 240 Hz panel. A full-screen
+`CEF-OSC-WIDGET` capture overlay was present in several test runs and can also
+add periodic composition hitches; close OBS/Streamlabs/browser overlays when
+measuring.
+
+### 1.0.8 package
+
+- Standalone: `dist/BetterRemotePlay-1.0.8-standalone.zip`
+  SHA256 `C1E0AB23E513E55DD159B42822F1CF24465A4A3B8D73DFCB2B84FBDB976AE5AE`
+- Update **1.0.7 -> 1.0.8**:
+  `dist/BetterRemotePlay-1.0.7-to-1.0.8-update.exe` (1.35 MB)
+  SHA256 `BFD0E16AA7E00D428C5355991C179A50789C1D6CF30F46174D76209B557623F8`
+- `brpnext.exe` SHA256
+  `C2FD28DCAB8E5C3734CAE2A95A2ECC13C391C168E54C9815A4C0AEFF0AC6907A`
+- Patch 1.0.7 -> 1.0.8 verified: `version=1.0.8`, 0 markers,
+  `files_differ=0`.
+- Tests: `brp_next_tests` ALL PASS (82).
+- Profile: 30 fps, buffer 1, DLAA, DLSS-G 2x.

@@ -464,7 +464,7 @@ bool NvDlssSr::WaitPending(std::string& detail) {
 }
 
 bool NvDlssSr::Process(const uint8_t* rgba, int width, int height, Frame& out,
-                       std::string& detail) {
+                       std::string& detail, bool synchronous) {
     auto* params = static_cast<NVSDK_NGX_Parameter*>(parameters_);
     if (!feature_ || !rgba || width != in_width_ || height != in_height_) {
         detail = "DLSS SR is not initialized for this frame size";
@@ -554,6 +554,13 @@ bool NvDlssSr::Process(const uint8_t* rgba, int width, int height, Frame& out,
         return false;
     }
     pending_slot_ = slot;
+    if (synchronous) {
+        if (!WaitPending(detail)) {
+            return false;
+        }
+        last_output_slot_ = slot;
+        have_output_ = true;
+    }
     if (!have_output_) {
         // First frame after a (re)init: the caller needs something to show.
         if (!WaitPending(detail)) {

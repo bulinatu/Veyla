@@ -109,3 +109,12 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
   1 / 2 / 3 frames. Default and the current profile use 1 frame.
 - The DLSS-G feed uses the same clock; 30 fps + 2x measured 59.9-60.2 fps.
 - Diagnostics shows the dominant hold, for example `holds 8v 100%`.
+
+## 1.0.8 - SR/FG tuning for 30 fps
+
+- At 30 fps with a frame buffer, DLSS SR evaluates synchronously and returns
+  the current frame, removing the extra source interval the async path added.
+  The 8-refresh hold cadence is unchanged.
+- 4x DLSS-G at 1080p measured 92-94 fps on a 240 Hz panel, so 2x (60 fps) is
+  the stable choice for 30 fps games; DLAA is the recommended generator input.
+- Diagnostics keeps showing the dominant hold (`holds 8v 100%`).
