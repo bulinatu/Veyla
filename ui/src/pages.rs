@@ -254,6 +254,68 @@ impl Root {
 
         let profile_group = group("Profiles", "One click", vec![presets.into_any_element()]);
 
+        let saved_profiles = self.profiles();
+        let mut saved_rows = div().flex().flex_col().gap(px(6.0));
+        if saved_profiles.is_empty() {
+            saved_rows = saved_rows.child(
+                div()
+                    .text_size(theme::small())
+                    .text_color(theme::muted())
+                    .child("No saved profiles yet"),
+            );
+        } else {
+            for profile in saved_profiles {
+                let id = profile.id.clone();
+                let is_default = profile.is_default;
+                saved_rows = saved_rows.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .child(
+                                    div()
+                                        .text_size(theme::small())
+                                        .text_color(theme::text())
+                                        .child(profile.name),
+                                )
+                                .when(is_default, |el| {
+                                    el.child(widgets::chip("Default", theme::ACCENT_BRIGHT))
+                                }),
+                        )
+                        .child(widgets::button(
+                            "Apply",
+                            Tone::Subtle,
+                            cx.listener(
+                                move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                                    this.apply_profile(&id, cx);
+                                },
+                            ),
+                        )),
+                );
+            }
+        }
+        let profiles_group = widgets::card_pad()
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .child(widgets::section("Saved profiles", "Engine configuration"))
+            .child(saved_rows)
+            .child(widgets::button(
+                "Save current",
+                Tone::Ghost,
+                cx.listener(
+                    |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                        this.save_profile(cx);
+                    },
+                ),
+            ));
+
         let live_group = group(
             "Live",
             "Engine telemetry",
@@ -300,7 +362,7 @@ impl Root {
                 div()
                     .text_size(theme::tiny())
                     .text_color(theme::muted())
-                    .child("BetterRemotePlay Next 2.1 · GPUI shell"),
+                    .child("BetterRemotePlay Next 2.3 · GPUI shell"),
             )
             .child(
                 div()
@@ -318,7 +380,17 @@ impl Root {
                     .child(widgets::chip(
                         format!("{} Hz pad", self.settings.i("controller.poll_hz", 250)),
                         theme::PINK,
-                    )),
+                    ))
+                    .when(!self.status.gpu.is_empty(), |el| {
+                        el.child(widgets::chip(
+                            self.status
+                                .gpu
+                                .chars()
+                                .take(30)
+                                .collect::<String>(),
+                            theme::GREEN,
+                        ))
+                    }),
             );
 
         div()
@@ -340,7 +412,8 @@ impl Root {
                             .flex()
                             .flex_col()
                             .gap(px(16.0))
-                            .child(profile_group),
+                            .child(profile_group)
+                            .child(profiles_group),
                     ),
             )
             .child(stats)

@@ -12,11 +12,11 @@ use gpui::{
     InteractiveElement, IntoElement, Render, SharedString, StatefulInteractiveElement, Window,
 };
 
-use crate::bridge::{Devices, Engine, Shared};
+use crate::bridge::{Devices, Engine, ProfileInfo, Shared};
 use crate::model::{Settings, Status};
 use crate::{theme, widgets};
 
-const TABS: [&str; 7] = ["Info", "SR", "FG", "Video", "Stream", "Audio", "Pad"];
+const TABS: [&str; 8] = ["Info", "SR", "FG", "Video", "Stream", "Audio", "Pad", "Profile"];
 
 pub struct OverlayView {
     engine: Engine,
@@ -24,6 +24,8 @@ pub struct OverlayView {
     settings: Settings,
     status: Status,
     devices: Devices,
+    profiles: Vec<ProfileInfo>,
+    profiles_rev: u64,
     tab: usize,
     pub(crate) focus: FocusHandle,
     last_rev: u64,
@@ -33,9 +35,15 @@ pub struct OverlayView {
 impl OverlayView {
     pub fn new(engine: Engine, cx: &mut Context<Self>) -> Self {
         let shared = engine.shared.clone();
-        let (status, devices, devices_rev) = {
+        let (status, devices, devices_rev, profiles, profiles_rev) = {
             let state = shared.lock().unwrap();
-            (state.status.clone(), state.devices.clone().unwrap_or_default(), state.devices_rev)
+            (
+                state.status.clone(),
+                state.devices.clone().unwrap_or_default(),
+                state.devices_rev,
+                state.profiles.clone(),
+                state.profiles_rev,
+            )
         };
         let focus = cx.focus_handle();
         let view = Self {
@@ -44,6 +52,8 @@ impl OverlayView {
             settings: Settings::load(),
             status,
             devices,
+            profiles,
+            profiles_rev,
             tab: 0,
             focus,
             last_rev: 0,
@@ -54,7 +64,7 @@ impl OverlayView {
                 .timer(Duration::from_millis(150))
                 .await;
             let result = this.update(cx, |this, cx| {
-                let (rev, status, devices_rev, devices) = {
+                let (rev, status, devices_rev, devices, profiles_rev, profiles) = {
                     let state = match this.shared.lock() {
                         Ok(state) => state,
                         Err(_) => return,
@@ -64,13 +74,20 @@ impl OverlayView {
                         state.status.clone(),
                         state.devices_rev,
                         state.devices.clone().unwrap_or_default(),
+                        state.profiles_rev,
+                        state.profiles.clone(),
                     )
                 };
-                if rev != this.last_rev || devices_rev != this.last_devices_rev {
+                if rev != this.last_rev
+                    || devices_rev != this.last_devices_rev
+                    || profiles_rev != this.profiles_rev
+                {
                     this.last_rev = rev;
                     this.last_devices_rev = devices_rev;
+                    this.profiles_rev = profiles_rev;
                     this.status = status;
                     this.devices = devices;
+                    this.profiles = profiles;
                     cx.notify();
                 }
             });
@@ -484,7 +501,7 @@ impl OverlayView {
                     },
                 ));
             }
-            _ => {
+            6 => {
                 rows.push(self.stepper_row(
                     "controller.rumble_strength",
                     "Rumble",
@@ -501,6 +518,45 @@ impl OverlayView {
                     "Bluetooth can sustain 1000 Hz",
                     &[(125, "125"), (250, "250"), (500, "500"), (1000, "1000")],
                     cx,
+                ));
+            }
+            _ => {
+                if self.profiles.is_empty() {
+                    rows.push(widgets::row(
+                        "Saved profiles",
+                        "None yet",
+                        widgets::chip("Empty", theme::TEXT_MUTED),
+                    ));
+                }
+                for profile in &self.profiles {
+                    let id = profile.id.clone();
+                    rows.push(widgets::row(
+                        profile.name.clone(),
+                        if profile.is_default { "Default" } else { "Saved configuration" },
+                        widgets::button(
+                            "Apply",
+                            widgets::Tone::Subtle,
+                            cx.listener(
+                                move |this, _: &gpui::ClickEvent, _: &mut Window, _: &mut Context<Self>| {
+                                    this.engine.send(&format!("profile_apply {id}"));
+                                },
+                            ),
+                        ),
+                    ));
+                }
+                let name = format!("Profile {}", self.profiles.len() + 1);
+                rows.push(widgets::row(
+                    "Current settings",
+                    "Save as a named profile",
+                    widgets::button(
+                        "Save current",
+                        widgets::Tone::Ghost,
+                        cx.listener(
+                            move |this, _: &gpui::ClickEvent, _: &mut Window, _: &mut Context<Self>| {
+                                this.engine.send(&format!("profile_save {name}"));
+                            },
+                        ),
+                    ),
                 ));
             }
         }

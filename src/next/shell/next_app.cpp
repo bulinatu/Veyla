@@ -48,7 +48,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"2.1.0";
+constexpr wchar_t kVersion[] = L"2.3.0";
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -649,6 +649,10 @@ void NextApp::Frame() {
             PublishDevices();
             publish_devices_ = false;
         }
+        if (publish_profiles_) {
+            PublishProfiles();
+            publish_profiles_ = false;
+        }
     }
     ProbeIfNeeded(now_);
     if (bench_active_) {
@@ -918,7 +922,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  2.1.0", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  2.3.0", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -1032,7 +1036,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"BetterRemotePlay Next 2.1.0",
+        renderer_->Text(L"BetterRemotePlay Next 2.3.0",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -2177,7 +2181,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"BetterRemotePlay Next 2.1.0  |  stable release", L"STABLE", true);
+               L"BetterRemotePlay Next 2.3.0  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -2186,7 +2190,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay Next", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 2.1.0  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 2.3.0  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -4102,6 +4106,14 @@ void NextApp::HandleBridgeCommand(const std::string& command) {
         ReloadSettingsFromDisk();
     } else if (command == "devices") {
         publish_devices_ = true;
+    } else if (command == "profiles") {
+        publish_profiles_ = true;
+    } else if (command.rfind("profile_apply ", 0) == 0) {
+        ApplyProfileById(command.substr(14));
+    } else if (command.rfind("profile_save ", 0) == 0) {
+        SaveProfileByName(command.substr(13));
+    } else if (command.rfind("profile_delete ", 0) == 0) {
+        DeleteProfileById(command.substr(15));
     } else if (command == "overlay_open") {
         overlay_pause_fg_ = true;
         if (dlss_fg_) {
@@ -4289,6 +4301,85 @@ void NextApp::PublishDevices() {
     }
     json += "]}";
     bridge_.Publish(std::move(json));
+}
+
+void NextApp::PublishProfiles() {
+    auto escape = [](const std::string& text) {
+        std::string out;
+        for (const char ch : text) {
+            if (ch == '"' || ch == '\\') {
+                out += '\\';
+                out += ch;
+            } else if (static_cast<unsigned char>(ch) >= 0x20) {
+                out += ch;
+            }
+        }
+        return out;
+    };
+    std::vector<Profile> profiles;
+    if (host_->Profiles()) {
+        host_->Profiles()->List(profiles);
+    }
+    std::string json = "E {\"kind\":\"profiles\",\"items\":[";
+    for (std::size_t i = 0; i < profiles.size(); ++i) {
+        if (i != 0) {
+            json += ',';
+        }
+        json += "{\"id\":\"";
+        json += escape(profiles[i].id);
+        json += "\",\"name\":\"";
+        json += escape(profiles[i].name);
+        json += "\",\"default\":";
+        json += profiles[i].is_default ? "true" : "false";
+        json += '}';
+    }
+    json += "]}";
+    bridge_.Publish(std::move(json));
+}
+
+void NextApp::ApplyProfileById(const std::string& id) {
+    if (!host_->Profiles()) {
+        return;
+    }
+    std::vector<Profile> profiles;
+    host_->Profiles()->List(profiles);
+    for (const Profile& profile : profiles) {
+        if (profile.id == id) {
+            settings_ = profile.settings;
+            Apply();
+            overlay_status_ = L"Profile applied: " + Widen(profile.name);
+            overlay_status_error_ = false;
+            last_overlay_update_ = -1.0;
+            break;
+        }
+    }
+}
+
+void NextApp::SaveProfileByName(const std::string& name) {
+    if (!host_->Profiles() || name.empty()) {
+        return;
+    }
+    Profile profile;
+    profile.id = MakeProfileId(name);
+    profile.name = name;
+    profile.settings = host_->Settings();
+    profile.created_at = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count());
+    profile.updated_at = profile.created_at;
+    if (host_->Profiles()->Save(profile).ok()) {
+        publish_profiles_ = true;
+        overlay_status_ = L"Profile saved: " + Widen(name);
+        overlay_status_error_ = false;
+    }
+}
+
+void NextApp::DeleteProfileById(const std::string& id) {
+    if (host_->Profiles() && !id.empty()) {
+        host_->Profiles()->Delete(id);
+        publish_profiles_ = true;
+    }
 }
 
 void NextApp::ToggleBorderlessFullscreen() {

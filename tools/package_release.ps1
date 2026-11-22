@@ -11,7 +11,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $release = Join-Path $root "build\Release"
 $distRoot = Join-Path $root "dist"
 $dest = Join-Path $distRoot "BetterRemotePlay"
-$version = "2.1.0"
+$version = "2.3.0"
 
 function Require-File([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -154,6 +154,9 @@ What changed in 2.0
   a dialog; nothing has to be typed by index.
 - Text size 90-125%, and settings apply about 350 ms after the last edit
   (Apply still forces it immediately).
+- Saved profiles from the engine store are listed on Home and in the control
+  center, with Apply and Save current.
+- Ctrl+1..8 switches tabs, Ctrl+Enter connects.
 - The stream window and all media work stay in the C++ engine. The shell
   minimizes itself while you play so it cannot add composition jitter.
 

@@ -40,6 +40,13 @@ pub struct Monitor {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct ProfileInfo {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct Devices {
     pub audio: Vec<Device>,
     pub monitors: Vec<Monitor>,
@@ -88,6 +95,8 @@ pub struct Shared {
     pub online: bool,
     pub devices: Option<Devices>,
     pub devices_rev: u64,
+    pub profiles: Vec<ProfileInfo>,
+    pub profiles_rev: u64,
     pub events: Vec<String>,
 }
 
@@ -174,6 +183,20 @@ impl Engine {
                         state.events.push("overlay-toggle".to_string());
                     } else if let Ok(value) = serde_json::from_str::<Value>(body) {
                         match value.get("kind").and_then(Value::as_str) {
+                            Some("profiles") => {
+                            let mut state = state.lock().unwrap();
+                            state.profiles.clear();
+                            if let Some(items) = value.get("items").and_then(Value::as_array) {
+                                for item in items {
+                                    state.profiles.push(ProfileInfo {
+                                        id: item.get("id").and_then(Value::as_str).unwrap_or_default().to_string(),
+                                        name: item.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+                                        is_default: item.get("default").and_then(Value::as_bool).unwrap_or(false),
+                                    });
+                                }
+                            }
+                            state.profiles_rev += 1;
+                            }
                             Some("devices") => {
                             let devices = Devices::from_json(&value);
                             let mut state = state.lock().unwrap();

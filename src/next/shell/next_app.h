@@ -188,6 +188,11 @@ private:
     double bridge_status_at_ = -1.0;
     bool publish_devices_ = false;
     bool overlay_pause_fg_ = false;
+    bool publish_profiles_ = false;
+    void PublishProfiles();
+    void ApplyProfileById(const std::string& id);
+    void SaveProfileByName(const std::string& name);
+    void DeleteProfileById(const std::string& id);
     void HandleBridgeCommand(const std::string& command);
     void PublishBridgeStatus();
     void PublishDevices();

@@ -195,8 +195,8 @@ void UiBridge::ReaderMain() {
             if (line.empty()) {
                 continue;
             }
-            if (line.size() > 64) {
-                line.resize(64);
+            if (line.size() > 160) {
+                line.resize(160);
             }
             BridgeLog(("cmd: " + line).c_str());
             {

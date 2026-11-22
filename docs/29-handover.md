@@ -1172,3 +1172,49 @@ stopped presenting them as if they did something.
 - Patch verified: `version=2.1.0`, 0 markers, `files_differ=0`, 4 files changed.
 - Packaged smoke test: shell starts the engine, bridge connects, devices
   (`audio=5 monitors=3 gpus=4`), stream window opens, shell minimizes.
+
+## 2.2.0 - profiles, keyboard, settings sync
+
+- **Profiles.** Bridge commands `profiles`, `profile_apply <id>`,
+  `profile_save <name>`, `profile_delete <id>`; engine event
+  `E {"kind":"profiles",...}`. Home shows a Saved Profiles card with Apply and
+  Save current; the GPUI control center gained a Profile tab. The bridge command
+  limit went from 64 to 160 bytes for names.
+- **Keyboard.** Ctrl+1..8 switches the visible tabs (Advanced counts only when
+  enabled), Ctrl+Enter connects/watches. F10 from the shell window toggles the
+  GPUI panel; Esc closes a picker or the panel before anything else.
+- **Settings sync.** Root watches the settings file mtime and reloads on
+  external changes, so profile applies and overlay edits show up immediately.
+  Writes made by the shell update the stored mtime to avoid a reload loop.
+- **Tabs** lost their Unicode icons: Inter has no glyph coverage for them on
+  every machine and the fallback rendered tofu. Text-only labels are wider and
+  unambiguous; the compact layout still fits at 1040 px.
+- Version strings and package metadata moved to 2.2.0.
+
+## 2.3.0 - single instance, hotplug, placement
+
+- **Single instance.** A named mutex (`BetterRemotePlayNextShell`) makes a
+  second launch bring the existing shell forward and exit, instead of spawning a
+  second engine that fights for the bridge port.
+- **Panic log.** A panic hook writes `PANIC: ...` into `ui.log` before the
+  process aborts, so a field crash leaves a trace.
+- **Hotplug.** While a device picker is open the shell re-requests `devices`
+  every ~2 s, so headsets and monitors plugged in after launch appear.
+- **Placement.** The control center opens on `display.monitor` (the display
+  index used for the stream) instead of always the primary display.
+- **Home** shows the GPU adapter as a chip once the engine reports it.
+- Version metadata moved to 2.3.0.
+
+### 2.3.0 package
+
+- Standalone: `dist/BetterRemotePlay-2.3.0-standalone.zip` (922.0 MB)
+  SHA256 `0CAC77F2570E62D2F449EFFA05D81DB57EEC789268C7852A39F1B4174D28E134`
+- Update **2.0.0 -> 2.3.0** (works from 2.1.0 too):
+  `dist/BetterRemotePlay-2.0.0-to-2.3.0-update.exe` (5.3 MB)
+  SHA256 `7D1173A322ADB5E0EA337CBFDAED712252913179B58DAB54E91D3DC9494C8724`
+- `brpnext.exe` (shell)
+  `99F7DCEF81A2BD6370B60C0D51ACF9845FB0103FE8575834546D3E7FDD10C5E0`
+- `brpnext-engine.exe`
+  `4EC104986C3832980D03151935679710548E8755BD596B965445A852D255A171`
+- Patch verified: `version=2.3.0`, 0 markers, `files_differ=0`.
+- Packaged single-instance check: second launch exits 0, one shell remains.

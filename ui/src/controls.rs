@@ -2,7 +2,7 @@
 //! map, persist it, and notify the view.
 
 use gpui::{
-    div, prelude::*, px, rgba, rgb, App, AnyElement, ClickEvent, Context, FontWeight, MouseButton,
+    div, prelude::*, px, rgba, rgb, AnyElement, ClickEvent, Context, FontWeight, MouseButton,
     InteractiveElement, SharedString, StatefulInteractiveElement, Window,
 };
 use serde_json::Value;
@@ -14,6 +14,7 @@ use crate::widgets;
 impl Root {
     pub fn persist(&mut self) {
         let _ = self.settings.save();
+        self.settings_mtime = self.settings.file_mtime();
         self.settings_rev = self.settings_rev.wrapping_add(1);
     }
 
@@ -359,8 +360,46 @@ impl Root {
     /// Keyboard routing for the single active inline editor.
     pub fn on_key(&mut self, event: &gpui::KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let Some(key) = self.editing else {
+            if event.keystroke.modifiers.control {
+                match event.keystroke.key.as_str() {
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" => {
+                        let index = event
+                            .keystroke
+                            .key
+                            .parse::<usize>()
+                            .unwrap_or(1)
+                            .saturating_sub(1);
+                        let visible: Vec<crate::app::Tab> = crate::app::Tab::ALL
+                            .iter()
+                            .copied()
+                            .filter(|tab| {
+                                *tab != crate::app::Tab::Advanced || self.advanced
+                            })
+                            .collect();
+                        if let Some(tab) = visible.get(index).copied() {
+                            self.tab = tab;
+                            cx.notify();
+                        }
+                        return;
+                    }
+                    "enter" => {
+                        self.action_connect(cx);
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+            if event.keystroke.key == "f10" && self.status.streaming && self.picker.is_none() {
+                self.toggle_overlay(cx);
+                return;
+            }
             if event.keystroke.key == "escape" {
-                self.editing = None;
+                if self.picker.is_some() {
+                    self.picker = None;
+                    cx.notify();
+                } else {
+                    self.editing = None;
+                }
             }
             return;
         };

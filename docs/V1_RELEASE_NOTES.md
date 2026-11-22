@@ -171,3 +171,18 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
   a disconnect while the panel is open.
 - Corrupt settings files are quarantined, never overwritten by defaults.
 - Advanced shows a Pacing card (loop p99, cadence, scanout, present misses).
+
+## 2.2.0
+
+- Saved profiles are back: list, apply and save from Home or the in-stream
+  control center, backed by the engine's profile store.
+- Ctrl+1..8 switches tabs, Ctrl+Enter connects; tab labels are text-only so no
+  machine falls back to tofu glyphs.
+- The shell reloads settings changed by the engine or the overlay immediately.
+
+## 2.3.0
+
+- Only one shell can run: a second launch focuses the existing window.
+- Panics are written to the shell log.
+- Audio/monitor/GPU lists refresh while a picker is open.
+- The control center opens on the display used for streaming.

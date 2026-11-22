@@ -85,14 +85,20 @@ pub struct Root {
     pub(crate) shell_minimized: bool,
     pub(crate) picker: Option<PickerKind>,
     pub(crate) devices_rev: u64,
+    pub(crate) profiles_rev: u64,
+    pub(crate) devices_tick: u8,
+    pub(crate) settings_mtime: Option<std::time::SystemTime>,
     pub(crate) overlay_handle: Option<AnyWindowHandle>,
     pub(crate) settings_rev: u64,
     applied_rev: u64,
     apply_ticks: u8,
     focus_initialized: bool,
-    logged_render: bool,
     boot_timer_started: bool,
     start_min_done: bool,
+}
+
+pub(crate) fn log_panic(message: &str) {
+    crate::model::log_line(&format!("PANIC: {message}"));
 }
 
 impl Root {
@@ -121,7 +127,7 @@ impl Root {
                     let Some(engine) = this.engine.as_ref() else {
                         return;
                     };
-                    let (rev, status, online, devices_rev, events) = {
+                    let (rev, status, online, devices_rev, profiles_rev, events) = {
                         let mut state = match engine.shared.lock() {
                             Ok(state) => state,
                             Err(_) => return,
@@ -131,6 +137,7 @@ impl Root {
                             state.status.clone(),
                             state.online,
                             state.devices_rev,
+                            state.profiles_rev,
                             std::mem::take(&mut state.events),
                         )
                     };
@@ -161,11 +168,29 @@ impl Root {
                         this.apply_ticks = 0;
                         this.applied_rev = this.settings_rev;
                     }
+                    if this.picker.is_some() {
+                        this.devices_tick += 1;
+                        if this.devices_tick >= 16 {
+                            this.devices_tick = 0;
+                            this.send("devices");
+                        }
+                    } else {
+                        this.devices_tick = 0;
+                    }
                     let came_online = online && !this.engine_online;
                     let devices_changed = devices_rev != this.devices_rev;
                     this.devices_rev = devices_rev;
-                    if devices_changed {
+                    let profiles_changed = profiles_rev != this.profiles_rev;
+                    this.profiles_rev = profiles_rev;
+                    if devices_changed || profiles_changed {
                         cx.notify();
+                    }
+                    if let Some(mtime) = this.settings.file_mtime() {
+                        if this.settings_mtime != Some(mtime) {
+                            this.settings_mtime = Some(mtime);
+                            this.settings = Settings::load();
+                            cx.notify();
+                        }
                     }
                     if rev != this.last_rev || online != this.engine_online {
                         this.last_rev = rev;
@@ -178,6 +203,7 @@ impl Root {
                         }
                         if came_online {
                             this.send("devices");
+                            this.send("profiles");
                         }
                         cx.notify();
                     }
@@ -224,6 +250,7 @@ impl Root {
             "advanced" => Tab::Advanced,
             _ => Tab::Home,
         };
+        let settings_mtime = settings.file_mtime();
         Self {
             settings,
             tab: initial_tab,
@@ -239,12 +266,14 @@ impl Root {
             shell_minimized: false,
             picker: None,
             devices_rev: 0,
+            profiles_rev: 0,
+            devices_tick: 0,
+            settings_mtime,
             overlay_handle: None,
             settings_rev: 0,
             applied_rev: 0,
             apply_ticks: 0,
             focus_initialized: false,
-            logged_render: false,
             boot_timer_started: false,
             start_min_done: false,
         }
@@ -443,14 +472,12 @@ impl Root {
     fn top_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let width = window.viewport_size().width;
         let tight = width < px(1230.0);
-        let show_labels = width > px(1110.0);
         let mut tabs = div().flex().items_center().gap(px(2.0));
         for tab in Tab::ALL {
             if tab == Tab::Advanced && !self.advanced {
                 continue;
             }
             let selected = self.tab == tab;
-            let icon = tab.icon();
             let label = tab.label();
             tabs = tabs.child(
                 div()
@@ -485,13 +512,7 @@ impl Root {
                         this.select(tab);
                         cx.notify();
                     }))
-                    .child(
-                        div()
-                            .text_size(px(12.0))
-                            .text_color(if selected { theme::accent() } else { theme::muted() })
-                            .child(icon),
-                    )
-                    .when(show_labels, |el| el.child(label)),
+                    .child(label),
             );
         }
 
@@ -638,6 +659,30 @@ impl Root {
             }
         }
         crate::bridge::Devices::default()
+    }
+
+    pub(crate) fn profiles(&self) -> Vec<crate::bridge::ProfileInfo> {
+        if let Some(engine) = self.engine.as_ref() {
+            if let Ok(state) = engine.shared.lock() {
+                return state.profiles.clone();
+            }
+        }
+        Vec::new()
+    }
+
+    pub(crate) fn apply_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.send(&format!("profile_apply {id}"));
+        self.toast("Profile applied", false, cx);
+    }
+
+    pub(crate) fn save_profile(&mut self, cx: &mut Context<Self>) {
+        if self.engine.is_none() {
+            self.toast("Engine is not running", true, cx);
+            return;
+        }
+        let name = format!("Profile {}", self.profiles().len() + 1);
+        self.send(&format!("profile_save {name}"));
+        self.toast("Profile saved", false, cx);
     }
 
     pub(crate) fn audio_label(&self) -> String {

@@ -269,6 +269,12 @@ impl Settings {
         *self = Self::load();
     }
 
+    /// Modification time of the settings file, for detecting edits made by the
+    /// overlay window or by the engine.
+    pub fn file_mtime(&self) -> Option<std::time::SystemTime> {
+        fs::metadata(&self.path).and_then(|meta| meta.modified()).ok()
+    }
+
     pub fn reset(&mut self) {
         self.values.clear();
         self.ensure_defaults();
