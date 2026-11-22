@@ -57,6 +57,10 @@ public:
     // Pops the newest decoded frame and discards older ones. Used by the
     // frame generator, where a stale queued frame is pure latency.
     bool TakeNewestFrame(media::DecodedFrame& out);
+    // Pops the oldest decoded frame, preserving order. Frames are dropped only
+    // when the backlog exceeds `max_queue`, so a short network burst is played
+    // out instead of skipped. Used by the generator feed and the video path.
+    bool TakeFrameOrdered(media::DecodedFrame& out, int max_queue);
     bool TakeFrameNow(media::DecodedFrame& out);
     // Blocks until a decoded frame is queued or the timeout expires. Used by
     // the frame generator so it wakes on a frame instead of polling.

@@ -57,6 +57,7 @@ public:
     void SetMotionEnabled(bool enabled);
     bool TakeFrame(media::DecodedFrame& out, int buffer, bool paced);
     bool TakeNewestFrame(media::DecodedFrame& out);
+    bool TakeFrameOrdered(media::DecodedFrame& out, int max_queue);
     bool WaitForFrame(int timeout_ms);
     void SendController(const brp::PadState& state);
     brp::PadConsoleFeedback Feedback() const;

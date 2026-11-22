@@ -429,6 +429,10 @@ bool StreamingService::TakeNewestFrame(media::DecodedFrame& out) {
     return streaming_.TakeNewestFrame(out);
 }
 
+bool StreamingService::TakeFrameOrdered(media::DecodedFrame& out, int max_queue) {
+    return streaming_.TakeFrameOrdered(out, max_queue);
+}
+
 bool StreamingService::WaitForFrame(int timeout_ms) {
     return streaming_.WaitForFrame(timeout_ms);
 }

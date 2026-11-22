@@ -145,6 +145,7 @@ private:
     std::atomic<int> haptic_strength_{3};
     media::DecodedFrame video_frame_;
     bool have_frame_ = false;
+    double video_phase_ = 0.0;
     bool watching_ = false;
     bool watch_on_connect_ = false;
     bool watch_fullscreen_ = false;

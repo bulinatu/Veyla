@@ -677,3 +677,56 @@ DLSS-G worker: 59.9-60.1 fps displayed, 2x, 30 fps source
 - Patch 1.0.2 -> 1.0.3 verified: `version=1.0.3`, 0 markers,
   `files_differ=0`.
 - Tests: `brp_next_tests` ALL PASS (82).
+
+## 1.0.4 - latency and in-order delivery pass
+
+1.0.3 fixed the presentation cadence but introduced one regression and still
+used the wrong frame-selection policy for unstable links:
+
+- **The DLSS-G + SR readback added one source interval.** 1.0.3 copied the
+  "previous completed" SR slot without waiting. That slot is one frame older
+  than the frame just submitted, so the generator input moved back by 16.7 ms
+  at 60 fps (33 ms at 30 fps). The FG path is back on `Readback()`, which waits
+  for the frame it just submitted. This is the delay that 1.0.3 added.
+- **The video path now plays frames in order, not "newest wins".** Both the
+  parent path and the generator feed pop the oldest decoded frame. A short
+  network or decode burst is played out instead of being skipped; a backlog
+  above the cap (2 in the parent, 3 for the generator) is dropped so latency
+  cannot grow. This matches the reference app's delivery policy.
+- **The parent path pulls on a rational display phase** (`fps / refresh`), so
+  at 240 Hz and 60 fps it changes content every four refreshes with no
+  wall-clock drift. The standing frame is still redrawn on every vblank.
+- **A rigid generator grid was measured and rejected.** Holding one frame and
+  feeding the DLSS-G worker on a fixed slot starved it (117-118 fps displayed)
+  and made the cadence worse. The immediate ordered feed is kept: 119.7-119.9
+  fps displayed at 60 fps input, 2x, DLAA, 1440p.
+- Frame-generation input remains the synchronous newest SR output; the
+  async "completed slot" experiment does not ship.
+
+Measured on the reference machine after this pass (2560x1440 @ 240 Hz,
+1080p HEVC, DLAA):
+
+```
+no generator: cadence p50 16.7  p99 17.0 ms | scanout 239.8 Hz | present misses 0/s
+DLSS-G 2x:    fed 16.6 ms avg | worker 119.7 fps displayed | 0 feed drops
+```
+
+### 1.0.4 package
+
+- Standalone: `dist/BetterRemotePlay-1.0.4-standalone.zip`
+  SHA256 `2DC214BB5B1A09C617E3A0BF930379F9C43D29E264CA81099A5D6CF73BF88993`
+- Update **1.0.3 -> 1.0.4**:
+  `dist/BetterRemotePlay-1.0.3-to-1.0.4-update.exe` (1.35 MB)
+  SHA256 `02A9501FA442653433B7962C8B6EE684AB00376105825D4BEE5A3DFC07E2EC53`
+- Update **1.0.2 -> 1.0.4**:
+  `dist/BetterRemotePlay-1.0.2-to-1.0.4-update.exe` (1.35 MB)
+  SHA256 `B04D998FEE5DB9BF4F18C4AE8AF853D59FC8BC4CA9589A733A9546BD44228F32`
+- `brpnext.exe` SHA256
+  `CB29FDAC5D87BF5608285672A84F5EE7413482118AD558BB99F9A8495B795DF2`
+- Patch 1.0.3 -> 1.0.4 verified: `version=1.0.4`, 0 markers,
+  `files_differ=0`.
+- Tests: `brp_next_tests` ALL PASS (82).
+- Live checks: 60 fps source, no generator: cadence p50 16.7 / p99 17.0 ms,
+  scanout 239.8 Hz, 0 present misses/s. 30 fps source + DLSS-G 2x: worker
+  59.9-60.1 fps steady. 60 fps source + DLSS-G 2x: worker 118-120 fps; the
+  dips are the worker at the edge, not the parent presenter.

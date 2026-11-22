@@ -39,7 +39,7 @@ constexpr float kTitleHeight = 40.0f;
 constexpr float kSidebar = 224.0f;
 constexpr float kSidebarCollapsed = 68.0f;
 constexpr float kPad = 28.0f;
-constexpr wchar_t kVersion[] = L"1.0.3";
+constexpr wchar_t kVersion[] = L"1.0.4";
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -602,7 +602,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  1.0.3", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  1.0.4", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -716,7 +716,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"BetterRemotePlay Next 1.0.3",
+        renderer_->Text(L"BetterRemotePlay Next 1.0.4",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -1840,7 +1840,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"BetterRemotePlay Next 1.0.3  |  stable release", L"STABLE", true);
+               L"BetterRemotePlay Next 1.0.4  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -1849,7 +1849,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay Next", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 1.0.3  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 1.0.4  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -2647,13 +2647,13 @@ void NextApp::PresentVideo() {
                          !dlss_fg_failed_;
     if (fg_mode) {
         const float background[4] = {0.01f, 0.008f, 0.016f, 1.0f};
+
         bool new_frame = false;
-        // The generator owns its output cadence: feed every decoded frame as
-        // soon as it exists instead of waiting for the 60 Hz source slot. The
-        // worker queues/generates, and a gate here would add up to one source
-        // interval of pure latency.
+        // Feed every decoded frame as soon as it exists. The worker owns its
+        // output cadence; a rigid grid here starved it on a static menu and
+        // made the generated cadence worse, not better.
         media::DecodedFrame frame;
-        if (streaming_->TakeNewestFrame(frame)) {
+        if (streaming_->TakeFrameOrdered(frame, 3)) {
             video_frame_ = std::move(frame);
             have_frame_ = true;
             new_frame = true;
@@ -2670,6 +2670,17 @@ void NextApp::PresentVideo() {
             dlss_fg_->FrameWindow(window_->hwnd(), now_);
             RecordVideoShown();
             return true;
+        };
+
+        auto show_standing = [&]() {
+            if (have_frame_ && !video_frame_.rgba.empty()) {
+                presenter_->SetSourceFrame(video_frame_.rgba.data(), video_frame_.width,
+                                           video_frame_.height, video_frame_.pq);
+                presenter_->SetSourceFinal(false);
+                presenter_->Render(now_);
+            } else {
+                presenter_->Clear(background);
+            }
         };
 
         if (new_frame && have_frame_ && !video_frame_.rgba.empty()) {
@@ -2698,7 +2709,7 @@ void NextApp::PresentVideo() {
                         input = sr_scaled_.data();
                     }
                     if (dlss_sr_->Process(input, iw, ih, sr_frame, detail) &&
-                        dlss_sr_->ReadbackCompleted(rgba, detail)) {
+                        dlss_sr_->Readback(rgba, detail)) {
                         feed_w = dlss_sr_->out_width();
                         feed_h = dlss_sr_->out_height();
                         have_rgba = true;
@@ -2727,14 +2738,7 @@ void NextApp::PresentVideo() {
             if (new_frame) {
                 RecordVideoShown();
             }
-            if (have_frame_ && !video_frame_.rgba.empty()) {
-                presenter_->SetSourceFrame(video_frame_.rgba.data(), video_frame_.width,
-                                           video_frame_.height, video_frame_.pq);
-                presenter_->SetSourceFinal(false);
-                presenter_->Render(now_);
-            } else {
-                presenter_->Clear(background);
-            }
+            show_standing();
             return;
         }
 
@@ -2749,26 +2753,12 @@ void NextApp::PresentVideo() {
             dlss_fg_failed_ = true;
             fg_covering_ = false;
             Toast(note.empty() ? L"DLSS-G stopped" : note, true);
-            if (have_frame_ && !video_frame_.rgba.empty()) {
-                presenter_->SetSourceFrame(video_frame_.rgba.data(), video_frame_.width,
-                                           video_frame_.height, video_frame_.pq);
-                presenter_->SetSourceFinal(false);
-                presenter_->Render(now_);
-            } else {
-                presenter_->Clear(background);
-            }
+            show_standing();
             return;
         }
         if (!dlss_fg_->attached()) {
             // The worker is running but its presenter window is not up yet.
-            if (have_frame_ && !video_frame_.rgba.empty()) {
-                presenter_->SetSourceFrame(video_frame_.rgba.data(), video_frame_.width,
-                                           video_frame_.height, video_frame_.pq);
-                presenter_->SetSourceFinal(false);
-                presenter_->Render(now_);
-            } else {
-                presenter_->Clear(background);
-            }
+            show_standing();
             return;
         }
         // The worker's topmost window is the picture. Do not present the
@@ -2784,7 +2774,7 @@ void NextApp::PresentVideo() {
         rife_interval_ = 1.0 / std::clamp(content, 24.0, 60.0);
         bool new_frame = false;
         media::DecodedFrame frame;
-        if (streaming_->TakeNewestFrame(frame)) {
+        if (streaming_->TakeFrameOrdered(frame, 3)) {
             video_frame_ = std::move(frame);
             have_frame_ = true;
             new_frame = true;
@@ -2824,9 +2814,27 @@ void NextApp::PresentVideo() {
         return;
     }
 
+    // Pull one source frame per source interval, on the display's own tick
+    // grid. The reference app uses a rational phase (fps / refresh): at 240 Hz
+    // and 30 fps that is one pull every eight refreshes, with no wall-clock
+    // drift. The decoded queue stays in order and bounded, so a short network
+    // burst is played out instead of skipped and a backlog cannot build
+    // latency.
+    const double source_fps =
+        std::clamp(static_cast<double>(settings_.streaming.fps), 24.0, 240.0);
+    const int hz = RefreshHz();
+    video_phase_ += source_fps / static_cast<double>(hz);
+    bool due = false;
+    if (video_phase_ >= 1.0 - 1e-9) {
+        video_phase_ -= 1.0;
+        due = true;
+    }
+    if (video_phase_ < 0.0) {
+        video_phase_ = 0.0;
+    }
     bool new_frame = false;
     media::DecodedFrame frame;
-    if (streaming_->TakeNewestFrame(frame)) {
+    if (due && streaming_->TakeFrame(frame, 1, true)) {
         video_frame_ = std::move(frame);
         have_frame_ = true;
         new_frame = true;
@@ -3116,6 +3124,7 @@ void NextApp::ToggleWatch(bool watching) {
         }
         watching_ = true;
         have_frame_ = false;
+        video_phase_ = 0.0;
         video_intervals_.Reset();
         last_video_shown_at_ = -1.0;
         StopRifeThread();

@@ -72,3 +72,14 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
 - Presentation and decode threads run above normal priority.
 - DLSS-G + SR skips a GPU fence wait when feeding the worker.
 - Diagnostics shows measured scanout, present misses and loop p99.
+
+## 1.0.4 - latency and in-order delivery
+
+- Removed the one-source-frame delay that 1.0.3 added to the DLSS-G + SR path
+  (the "previous completed slot" readback).
+- Video frames are delivered in order and only dropped above a bounded
+  backlog, so a network burst is played out instead of skipped.
+- The parent path pulls on a rational display phase (fps / refresh), keeping
+  content changes on an even refresh grid without a wall-clock timer.
+- The rigid generator feed grid tested in development made the worker slower
+  and is not shipped.
