@@ -771,6 +771,9 @@ bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, bool paced) {
     const double seconds =
         std::chrono::duration<double>(now - started_).count();
     const int max_buffer = std::clamp(buffer, 0, 6);
+    // Adaptive ceiling: one step above the chosen buffer, never above 3, so a
+    // jittery link can buy a frame of slack without touching the setting.
+    const int ceiling = max_buffer == 0 ? 0 : std::min(max_buffer + 1, 3);
 
     if (frames_.empty()) {
         primed_ = false;
@@ -781,7 +784,7 @@ bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, bool paced) {
         if (state_.load() == StreamState::Streaming && max_buffer > 0 &&
             seconds - last_drought_ >= 3.0) {
             const int target = buffer_target_.load();
-            if (target < max_buffer) {
+            if (target < ceiling) {
                 buffer_target_.store(target + 1);
             }
             last_drought_ = seconds;
@@ -816,7 +819,7 @@ bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, bool paced) {
 
     const int target = max_buffer == 0
                            ? 0
-                           : std::clamp(buffer_target_.load(), 1, max_buffer);
+                           : std::clamp(buffer_target_.load(), 1, ceiling);
     const int wanted = target + 1;
     // Prime the buffer once, then present every tick. Waiting on every tick
     // would halve the frame rate whenever the producer is slightly slower than
@@ -828,9 +831,10 @@ bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, bool paced) {
         }
         primed_ = true;
     }
-    // Bound latency: skip at most one extra frame per presentation tick. This
-    // avoids both an unbounded queue and a sudden multi-frame jump.
-    if (static_cast<int>(frames_.size()) > wanted) {
+    // Bound latency: drop at most one frame per presentation tick, and only
+    // when the queue is a full frame past target. One extra frame of queue is
+    // normal decode jitter; dropping on it is what read as a skip.
+    if (static_cast<int>(frames_.size()) > wanted + 1) {
         frames_.pop_front();
         buffer_drops_.fetch_add(1);
     }

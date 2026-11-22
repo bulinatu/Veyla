@@ -149,7 +149,7 @@ Status StreamingService::Connect(const ConsoleSettings& console) {
     profile.height = 1080;
     profile.bitrate_kbps = std::clamp(stream_options_.bitrate_kbps, 1000, 200000);
     profile.decoder = DecoderFromName(stream_options_.decoder);
-    profile.frame_buffer = std::clamp(stream_options_.frame_buffer, 0, 2);
+    profile.frame_buffer = std::clamp(stream_options_.frame_buffer, 0, 3);
     JoinConnect();
     streaming_.Stop();
     {
