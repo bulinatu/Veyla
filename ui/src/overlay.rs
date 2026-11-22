@@ -161,7 +161,7 @@ impl OverlayView {
                     },
                 ),
             )
-            .child("−");
+            .child("\u{2212}");
         let plus = div()
             .id(SharedString::from(format!("ov-{key}-p")))
             .flex()
@@ -328,7 +328,7 @@ impl OverlayView {
                         self.status.cadence_p50, self.status.cadence_p99
                     )
                 } else {
-                    "—".to_string()
+                    "\u{2014}".to_string()
                 };
                 rows.push(widgets::kv("Input", input));
                 rows.push(widgets::kv("Codec", self.status.codec.clone()));
@@ -359,7 +359,7 @@ impl OverlayView {
                 rows.push(widgets::kv(
                     "Neural render",
                     if self.status.nr_ready {
-                        format!("on · {:.1} ms", self.status.nr_ms)
+                        format!("on - {:.1} ms", self.status.nr_ms)
                     } else if self.settings.b("ai.neural_render", false) {
                         "starting".to_string()
                     } else {
@@ -377,7 +377,7 @@ impl OverlayView {
                 rows.push(self.stepper_row(
                     "ai.sr_quality",
                     "Quality",
-                    "0 performance · 5 DLAA",
+                    "0 performance / 5 DLAA",
                     0,
                     5,
                     1,
@@ -699,7 +699,7 @@ impl Render for OverlayView {
                                             .text_size(theme::tiny())
                                             .text_color(theme::muted())
                                             .child(format!(
-                                                "{}x{} · {}",
+                                                "{}x{} - {}",
                                                 self.status.width, self.status.height, self.status.codec
                                             )),
                                     )

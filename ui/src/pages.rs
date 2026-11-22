@@ -80,9 +80,9 @@ impl Root {
         };
 
         let connect_label: SharedString = if connected || streaming {
-            "▶  Watch".into()
+            "\u{25B6}  Watch".into()
         } else {
-            "▶  Connect & Play".into()
+            "\u{25B6}  Connect & Play".into()
         };
         let connect = div()
             .id("hero-connect")
@@ -173,7 +173,7 @@ impl Root {
                 div()
                     .text_size(theme::tiny())
                     .text_color(theme::muted())
-                    .child("Esc arms disconnect  ·  F10 control center  ·  Alt+F4 leave stream"),
+                    .child("Esc arms disconnect  -  F10 control center  -  Alt+F4 leave stream"),
             );
 
         let stats = div()
@@ -195,7 +195,7 @@ impl Root {
                 if self.status.decode_ms > 0.0 {
                     format!("{:.1} ms", self.status.decode_ms)
                 } else {
-                    "—".to_string()
+                    "\u{2014}".to_string()
                 },
                 if self.status.decode_ms > 12.0 {
                     theme::AMBER
@@ -336,7 +336,7 @@ impl Root {
                             self.status.cadence_p50, self.status.cadence_p99
                         )
                     } else {
-                        "—".to_string()
+                        "\u{2014}".to_string()
                     },
                 ),
                 widgets::kv(
@@ -344,7 +344,7 @@ impl Root {
                     if self.status.scanout_hz > 0.0 {
                         format!("{:.0} Hz", self.status.scanout_hz)
                     } else {
-                        "—".to_string()
+                        "\u{2014}".to_string()
                     },
                 ),
                 widgets::kv("Loss", format!("{:.2}%", self.status.loss_percent)),
@@ -362,7 +362,7 @@ impl Root {
                 div()
                     .text_size(theme::tiny())
                     .text_color(theme::muted())
-                    .child("BetterRemotePlay Next 2.4.3 · GPUI shell"),
+                    .child("BetterRemotePlay Next 2.4.4 - GPUI shell"),
             )
             .child(
                 div()
@@ -370,7 +370,7 @@ impl Root {
                     .items_center()
                     .gap(px(8.0))
                     .child(widgets::chip(
-                        format!("{} · {}", self.settings.s("streaming.fps", "60"), "fps"),
+                        format!("{} fps", self.settings.s("streaming.fps", "60")),
                         theme::ACCENT_BRIGHT,
                     ))
                     .child(widgets::chip(
@@ -879,7 +879,7 @@ impl Root {
 
         let runtime_text = if self.status.nr_runtime {
             if self.status.nr_ready {
-                format!("worker active Â· {:.1} ms", self.status.nr_ms)
+                format!("worker active - {:.1} ms", self.status.nr_ms)
             } else {
                 "runtime present".to_string()
             }
@@ -892,7 +892,7 @@ impl Root {
             .gap(px(10.0))
             .child(widgets::section(
                 "DLSS 5 neural rendering",
-                "NGX feature 18 Â· video mode",
+                "NGX feature 18 - video mode",
             ))
             .child(
                 div()
@@ -1173,7 +1173,7 @@ impl Root {
                     if self.status.scanout_hz > 0.0 {
                         format!("{:.0} Hz", self.status.scanout_hz)
                     } else {
-                        "—".to_string()
+                        "\u{2014}".to_string()
                     },
                 ),
                 widgets::kv(

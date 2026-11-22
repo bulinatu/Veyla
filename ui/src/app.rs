@@ -50,18 +50,6 @@ impl Tab {
         }
     }
 
-    pub fn icon(self) -> &'static str {
-        match self {
-            Tab::Home => "â—†",
-            Tab::Stream => "â–·",
-            Tab::Video => "â–£",
-            Tab::Audio => "â™ª",
-            Tab::Pad => "â—Ž",
-            Tab::Neural => "âœ¦",
-            Tab::Overlay => "â–¤",
-            Tab::Advanced => "âš™",
-        }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -329,7 +317,7 @@ impl Root {
             self.toast("Entering stream", false, cx);
         } else {
             self.send("connect");
-            self.toast("Connecting to consoleâ€¦", false, cx);
+            self.toast("Connecting to console...", false, cx);
         }
     }
 
@@ -626,15 +614,15 @@ impl Root {
             )
             .child(div().w(px(8.0)))
             .child(widgets::button(
-                if tight { "âœ“" } else { "Apply" },
+                if tight { "OK" } else { "Apply" },
                 widgets::Tone::Subtle,
                 cx.listener(|this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
                     this.action_apply(cx);
                 }),
             ))
-            .child(window_button("min", "â€“", false, |window| window.minimize_window()))
-            .child(window_button("max", "â–¢", false, |window| window.zoom_window()))
-            .child(window_button("close", "âœ•", true, |window| window.remove_window()))
+            .child(window_button("min", "\u{2013}", false, |window| window.minimize_window()))
+            .child(window_button("max", "\u{25A2}", false, |window| window.zoom_window()))
+            .child(window_button("close", "\u{2715}", true, |window| window.remove_window()))
             .into_any_element()
     }
 
@@ -865,11 +853,11 @@ impl Root {
                 let current = self.settings.i("display.monitor", 0);
                 for monitor in &devices.monitors {
                     let detail = format!(
-                        "{}x{}  Â·  {} Hz{}",
+                        "{}x{}  /  {} Hz{}",
                         monitor.width,
                         monitor.height,
                         monitor.hz,
-                        if monitor.primary { "  Â·  Primary" } else { "" }
+                        if monitor.primary { "  /  Primary" } else { "" }
                     );
                     rows = rows.child(self.pick_row(
                         &monitor.name,

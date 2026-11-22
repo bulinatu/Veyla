@@ -1339,3 +1339,26 @@ stopped presenting them as if they did something.
 - Patch verified: `version=2.4.3`, 0 markers, `files_differ=0`.
 - Packaged PE subsystem = 2 (GUI); launch test leaves the window alive and no
   console host is created.
+
+## 2.4.4 - glyph repair
+
+- The window buttons showed `a-e-, a-?T, aoe.` because earlier line-based
+  PowerShell surgery read UTF-8 files as ANSI and re-saved them, double-encoding
+  every non-ASCII literal. All `ui/src` files are now ASCII-only: the glyphs are
+  Rust escapes (`\u{2013}`, `\u{25A2}`, `\u{2715}`, `\u{25B6}`, `\u{00B7}`,
+  `\u{2212}`, `\u{2014}`), so no future edit can corrupt them again.
+- Removed the dead `Tab::icon` method whose glyphs were part of the corruption.
+- Visible result: minimise/maximise/close render as dash, square and x; the hero
+  button shows the play mark; hints use `-` instead of a broken middle dot.
+
+### 2.4.4 package
+
+- Standalone: `dist/BetterRemotePlay-2.4.4-standalone.zip` (922.0 MB)
+  SHA256 `8ED277D2BEC33723153780328AE31DDFB7A77C731F5F71D93A96D0F005AA0A07`
+- Update **2.4.3 -> 2.4.4**:
+  `dist/BetterRemotePlay-2.4.3-to-2.4.4-update.exe` (5.3 MB)
+  SHA256 `1D7BA33D5ED804F4DB627135E237A2FB32D2BEBF9246647F7C9CE9573E701912`
+- `brpnext.exe`
+  `FF8F0AE46029D6C00002CAA9D64274296B6656A34C841E85E764318E5286761B`
+- Patch verified: `version=2.4.4`, 0 markers, `files_differ=0`.
+- Packaged visual check: dash/square/x buttons and the play mark render.

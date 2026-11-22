@@ -346,10 +346,10 @@ impl Preset {
 
     pub fn hint(self) -> &'static str {
         match self {
-            Preset::LowLatency => "Buffer 0 · no AI · 60 fps",
-            Preset::Performance => "FG on · buffer 0 · 1000 Hz",
-            Preset::Balanced => "SR quality · buffer 1",
-            Preset::Cinematic => "30 fps · DLAA · FG 2x",
+            Preset::LowLatency => "Buffer 0 - no AI - 60 fps",
+            Preset::Performance => "FG on - buffer 0 - 1000 Hz",
+            Preset::Balanced => "SR quality - buffer 1",
+            Preset::Cinematic => "30 fps - DLAA - FG 2x",
         }
     }
 }

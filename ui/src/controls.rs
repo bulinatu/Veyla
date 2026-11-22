@@ -206,7 +206,7 @@ impl Root {
                         },
                     ))
                 })
-                .child("−")
+                .child("\u{2212}")
                 .into_any_element()
         };
 

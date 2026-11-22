@@ -209,3 +209,8 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
 ## 2.4.3
 
 - The shell runs as a GUI application: no console/terminal window on launch.
+
+## 2.4.4
+
+- Fixed the broken window-button glyphs and every other mojibake string in the
+  shell; the UI sources are ASCII-only with Unicode escapes.
