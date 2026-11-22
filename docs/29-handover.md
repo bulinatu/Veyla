@@ -1298,3 +1298,21 @@ stopped presenting them as if they did something.
   `623B7D7222E491D23722575C99DA98DA5273AF219A92289E36268C7A9EBB69C7`
 - Patch verified: `version=2.4.1`, 0 markers, `files_differ=0`.
 - Packaged visual check: frosted sheet, soft card halos, aurora in the gutters.
+
+## 2.4.2 - Home cleanup
+
+- Removed the redundant "Console / This session" card from Home (address,
+  auto-reconnect, fullscreen, overlay hotkey were already in the hero and the
+  dedicated pages). The Live telemetry card now spans the full content width.
+- No engine or overlay change.
+
+### 2.4.2 package
+
+- Standalone: `dist/BetterRemotePlay-2.4.2-standalone.zip` (922.0 MB)
+  SHA256 `A3CA3D76CA3EB97AE139678F8474D1BC4624578BB6806B6BAB226EAD053F7DD8`
+- Update **2.4.1 -> 2.4.2**:
+  `dist/BetterRemotePlay-2.4.1-to-2.4.2-update.exe` (5.3 MB)
+  SHA256 `362CC0C9314D230FD723DF217D78A2AD325EC1F0CE14AF290292EC38B6E6F7B0`
+- `brpnext.exe`
+  `6CE32A41326D03ABB3F4EC3C96677E7C34A1E4320F0EC972AF59FF24A0D846DC`
+- Patch verified: `version=2.4.2`, 0 markers, `files_differ=0`.

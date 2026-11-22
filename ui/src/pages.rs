@@ -362,7 +362,7 @@ impl Root {
                 div()
                     .text_size(theme::tiny())
                     .text_color(theme::muted())
-                    .child("BetterRemotePlay Next 2.4.1 · GPUI shell"),
+                    .child("BetterRemotePlay Next 2.4.2 · GPUI shell"),
             )
             .child(
                 div()
@@ -417,23 +417,7 @@ impl Root {
                     ),
             )
             .child(stats)
-            .child(
-                div()
-                    .flex()
-                    .gap(px(16.0))
-                    .child(div().flex_1().child(live_group))
-                    .child(div().w(px(330.0)).child(
-                        widgets::card_pad()
-                            .flex()
-                            .flex_col()
-                            .gap(px(10.0))
-                            .child(widgets::section("Console", "This session"))
-                            .child(widgets::kv("Address", address_for(&self.settings)))
-                            .child(widgets::kv("Auto reconnect", yes_no(self.settings.b("console.auto_reconnect", true))))
-                            .child(widgets::kv("Fullscreen", yes_no(self.settings.b("display.fullscreen_on_play", true))))
-                            .child(widgets::kv("Overlay", self.settings.s("overlay.hotkey", "F10"))),
-                    )),
-            )
+            .child(live_group)
             .child(footer)
             .into_any_element()
     }

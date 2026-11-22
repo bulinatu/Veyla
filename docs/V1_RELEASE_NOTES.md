@@ -201,3 +201,7 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
 - Frosted-glass composition in the shell: translucent content sheet, soft
   gaussian card/top-bar shadows, softer aurora. GPUI has no true backdrop blur;
   this is a layered approximation, documented as such.
+
+## 2.4.2
+
+- Home drops the duplicate Console card; live telemetry gets the full width.
