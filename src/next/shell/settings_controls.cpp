@@ -160,6 +160,16 @@ float SettingsControls::Streaming(float x, float y, float width) {
     }
     y += kRow + kGap;
 
+    int buffer = std::clamp(settings_.streaming.frame_buffer, 0, 3);
+    if (widgets_.Choice(Next(), Row(x, y, width), L"Frame buffer",
+                        {L"Off (lowest latency)", L"1 frame (smooth)",
+                         L"2 frames", L"3 frames"},
+                        buffer)) {
+        settings_.streaming.frame_buffer = buffer;
+        Touch();
+    }
+    y += kRow + kGap;
+
     float bitrate = static_cast<float>(settings_.streaming.bitrate_kbps);
     if (widgets_.Slider(Next(), Row(x, y, width), L"Bitrate", bitrate, 5000.0f,
                         200000.0f, 1000.0f, L"%.0f kbps")) {
@@ -179,12 +189,13 @@ float SettingsControls::Streaming(float x, float y, float width) {
     }
     y += kRow + kGap;
 
-    widgets_.Label(Rect(x, y, x + width, y + 46),
+    widgets_.Label(Rect(x, y, x + width, y + 52),
                    L"60 fps is the low-latency choice: the camera and encoder update every "
-                   L"16.7 ms instead of 33 ms. The decoder setting applies when the next "
-                   L"session starts.",
+                   L"16.7 ms instead of 33 ms. A one-frame buffer absorbs a late decode "
+                   L"at the cost of one source interval. The decoder setting applies when "
+                   L"the next session starts.",
                    widgets_.Tokens().text_faint, 10.5f, DWRITE_FONT_WEIGHT_MEDIUM);
-    return y + 46.0f;
+    return y + 52.0f;
 }
 float SettingsControls::Video(float x, float y, float width) {
     int target = settings_.video.render_target == 1080

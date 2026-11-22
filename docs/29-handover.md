@@ -829,3 +829,61 @@ Measured: Watch -> Esc -> main window restored and stream hidden in **339 ms**
 - Patch 1.0.5 -> 1.0.6 verified: `version=1.0.6`, 0 markers,
   `files_differ=0`.
 - Tests: `brp_next_tests` ALL PASS (82).
+
+## 1.0.7 - 30 fps cadence and the frame buffer
+
+GTA VI is locked at 30 fps, so the stream runs at a 30 fps source. At 30 fps on
+a 240 Hz display each frame must stay on screen for exactly **8 refreshes**.
+The telemetry now records that hold distribution directly
+(`screen hold = PresentedRefreshCount delta between content changes`).
+
+Measured before this pass, 30 fps / 240 Hz / no generator:
+
+```
+holds 7:8  8:15  9:7      <- ~50% of frames were one refresh short or long
+cadence p50 33.4  p99 37.6 ms
+```
+
+That 7-9-7-9 wobble is visible as uneven motion even though the average is
+30 fps. Two policies were measured:
+
+- **Newest frame every tick** reacts to arrival timing, so network/decode
+  jitter (p99 37.6 ms) is copied to the screen.
+- **Unprimed phase gate** (1.0.4-1.0.6) pulls on the source slot but has no
+  spare frame; a frame a few milliseconds late leaves the screen on the
+  previous image for a full interval (16 refreshes).
+
+The fixed policy is a **primed, phase-locked queue**: the decoded queue keeps
+one spare frame, and one frame is presented per source slot on the display
+grid. A late frame is covered by the spare; the content still changes exactly
+every 8 refreshes. Frame-buffer 0 keeps the old newest-frame behavior.
+
+Measured after, same scene:
+
+```
+holds 7:0  8:30  9:0  10:0  16:0       (every second)
+cadence p50 33.4  p99 33.6 ms
+dec 9.0-9.3 / max 10.0 ms
+```
+
+The DLSS-G feed uses the same `PullFrame()` clock. 30 fps source + buffer 1 +
+DLSS-G 2x: feed cadence p99 35.6 ms, worker 59.9-60.2 fps.
+
+Settings: `Streaming > Frame buffer` is back (Off / 1 / 2 / 3 frames). Default
+and the profile value are **1 frame**; it costs one source interval (33 ms at
+30 fps) and is what removes the wobble. The in-app Diagnostics line now shows
+the dominant hold, e.g. `holds 8v 100%`.
+
+### 1.0.7 package
+
+- Standalone: `dist/BetterRemotePlay-1.0.7-standalone.zip`
+  SHA256 `487B674FB5328390D44735F70464E4E01ED9ECEC2CF471C940249A1132511E68`
+- Update **1.0.6 -> 1.0.7**:
+  `dist/BetterRemotePlay-1.0.6-to-1.0.7-update.exe` (0.74 MB)
+  SHA256 `FD9A93F8A28814A049A6E45FE25653840AD4F2B29B88CA926B19CD92DBBFC08C`
+- `brpnext.exe` SHA256
+  `671F90B64B458A36AFC9DF5BDA98B4317C1C2F3EAAE2212B14D7D9CF786165C4`
+- Patch 1.0.6 -> 1.0.7 verified: `version=1.0.7`, 0 markers,
+  `files_differ=0`.
+- Tests: `brp_next_tests` ALL PASS (82).
+- Profile after the pass: source 30 fps, frame buffer 1, DLAA, DLSS-G 2x.

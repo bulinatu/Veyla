@@ -99,3 +99,13 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
 - The stream surface is video-only: no UI composition, no menu swapchain.
 - DLSS SR rebuilds on the stream device; DLSS-G and the overlay follow the
   stream window. F10/F11/Esc and Alt+F4 are handled there.
+
+## 1.0.7 - 30 fps cadence
+
+- Frame pacing is phase-locked to the display and the decoded queue keeps one
+  spare frame. At 30 fps / 240 Hz every frame is now held exactly 8 refreshes
+  (measured `holds 8:30` per second) instead of a 7-9-7-9 wobble.
+- `Settings > Streaming > Frame buffer` is back: Off (lowest latency) /
+  1 / 2 / 3 frames. Default and the current profile use 1 frame.
+- The DLSS-G feed uses the same clock; 30 fps + 2x measured 59.9-60.2 fps.
+- Diagnostics shows the dominant hold, for example `holds 8v 100%`.

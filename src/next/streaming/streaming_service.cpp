@@ -258,6 +258,7 @@ StreamSnapshot StreamingService::Snapshot() const {
     snapshot.bitrate_kbps = static_cast<double>(profile_.bitrate_kbps);
     snapshot.source_fps = streaming_.fps();
     snapshot.decode_ms = stats_.decode_ms_avg;
+    snapshot.decode_ms_max = stats_.decode_ms_max;
     snapshot.decoder_drops = stats_.buffer_drops;
     snapshot.jitter_ms = stats_.arrival_ms;
     if (stats_.frames > 0) {

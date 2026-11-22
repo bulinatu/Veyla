@@ -191,6 +191,7 @@ struct StreamSnapshot {
     double jitter_ms = 0.0;
     int decoder_drops = 0;
     double decode_ms = 0.0;
+    double decode_ms_max = 0.0;
 };
 
 struct GpuSnapshot {

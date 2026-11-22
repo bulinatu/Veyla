@@ -39,7 +39,7 @@ constexpr float kTitleHeight = 40.0f;
 constexpr float kSidebar = 224.0f;
 constexpr float kSidebarCollapsed = 68.0f;
 constexpr float kPad = 28.0f;
-constexpr wchar_t kVersion[] = L"1.0.6";
+constexpr wchar_t kVersion[] = L"1.0.7";
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -621,15 +621,25 @@ void NextApp::Frame() {
             if (std::getenv("BRP_NEXT_FRAME_PROBE")) {
                 const StreamSnapshot probe =
                     streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
+                unsigned h7 = 0, h8 = 0, h9 = 0, h10 = 0, h16 = 0;
+                if (hold_counts_[7] >= hold_seen_[7]) h7 = hold_counts_[7] - hold_seen_[7];
+                if (hold_counts_[8] >= hold_seen_[8]) h8 = hold_counts_[8] - hold_seen_[8];
+                if (hold_counts_[9] >= hold_seen_[9]) h9 = hold_counts_[9] - hold_seen_[9];
+                if (hold_counts_[10] >= hold_seen_[10]) h10 = hold_counts_[10] - hold_seen_[10];
+                if (hold_counts_[16] >= hold_seen_[16]) h16 = hold_counts_[16] - hold_seen_[16];
+                hold_seen_ = hold_counts_;
                 std::fprintf(stderr,
                              "[next] loop p50 %.2f p99 %.2f max %.2f  |  cadence p50 %.1f "
                              "p99 %.1f  |  scanout %.1f Hz  |  present misses %llu  |  "
-                             "shown %d  |  sr submit %.2f ms  |  sr cpu %.2f ms  |  "
+                             "shown %d  |  holds 7:%u 8:%u 9:%u 10:%u 16:%u  |  sr submit %.2f ms  |  "
+                             "sr cpu %.2f ms  |  dec %.2f/%.2f ms  |  "
                              "net jitter %.2f ms loss %.2f%% drops %d\n",
                              loop_intervals_.Percentile(0.50), loop_p99_,
                              loop_intervals_.Max(), cadence_p50_, cadence_p99_,
                              present_refresh_hz_, present_misses_rate_, display_rate_,
+                             h7, h8, h9, h10, h16,
                              dlss_sr_ ? dlss_sr_->last_ms() : 0.0, sr_cpu_ms_,
+                             probe.decode_ms, probe.decode_ms_max,
                              probe.jitter_ms, probe.loss_percent, probe.decoder_drops);
             }
         }
@@ -660,6 +670,17 @@ void NextApp::Render() {
         }
         // Video-only surface: no Direct2D pass, no UI composition.
         ActivePresenter()->PresentNow(true);
+        if (content_changed_) {
+            content_changed_ = false;
+            const unsigned refresh = ActivePresenter()->present_refresh_count();
+            if (last_source_refresh_ != 0 && refresh > last_source_refresh_) {
+                const unsigned delta =
+                    std::clamp(refresh - last_source_refresh_, 1u, 31u);
+                ++hold_counts_[delta];
+                ++hold_total_;
+            }
+            last_source_refresh_ = refresh;
+        }
         return;
     }
     const float clear[4] = {theme.background.r / 255.0f, theme.background.g / 255.0f,
@@ -740,7 +761,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  1.0.6", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  1.0.7", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -854,7 +875,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"BetterRemotePlay Next 1.0.6",
+        renderer_->Text(L"BetterRemotePlay Next 1.0.7",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -1885,11 +1906,21 @@ void NextApp::RenderDiagnostics(Widgets& widgets) {
 
     wchar_t scanout[240] = {};
     if (stream.connected && watching_ && !fg_covering_) {
+        unsigned best_v = 0;
+        unsigned best_n = 0;
+        for (unsigned i = 1; i < hold_counts_.size(); ++i) {
+            if (hold_counts_[i] > best_n) {
+                best_n = hold_counts_[i];
+                best_v = i;
+            }
+        }
+        const double best_pct =
+            hold_total_ > 0 ? 100.0 * static_cast<double>(best_n) / hold_total_ : 0.0;
         std::swprintf(scanout, 240,
                       L"Scanout: %.1f Hz measured  |  present misses %llu/s  |  "
-                      L"loop p99 %.2f ms  |  target %.1f Hz",
-                      present_refresh_hz_, present_misses_rate_, loop_p99_,
-                      static_cast<double>(RefreshHz()));
+                      L"holds %uv %.0f%%  |  loop p99 %.2f ms  |  target %.1f Hz",
+                      present_refresh_hz_, present_misses_rate_, best_v, best_pct,
+                      loop_p99_, static_cast<double>(RefreshHz()));
     } else if (stream.connected && fg_covering_) {
         if (fg_fps_ > 0.5) {
             std::swprintf(scanout, 240,
@@ -1986,7 +2017,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"BetterRemotePlay Next 1.0.6  |  stable release", L"STABLE", true);
+               L"BetterRemotePlay Next 1.0.7  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -1995,7 +2026,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay Next", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 1.0.6  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 1.0.7  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -2792,6 +2823,28 @@ std::wstring NextApp::Summary(const Profile& profile) const {
     return summary;
 }
 
+bool NextApp::PullFrame(media::DecodedFrame& out) {
+    const int frame_buffer = std::clamp(settings_.streaming.frame_buffer, 0, 3);
+    if (frame_buffer <= 0) {
+        return streaming_->TakeNewestFrame(out);
+    }
+    // Phase-locked pull: one source frame per source interval, on the display's
+    // own tick grid. The decoded queue is primed and keeps one spare, so a
+    // frame that arrives a few milliseconds late is covered instead of
+    // shifting the whole cadence.
+    const double source_fps =
+        std::clamp(static_cast<double>(settings_.streaming.fps), 24.0, 240.0);
+    video_phase_ += source_fps / static_cast<double>(RefreshHz());
+    if (video_phase_ < 1.0 - 1e-9) {
+        if (video_phase_ < 0.0) {
+            video_phase_ = 0.0;
+        }
+        return false;
+    }
+    video_phase_ -= 1.0;
+    return streaming_->TakeFrame(out, frame_buffer, false);
+}
+
 void NextApp::PresentVideo() {
     if (!streaming_) {
         return;
@@ -2807,11 +2860,11 @@ void NextApp::PresentVideo() {
         const float background[4] = {0.01f, 0.008f, 0.016f, 1.0f};
 
         bool new_frame = false;
-        // Feed every decoded frame as soon as it exists. The worker owns its
-        // output cadence; a rigid grid here starved it on a static menu and
-        // made the generated cadence worse, not better.
+        // Feed the generator on the same clock as the display. With a frame
+        // buffer it gets a primed, phase-locked 30/60 Hz input; with the buffer
+        // off it gets the newest frame immediately.
         media::DecodedFrame frame;
-        if (streaming_->TakeFrameOrdered(frame, 3)) {
+        if (PullFrame(frame)) {
             video_frame_ = std::move(frame);
             have_frame_ = true;
             new_frame = true;
@@ -2972,27 +3025,9 @@ void NextApp::PresentVideo() {
         return;
     }
 
-    // Pull one source frame per source interval, on the display's own tick
-    // grid. The reference app uses a rational phase (fps / refresh): at 240 Hz
-    // and 30 fps that is one pull every eight refreshes, with no wall-clock
-    // drift. The decoded queue stays in order and bounded, so a short network
-    // burst is played out instead of skipped and a backlog cannot build
-    // latency.
-    const double source_fps =
-        std::clamp(static_cast<double>(settings_.streaming.fps), 24.0, 240.0);
-    const int hz = RefreshHz();
-    video_phase_ += source_fps / static_cast<double>(hz);
-    bool due = false;
-    if (video_phase_ >= 1.0 - 1e-9) {
-        video_phase_ -= 1.0;
-        due = true;
-    }
-    if (video_phase_ < 0.0) {
-        video_phase_ = 0.0;
-    }
     bool new_frame = false;
     media::DecodedFrame frame;
-    if (due && streaming_->TakeFrame(frame, 1, true)) {
+    if (PullFrame(frame)) {
         video_frame_ = std::move(frame);
         have_frame_ = true;
         new_frame = true;
@@ -3283,6 +3318,11 @@ void NextApp::ToggleWatch(bool watching) {
         watching_ = true;
         have_frame_ = false;
         video_phase_ = 0.0;
+        last_source_refresh_ = 0;
+        hold_counts_.fill(0);
+        hold_seen_.fill(0);
+        hold_total_ = 0;
+        content_changed_ = false;
         video_intervals_.Reset();
         last_video_shown_at_ = -1.0;
         StopRifeThread();
@@ -3852,6 +3892,7 @@ void NextApp::WriteBenchReport() {
     Toast(L"Benchmark report: " + path.wstring());
 }
 void NextApp::RecordVideoShown() {
+    content_changed_ = true;
     display_shown_.fetch_add(1);
     if (last_video_shown_at_ >= 0.0) {
         const double interval_ms = (now_ - last_video_shown_at_) * 1000.0;

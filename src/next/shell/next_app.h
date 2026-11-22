@@ -13,6 +13,7 @@
 #include "ui/widgets.h"
 
 #include <atomic>
+#include <array>
 #include <condition_variable>
 #include <deque>
 #include <memory>
@@ -74,6 +75,7 @@ private:
                       const wchar_t* subtitle, const wchar_t* status = nullptr,
                       bool good = true);
     void PresentVideo();
+    bool PullFrame(media::DecodedFrame& out);
     void StartPadThread();
     void StopPadThread();
     void ToggleWatch(bool watching);
@@ -228,6 +230,11 @@ private:
     unsigned long long present_misses_rate_ = 0;
     unsigned present_refresh_seen_ = 0;
     double present_refresh_hz_ = 0.0;
+    unsigned last_source_refresh_ = 0;
+    std::array<unsigned, 32> hold_counts_{};
+    std::array<unsigned, 32> hold_seen_{};
+    unsigned hold_total_ = 0;
+    bool content_changed_ = false;
     double stats_at_ = -1.0;
     double sr_cpu_ms_ = 0.0;
     int display_shown_last_ = 0;
