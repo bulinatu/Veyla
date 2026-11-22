@@ -131,3 +131,15 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
   their controls.
 - The overlay is a side-docked panel on the chosen side, with Stream, Audio and
   Pad tabs and restart badges for session-only changes.
+
+## 1.2.0 - stable
+
+- DLSS-G frames are submitted on an exact source-rate grid with a due time;
+  the worker no longer inherits UI loop jitter.
+- F10 opens the side control center (system-key fix), Esc arms persistently
+  and works after Alt-Tab through a foreground-only global hook.
+- Controller poll rate up to 1000 Hz, live.
+- Settings is reduced to General/Audio/Controller/Advanced; the other pages
+  own their controls.
+- The overlay is a side-docked panel with Stream/Audio/Pad tabs and restart
+  badges; the NVIDIA App overlay is hidden while streaming.

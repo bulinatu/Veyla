@@ -1001,3 +1001,47 @@ needs a good host (DSX reaches 1000 Hz).
   `files_differ=0`.
 - Tests: `brp_next_tests` ALL PASS (82).
 - Profile: 30 fps, frame buffer 1, DLAA, DLSS-G 2x, controller poll 1000 Hz.
+
+## 1.2.0 - stable: final frame pacing pass
+
+- **Generator submit pacer: implemented, then removed.** A due-time submit
+  slot accumulated drift when the source clock was slightly slower than the
+  nominal rate (GTA VI is 29.97 fps): the target moved ahead of the real clock,
+  the worker held frames longer and longer, and after a few minutes the focused
+  worker window looked frozen while audio continued. The final build uses the
+  primed, phase-locked pull (one spare frame) with an immediate `Submit`.
+  Focused 45 s run: feed p99 35.6-35.8 ms, worker 59.9-60.0 fps, UI loop p99
+  5.5-6.0 ms.
+- **Focus loss fallback.** When the worker is attached but no longer covering
+  (Alt-Tab, another full-screen overlay), the parent presenter keeps drawing
+  the newest decoded frame instead of freezing on the last presented image.
+  `Alt-Tab` now leaves a live stream window behind the other application.
+- **NVIDIA App overlay** (`NVIDIA Overlay.exe`, class `CEF-OSC-WIDGET`) is
+  hidden at Watch start and re-checked once per second while streaming. It is
+  a full-screen CEF window that reappeared after a manual hide and can add
+  composition hitches.
+- **F10** now works (system key via `WM_SYSKEYDOWN`); **Esc** arms persistently
+  with a banner and a global foreground-only hook, so Alt-Tab cannot lose it.
+- **Controller poll** is selectable 125/250/500/1000 Hz, applied live by the pad
+  thread's high-resolution timer.
+- **Settings** holds only General/Audio/Controller/Advanced; the other pages
+  own their controls.
+- **Control center** is side-docked (Left/Right, Top/Middle/Bottom) with tabs
+  Info, SR, FG, Video, Perf, Stream, Audio, Pad, Profile. Session-only changes
+  are marked `STREAM RESTART required` / `NEXT SESSION` in warning colour.
+- 30 fps SR is synchronous with the buffer; the base path keeps `holds 8:30`.
+- Final profile: 30 fps, buffer 1, DLAA, DLSS-G 2x, controller 1000 Hz.
+
+### 1.2.0 package
+
+- Standalone: `dist/BetterRemotePlay-1.2.0-standalone.zip`
+  SHA256 `773376474A7D5187EFB9719DFF850AE0B34BEE2D70241D8E130D35514E53369C`
+- Update **1.0.9 -> 1.2.0**:
+  `dist/BetterRemotePlay-1.0.9-to-1.2.0-update.exe` (0.75 MB)
+  SHA256 `38C2E5574136B5382C3944202AF3B9D7F6D95AE84EC14570BE44D68F287CEC2E`
+- `brpnext.exe` SHA256
+  `13338189ADD18657BE0550E7BA98C4FCB6076523C3EAE44B69C56D2CE89B522F`
+- Patch 1.0.9 -> 1.2.0 verified: `version=1.2.0`, 0 markers,
+  `files_differ=0`.
+- Tests: `brp_next_tests` ALL PASS (82).
+- Final profile: 30 fps, frame buffer 1, DLAA, DLSS-G 2x, controller 1000 Hz.

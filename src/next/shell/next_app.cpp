@@ -40,7 +40,15 @@ constexpr float kSidebar = 224.0f;
 constexpr float kSidebarCollapsed = 68.0f;
 constexpr float kPad = 28.0f;
 NextApp* g_hook_app = nullptr;
-constexpr wchar_t kVersion[] = L"1.0.9";
+
+void HideNvidiaOverlay() {
+    // The NVIDIA App overlay is a full-screen CEF window. It reappears when a
+    // game-like window starts, so hide it while we own the stream surface.
+    if (HWND overlay = ::FindWindowW(L"CEF-OSC-WIDGET", L"NVIDIA GeForce Overlay")) {
+        ::ShowWindow(overlay, SW_HIDE);
+    }
+}
+constexpr wchar_t kVersion[] = L"1.2.0";
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -567,6 +575,7 @@ bool NextApp::EnsureStreamSurface() {
     }
     stream_window_->SetCursorHidden(true);
     ResizeStream();
+    ::SetForegroundWindow(stream_window_->hwnd());
     return true;
 }
 
@@ -836,7 +845,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  1.0.9", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  1.2.0", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -950,7 +959,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"BetterRemotePlay Next 1.0.9",
+        renderer_->Text(L"BetterRemotePlay Next 1.2.0",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -2095,7 +2104,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"BetterRemotePlay Next 1.0.9  |  stable release", L"STABLE", true);
+               L"BetterRemotePlay Next 1.2.0  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -2104,7 +2113,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay Next", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 1.0.9  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 1.2.0  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -3127,10 +3136,35 @@ void NextApp::PresentVideo() {
     if (fg_mode) {
         const float background[4] = {0.01f, 0.008f, 0.016f, 1.0f};
 
+        // If the worker is already attached but not covering (lost focus, the
+        // NVIDIA overlay stole the foreground, Alt-Tab), keep the stream window
+        // alive from the parent presenter. Skipping this froze on the last
+        // presented image while audio continued.
+        if (dlss_fg_ && dlss_fg_->ready() && dlss_fg_->attached()) {
+            dlss_fg_->FrameWindow(ActiveWindow()->hwnd(), now_);
+            fg_covering_ = dlss_fg_->covering();
+            if (!fg_covering_) {
+                media::DecodedFrame fallback;
+                if (streaming_->TakeNewestFrame(fallback)) {
+                    video_frame_ = std::move(fallback);
+                    have_frame_ = true;
+                    RecordVideoShown();
+                }
+                if (have_frame_ && !video_frame_.rgba.empty()) {
+                    video->SetSourceFrame(video_frame_.rgba.data(), video_frame_.width,
+                                          video_frame_.height, video_frame_.pq);
+                    video->SetSourceFinal(false);
+                    video->Render(now_);
+                } else {
+                    video->Clear(background);
+                }
+                return;
+            }
+        }
+
         bool new_frame = false;
-        // Feed the generator on the same clock as the display. With a frame
-        // buffer it gets a primed, phase-locked 30/60 Hz input; with the buffer
-        // off it gets the newest frame immediately.
+        // The generator uses the same primed, phase-locked pull as the parent
+        // path, plus a dedicated submit slot so its input cadence is exact.
         media::DecodedFrame frame;
         if (PullFrame(frame)) {
             video_frame_ = std::move(frame);
@@ -3237,6 +3271,14 @@ void NextApp::PresentVideo() {
         }
         if (!dlss_fg_->attached()) {
             // The worker is running but its presenter window is not up yet.
+            show_standing();
+            return;
+        }
+        if (!fg_covering_) {
+            // The worker is attached but hidden (lost focus, Alt-Tab, another
+            // full-screen overlay). Keep presenting the stream window from the
+            // parent; otherwise the picture freezes on the last presented
+            // frame while audio continues.
             show_standing();
             return;
         }
@@ -3616,6 +3658,7 @@ void NextApp::ToggleWatch(bool watching) {
         dlss_failed_ = false;
         dlss_in_w_ = 0;
         dlss_in_h_ = 0;
+        HideNvidiaOverlay();
         if (!EnsureStreamSurface()) {
             watching_ = false;
             window_->Show();
