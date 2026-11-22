@@ -219,3 +219,8 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
 
 - RIFE model/blend are greyed out when DLSS-G is selected; the multiplier is
   greyed out for RIFE. Dimmed rows are read-only.
+
+## 2.4.6
+
+- Smoother pacing (time-based playout, queue trim), lower frame age (84 -> 37 ms at buffer 1), no spin in the presentation loop.
+- Motion safety is RIFE-only; the control is dimmed on DLSS-G.

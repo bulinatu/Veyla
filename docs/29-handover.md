@@ -1384,3 +1384,26 @@ stopped presenting them as if they did something.
 - Patch verified: `version=2.4.5`, 0 markers, `files_differ=0`.
 
 3.x forward handover: docs/33-handover-3x.md (architecture decisions, workstreams, release checklist, open decisions).
+
+## 2.4.6 - latency, pacing and motion-safety honesty
+
+- Pacing: playout phase follows real elapsed time with a queue PI trim, so a
+  29.7 fps source no longer drains the buffer; no spin while frames are queued.
+- SR and NR run synchronously in the FG path (one frame less latency; frame
+  age at presentation 84 ms -> 37 ms at buffer 1, measured).
+- `frame_buffer=0` delivers frames in order and trims only past four frames
+  (it used to throw the queue away on each tick).
+- Probe prints queue, trim, wait/frame max and frame age.
+- Motion safety is RIFE-only and shown dimmed on DLSS-G (it had no effect
+  there). The fast-motion bypass tried for DLSS-G was not kept: it was not
+  measured to help and added frame stalls.
+- Standalone: `dist/BetterRemotePlay-2.4.6-standalone.zip` (922.0 MB)
+  SHA256 `FB7A2C263728318ABBFA7936276E297BEB4D272EF16AB8C018FCA68DC8A318DE`
+- Update **2.4.5 -> 2.4.6**: `dist/BetterRemotePlay-2.4.5-to-2.4.6-update.exe` (5.3 MB)
+  SHA256 `E1024D92B1C0E196559E23E225343C50D1DB2EAEDAFDB119E302A806BC72C0D6`
+- `brpnext.exe` `F6F53A8B7648206F80ED5A60DD1347CFE8E05D72B265F49688BD07814851D4A9`
+- `brpnext-engine.exe` `2134918A56B0EC5BA73EB62DD0C0D03FC291891156F099B0706A3E8C44838C12`
+- Patch verified: `version=2.4.6`, 0 markers, `files_differ=0`. Shell PE subsystem 2 (GUI).
+- Known open: DLSS-G interpolation artefacts on fast pans (no real motion
+  vectors on a video stream), freeze during fast pans not reproduced,
+  `frame_buffer=0` cadence weaker than 1, DLSS-G worker phase wobble.
