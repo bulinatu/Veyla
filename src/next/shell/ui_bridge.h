@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -63,7 +64,7 @@ private:
 
     std::mutex out_mutex_;
     std::condition_variable out_cv_;
-    std::string outbox_;
+    std::deque<std::string> outbox_;
     bool out_pending_ = false;
 };
 

@@ -159,3 +159,15 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
   and shown fps.
 - DLSS 5 is documented as unavailable for a 2D stream; Neural Render is the
   real depth + optical-flow path.
+
+## 2.1.0
+
+- The F10 control center is now a GPUI window (same theme, tabs, live data),
+  with DLSS-G paused while it is open so it cannot steal focus.
+- Live audio/monitor/GPU pickers from the engine; no indexes to remember.
+- Settings apply automatically ~350 ms after the last edit; text size scales
+  the whole type ramp.
+- F10 works even when the DLSS-G presenter owns the foreground; Esc never arms
+  a disconnect while the panel is open.
+- Corrupt settings files are quarantined, never overwritten by defaults.
+- Advanced shows a Pacing card (loop p99, cadence, scanout, present misses).

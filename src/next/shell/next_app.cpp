@@ -48,7 +48,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"2.0.0";
+constexpr wchar_t kVersion[] = L"2.1.0";
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -321,6 +321,40 @@ int NextApp::Run() {
 LRESULT CALLBACK NextApp::LowLevelKeyboardProc(int code, WPARAM wparam, LPARAM lparam) {
     if (code == HC_ACTION && (wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN)) {
         const auto* info = reinterpret_cast<KBDLLHOOKSTRUCT*>(lparam);
+        if (info && g_hook_app && g_hook_app->engine_mode_ &&
+            g_hook_app->watching_ && info->vkCode == VK_F10) {
+            // The DLSS-G presenter can hold the foreground instead of the
+            // stream window; route F10 from either to the GPUI shell.
+            const HWND foreground = ::GetForegroundWindow();
+            DWORD foreground_pid = 0;
+            if (foreground) {
+                ::GetWindowThreadProcessId(foreground, &foreground_pid);
+            }
+            if (foreground_pid == ::GetCurrentProcessId() ||
+                (g_hook_app->dlss_fg_ &&
+                 g_hook_app->dlss_fg_->worker_pid() == foreground_pid)) {
+                ::AllowSetForegroundWindow(ASFW_ANY);
+                g_hook_app->bridge_.Publish("E overlay-toggle");
+                return 1;
+            }
+        }
+        if (info && g_hook_app && g_hook_app->overlay_pause_fg_ &&
+            (info->vkCode == VK_ESCAPE || info->vkCode == VK_F10)) {
+            // The GPUI control center is open but may not own the foreground
+            // (the DLSS-G presenter is topmost). Route Esc/F10 to it and keep
+            // the key away from the stream, so Esc never arms by accident.
+            const HWND foreground = ::GetForegroundWindow();
+            DWORD foreground_pid = 0;
+            if (foreground) {
+                ::GetWindowThreadProcessId(foreground, &foreground_pid);
+            }
+            if (foreground_pid == ::GetCurrentProcessId() ||
+                (g_hook_app->dlss_fg_ &&
+                 g_hook_app->dlss_fg_->worker_pid() == foreground_pid)) {
+                g_hook_app->bridge_.Publish("E overlay-toggle");
+                return 1;
+            }
+        }
         if (info && info->vkCode == VK_ESCAPE && g_hook_app &&
             g_hook_app->ShouldCaptureEsc()) {
             if (brp::Win32Window* window = g_hook_app->ActiveWindow()) {
@@ -336,6 +370,10 @@ bool NextApp::ShouldCaptureEsc() const {
     // Only steal Esc while the user is in, or arming, a session, and only when
     // the foreground window belongs to this process or to the DLSS-G worker.
     // Alt-Tabbing to another application keeps Esc there.
+    if (overlay_pause_fg_) {
+        // The GPUI control center owns the keyboard; Esc belongs to it.
+        return false;
+    }
     if (!watching_ && !disconnect_armed_) {
         return false;
     }
@@ -607,6 +645,10 @@ void NextApp::Frame() {
             PublishBridgeStatus();
             bridge_status_at_ = now_;
         }
+        if (publish_devices_) {
+            PublishDevices();
+            publish_devices_ = false;
+        }
     }
     ProbeIfNeeded(now_);
     if (bench_active_) {
@@ -654,7 +696,8 @@ void NextApp::Frame() {
     const bool app_foreground = ::GetForegroundWindow() == ActiveWindow()->hwnd();
     const bool show_overlay =
         watching_ && app_foreground &&
-        (settings_.overlay.enabled || overlay_control_ || disconnect_armed_);
+        (settings_.overlay.enabled || (!engine_mode_ && overlay_control_) ||
+         disconnect_armed_);
     if (std::getenv("BRP_OVERLAY_PROBE")) {
         std::fprintf(stderr, "[next] overlay show=%d watching=%d fg=%d active=%p foreground=%p\n",
                      show_overlay ? 1 : 0, watching_ ? 1 : 0, app_foreground ? 1 : 0,
@@ -875,7 +918,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  2.0.0", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  2.1.0", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -989,7 +1032,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"BetterRemotePlay Next 2.0.0",
+        renderer_->Text(L"BetterRemotePlay Next 2.1.0",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -2134,7 +2177,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"BetterRemotePlay Next 2.0.0  |  stable release", L"STABLE", true);
+               L"BetterRemotePlay Next 2.1.0  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -2143,7 +2186,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay Next", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 2.0.0  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 2.1.0  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -3036,6 +3079,18 @@ void NextApp::HandlePinInput() {
         return;
     }
     if (key == VK_F10 && watching_) {
+        if (engine_mode_) {
+            // The expanded control center lives in the GPUI shell. Tell it to
+            // toggle and keep the GDI overlay for compact stats only.
+            if (disconnect_armed_) {
+                disconnect_armed_ = false;
+            }
+            // We own the foreground right now, so grant the GPUI shell the
+            // right to take it for the control center window.
+            ::AllowSetForegroundWindow(ASFW_ANY);
+            bridge_.Publish("E overlay-toggle");
+            return;
+        }
         if (disconnect_armed_) {
             disconnect_armed_ = false;
         }
@@ -3171,7 +3226,9 @@ void NextApp::PresentVideo() {
         // alive from the parent presenter. Skipping this froze on the last
         // presented image while audio continued.
         if (dlss_fg_ && dlss_fg_->ready() && dlss_fg_->attached()) {
+            if (!overlay_pause_fg_) {
             dlss_fg_->FrameWindow(ActiveWindow()->hwnd(), now_);
+        }
             fg_covering_ = dlss_fg_->covering();
             if (!fg_covering_) {
                 media::DecodedFrame fallback;
@@ -3209,6 +3266,11 @@ void NextApp::PresentVideo() {
             // The worker creates its presenter on the first Process(); submit
             // before looking for the window or the first frame never arrives
             // and the window never becomes visible.
+            if (overlay_pause_fg_) {
+                // The control center is open: keep the worker quiet so it
+                // cannot raise itself over the panel or steal the foreground.
+                return true;
+            }
             dlss_fg_->Submit(std::move(rgba), width, height);
             dlss_fg_->FrameWindow(ActiveWindow()->hwnd(), now_);
             RecordVideoShown();
@@ -3285,7 +3347,9 @@ void NextApp::PresentVideo() {
             return;
         }
 
-        dlss_fg_->FrameWindow(ActiveWindow()->hwnd(), now_);
+        if (!overlay_pause_fg_) {
+            dlss_fg_->FrameWindow(ActiveWindow()->hwnd(), now_);
+        }
         fg_covering_ = dlss_fg_->covering();
         fg_fps_ = dlss_fg_->displayed_fps();
         fg_actual_mult_ = dlss_fg_->actual_multiplier();
@@ -4036,6 +4100,24 @@ void NextApp::HandleBridgeCommand(const std::string& command) {
         DisconnectStream();
     } else if (command == "apply") {
         ReloadSettingsFromDisk();
+    } else if (command == "devices") {
+        publish_devices_ = true;
+    } else if (command == "overlay_open") {
+        overlay_pause_fg_ = true;
+        if (dlss_fg_) {
+            dlss_fg_->Hide();
+        }
+        if (overlay_.visible()) {
+            overlay_.Hide();
+        }
+    } else if (command == "overlay_close") {
+        overlay_pause_fg_ = false;
+    } else if (command == "leave_watch") {
+        if (watching_) {
+            ToggleWatch(false);
+        }
+    } else if (command == "disconnect_now") {
+        DisconnectStream();
     } else if (command == "shutdown") {
         if (window_) {
             ::PostMessageW(window_->hwnd(), WM_CLOSE, 0, 0);
@@ -4114,6 +4196,7 @@ void NextApp::PublishBridgeStatus() {
     flag("connected", stream.connected, true);
     flag("streaming", streaming_now, true);
     flag("connecting", stream.connecting, true);
+    flag("armed", disconnect_armed_, true);
     text("message", stream.message, true);
     text("console_name", settings_.console.name, true);
     text("codec", stream.codec, true);
@@ -4124,6 +4207,8 @@ void NextApp::PublishBridgeStatus() {
     number("loss", stream.loss_percent, true);
     number("jitter", stream.jitter_ms, true);
     number("decode_ms", stream.decode_ms, true);
+    number("decode_max", stream.decode_ms_max, true);
+    number("loop_p99", loop_p99_, true);
     integer("drops", stream.decoder_drops, true);
     number("cadence_p50", cadence_p50_, true);
     number("cadence_p99", cadence_p99_, true);
@@ -4134,10 +4219,75 @@ void NextApp::PublishBridgeStatus() {
     number("sr_ms", dlss_sr_ ? dlss_sr_->last_ms() : 0.0, true);
     number("fg_ms", 0.0, true);
     integer("generated", static_cast<long long>(rife_generated_.load()), true);
+    flag("cuda", system_.cuda, true);
+    flag("tensorrt", system_.tensorrt_runtime, true);
+    flag("dlss_fg_ready", system_.dlss_fg, true);
+    flag("dlss_sr_ready", system_.dlss_sr, true);
     text("gpu", system_.gpu.name, true);
     text("driver", system_.gpu.driver, true);
     integer("vram_mb", static_cast<long long>(system_.gpu.vram_mb), false);
     json += '}';
+    bridge_.Publish(std::move(json));
+}
+
+void NextApp::PublishDevices() {
+    auto escape = [](const std::string& text) {
+        std::string out;
+        out.reserve(text.size() + 8);
+        for (const char ch : text) {
+            if (ch == '"' || ch == '\\') {
+                out += '\\';
+                out += ch;
+            } else if (static_cast<unsigned char>(ch) >= 0x20) {
+                out += ch;
+            }
+        }
+        return out;
+    };
+
+    std::string json = "E {\"kind\":\"devices\",\"audio\":[";
+    const std::vector<brp::audio::DeviceInfo> audio_devices =
+        brp::audio::Engine::Enumerate();
+    for (std::size_t i = 0; i < audio_devices.size(); ++i) {
+        if (i != 0) {
+            json += ',';
+        }
+        json += "{\"id\":\"";
+        json += escape(audio_devices[i].id);
+        json += "\",\"name\":\"";
+        json += escape(audio_devices[i].name);
+        json += "\",\"default\":";
+        json += audio_devices[i].is_default ? "true" : "false";
+        json += '}';
+    }
+
+    json += "],\"monitors\":[";
+    for (std::size_t i = 0; i < system_.displays.size(); ++i) {
+        const DisplayInfo& display = system_.displays[i];
+        if (i != 0) {
+            json += ',';
+        }
+        char buffer[512];
+        std::snprintf(buffer, sizeof(buffer),
+                      "{\"index\":%zu,\"name\":\"%s\",\"width\":%d,\"height\":%d,"
+                      "\"hz\":%d,\"primary\":%s}",
+                      i, escape(Narrow(display.name)).c_str(), display.width,
+                      display.height, display.refresh_hz,
+                      display.primary ? "true" : "false");
+        json += buffer;
+    }
+
+    json += "],\"gpus\":[";
+    const std::vector<std::string> adapters = EnumerateAdapterNames();
+    for (std::size_t i = 0; i < adapters.size(); ++i) {
+        if (i != 0) {
+            json += ',';
+        }
+        json += '"';
+        json += escape(adapters[i]);
+        json += '"';
+    }
+    json += "]}";
     bridge_.Publish(std::move(json));
 }
 

@@ -215,4 +215,26 @@ SystemInfo ProbeSystem() {
     return info;
 }
 
+std::vector<std::string> EnumerateAdapterNames() {
+    std::vector<std::string> names;
+    ComPtr<IDXGIFactory1> factory;
+    if (FAILED(::CreateDXGIFactory1(IID_PPV_ARGS(&factory))) || !factory) {
+        return names;
+    }
+    for (UINT index = 0;; ++index) {
+        ComPtr<IDXGIAdapter1> adapter;
+        if (factory->EnumAdapters1(index, &adapter) == DXGI_ERROR_NOT_FOUND) {
+            break;
+        }
+        if (!adapter) {
+            continue;
+        }
+        DXGI_ADAPTER_DESC1 desc{};
+        if (SUCCEEDED(adapter->GetDesc1(&desc))) {
+            names.push_back(Narrow(desc.Description));
+        }
+    }
+    return names;
+}
+
 }  // namespace brp::next

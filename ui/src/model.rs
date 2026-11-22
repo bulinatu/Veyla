@@ -36,11 +36,24 @@ pub struct Settings {
 impl Settings {
     pub fn load() -> Self {
         let path = settings_path();
-        let values = fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .and_then(|value| value.as_object().cloned())
-            .unwrap_or_default();
+        let mut values = Map::new();
+        match fs::read_to_string(&path) {
+            Ok(text) => match serde_json::from_str::<Value>(&text) {
+                Ok(Value::Object(map)) => values = map,
+                Ok(_) => {
+                    log_line("settings: root is not an object");
+                    Self::quarantine(&path);
+                }
+                Err(error) => {
+                    log_line(&format!("settings: parse failed: {error}"));
+                    Self::quarantine(&path);
+                }
+            },
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                log_line(&format!("settings: read failed: {error}"));
+            }
+        }
         let mut settings = Self {
             path,
             values,
@@ -48,6 +61,19 @@ impl Settings {
         };
         settings.ensure_defaults();
         settings
+    }
+
+    /// Moves a file we could not parse out of the way instead of letting the
+    /// next save destroy it.
+    fn quarantine(path: &PathBuf) {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let broken = path.with_extension(format!("json.corrupt-{stamp}"));
+        if let Err(error) = fs::rename(path, &broken) {
+            log_line(&format!("settings: quarantine failed: {error}"));
+        }
     }
 
     /// Defaults mirror the engine's own defaults so a fresh install behaves
@@ -328,6 +354,7 @@ pub struct Status {
     pub connected: bool,
     pub streaming: bool,
     pub connecting: bool,
+    pub armed: bool,
     pub message: String,
     pub console_name: String,
     pub codec: String,
@@ -338,6 +365,8 @@ pub struct Status {
     pub loss_percent: f64,
     pub jitter_ms: f64,
     pub decode_ms: f64,
+    pub decode_max: f64,
+    pub loop_p99: f64,
     pub drops: i64,
     pub cadence_p50: f64,
     pub cadence_p99: f64,
@@ -348,6 +377,10 @@ pub struct Status {
     pub sr_ms: f64,
     pub fg_ms: f64,
     pub generated: i64,
+    pub cuda: bool,
+    pub tensorrt: bool,
+    pub dlss_fg_ready: bool,
+    pub dlss_sr_ready: bool,
     pub gpu: String,
     pub driver: String,
     pub vram_mb: i64,
@@ -365,6 +398,7 @@ impl Status {
             connected: b("connected"),
             streaming: b("streaming"),
             connecting: b("connecting"),
+            armed: b("armed"),
             message: s("message"),
             console_name: s("console_name"),
             codec: s("codec"),
@@ -375,6 +409,8 @@ impl Status {
             loss_percent: f("loss"),
             jitter_ms: f("jitter"),
             decode_ms: f("decode_ms"),
+            decode_max: f("decode_max"),
+            loop_p99: f("loop_p99"),
             drops: i("drops"),
             cadence_p50: f("cadence_p50"),
             cadence_p99: f("cadence_p99"),
@@ -385,6 +421,10 @@ impl Status {
             sr_ms: f("sr_ms"),
             fg_ms: f("fg_ms"),
             generated: i("generated"),
+            cuda: b("cuda"),
+            tensorrt: b("tensorrt"),
+            dlss_fg_ready: b("dlss_fg_ready"),
+            dlss_sr_ready: b("dlss_sr_ready"),
             gpu: s("gpu"),
             driver: s("driver"),
             vram_mb: i("vram_mb"),

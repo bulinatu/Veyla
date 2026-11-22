@@ -22,16 +22,83 @@ use serde_json::Value;
 
 use crate::model::Status;
 
+#[derive(Clone, Debug, Default)]
+pub struct Device {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Monitor {
+    pub index: i64,
+    pub name: String,
+    pub width: i64,
+    pub height: i64,
+    pub hz: i64,
+    pub primary: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Devices {
+    pub audio: Vec<Device>,
+    pub monitors: Vec<Monitor>,
+    pub gpus: Vec<String>,
+}
+
+impl Devices {
+    fn from_json(value: &Value) -> Self {
+        let mut devices = Devices::default();
+        if let Some(list) = value.get("audio").and_then(Value::as_array) {
+            for item in list {
+                devices.audio.push(Device {
+                    id: item.get("id").and_then(Value::as_str).unwrap_or_default().to_string(),
+                    name: item.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+                    is_default: item.get("default").and_then(Value::as_bool).unwrap_or(false),
+                });
+            }
+        }
+        if let Some(list) = value.get("monitors").and_then(Value::as_array) {
+            for item in list {
+                devices.monitors.push(Monitor {
+                    index: item.get("index").and_then(Value::as_i64).unwrap_or(0),
+                    name: item.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+                    width: item.get("width").and_then(Value::as_i64).unwrap_or(0),
+                    height: item.get("height").and_then(Value::as_i64).unwrap_or(0),
+                    hz: item.get("hz").and_then(Value::as_i64).unwrap_or(0),
+                    primary: item.get("primary").and_then(Value::as_bool).unwrap_or(false),
+                });
+            }
+        }
+        if let Some(list) = value.get("gpus").and_then(Value::as_array) {
+            for item in list {
+                if let Some(name) = item.as_str() {
+                    devices.gpus.push(name.to_string());
+                }
+            }
+        }
+        devices
+    }
+}
+
 #[derive(Default)]
 pub struct Shared {
     pub status: Status,
     pub rev: u64,
     pub online: bool,
+    pub devices: Option<Devices>,
+    pub devices_rev: u64,
+    pub events: Vec<String>,
 }
 
-pub struct Engine {
-    child: Child,
+struct EngineInner {
+    child: Mutex<Child>,
     tx: Sender<String>,
+}
+
+#[derive(Clone)]
+pub struct Engine {
+    inner: Arc<EngineInner>,
     pub shared: Arc<Mutex<Shared>>,
 }
 
@@ -99,6 +166,34 @@ impl Engine {
                     Ok(0) | Err(_) => break,
                     Ok(_) => {}
                 }
+                if let Some(body) = line.strip_prefix("E ") {
+                    let body = body.trim();
+                    if body == "overlay-toggle" {
+                        crate::model::log_line("bridge: event overlay-toggle");
+                        let mut state = state.lock().unwrap();
+                        state.events.push("overlay-toggle".to_string());
+                    } else if let Ok(value) = serde_json::from_str::<Value>(body) {
+                        match value.get("kind").and_then(Value::as_str) {
+                            Some("devices") => {
+                            let devices = Devices::from_json(&value);
+                            let mut state = state.lock().unwrap();
+                            state.devices = Some(devices);
+                            state.devices_rev += 1;
+                            if state.devices_rev <= 2 {
+                                let a = state.devices.as_ref().map(|d| d.audio.len()).unwrap_or(0);
+                                let m = state.devices.as_ref().map(|d| d.monitors.len()).unwrap_or(0);
+                                let g = state.devices.as_ref().map(|d| d.gpus.len()).unwrap_or(0);
+                                drop(state);
+                                crate::model::log_line(&format!(
+                                    "bridge: devices audio={a} monitors={m} gpus={g}"
+                                ));
+                            }
+                            }
+                            _ => {}
+                        }
+                    }
+                    continue;
+                }
                 let Some(body) = line.strip_prefix("S ") else {
                     continue;
                 };
@@ -124,11 +219,17 @@ impl Engine {
             return None;
         }
 
-        Some(Self { child, tx, shared })
+        Some(Self {
+            inner: Arc::new(EngineInner {
+                child: Mutex::new(child),
+                tx,
+            }),
+            shared,
+        })
     }
 
     pub fn send(&self, command: &str) {
-        let _ = self.tx.send(command.to_string());
+        let _ = self.inner.tx.send(command.to_string());
     }
 
     pub fn online(&self) -> bool {
@@ -136,17 +237,20 @@ impl Engine {
     }
 }
 
-impl Drop for Engine {
+impl Drop for EngineInner {
     fn drop(&mut self) {
-        self.send("shutdown");
+        let _ = self.tx.send("shutdown".to_string());
+        let Ok(mut child) = self.child.lock() else {
+            return;
+        };
         for _ in 0..12 {
-            if let Ok(Some(_)) = self.child.try_wait() {
+            if let Ok(Some(_)) = child.try_wait() {
                 return;
             }
             thread::sleep(Duration::from_millis(25));
         }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
 

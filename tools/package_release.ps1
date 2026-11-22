@@ -11,7 +11,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $release = Join-Path $root "build\Release"
 $distRoot = Join-Path $root "dist"
 $dest = Join-Path $distRoot "BetterRemotePlay"
-$version = "2.0.0"
+$version = "2.1.0"
 
 function Require-File([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -132,7 +132,7 @@ if (Test-Path $rife) {
 }
 # --- readme -----------------------------------------------------------------
 $readme = @"
-BetterRemotePlay 2.0 - standalone build
+BetterRemotePlay 2.1 - standalone build
 =======================================
 
 Run brpnext.exe. No installer, no console window, no background service.
@@ -146,6 +146,14 @@ What changed in 2.0
   driven by the engine state, not a fake timer.
 - Top navigation with a Basic/Advanced switch. Every setting from 1.2 is here,
   grouped by concern, and still stored in the same next-settings.json.
+- The in-stream control center (F10) is now a second GPUI window docked to the
+  chosen side, with live telemetry, SR/FG/stream/audio/pad controls and the
+  same visual language as the shell. The compact stats card and the disconnect
+  banner stay in the engine so they keep working with the panel closed.
+- Audio endpoints, displays and GPU adapters are listed live and picked from
+  a dialog; nothing has to be typed by index.
+- Text size 90-125%, and settings apply about 350 ms after the last edit
+  (Apply still forces it immediately).
 - The stream window and all media work stay in the C++ engine. The shell
   minimizes itself while you play so it cannot add composition jitter.
 
@@ -194,7 +202,8 @@ Audio, controller, overlay
 - Controller: DualSense haptics, adaptive triggers, rumble, lightbar, poll rate
   125/250/500/1000 Hz.
 - Overlay: side (left/right), vertical anchor, scale, opacity, refresh interval,
-  compact mode and which sections are shown. F10 toggles it in the stream.
+  compact mode and which sections are shown. F10 toggles the GPUI control
+  center; the compact stats card is the engine-side fallback.
 
 Requirements
 ------------

@@ -169,6 +169,6 @@ pub fn aurora(animated: bool, reduce_motion: bool) -> AnyElement {
     );
 
     let _ = relative;
-    let _ = theme::T_BODY;
+    let _ = theme::body();
     root.into_any_element()
 }

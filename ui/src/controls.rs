@@ -14,6 +14,7 @@ use crate::widgets;
 impl Root {
     pub fn persist(&mut self) {
         let _ = self.settings.save();
+        self.settings_rev = self.settings_rev.wrapping_add(1);
     }
 
     pub fn toggle(&self, key: &'static str, cx: &mut Context<Self>) -> AnyElement {
@@ -66,7 +67,7 @@ impl Root {
             } else {
                 rgba(0xFFFFFF14)
             })
-            .text_size(theme::T_TINY)
+            .text_size(theme::tiny())
             .font_weight(if selected {
                 FontWeight::SEMIBOLD
             } else {
@@ -260,7 +261,7 @@ impl Root {
                     .items_center()
                     .justify_center()
                     .font_family(theme::MONO_FONT)
-                    .text_size(theme::T_MONO)
+                    .text_size(theme::mono())
                     .text_color(theme::text())
                     .child(label),
             )
@@ -314,7 +315,7 @@ impl Root {
                 rgba(0xFFFFFF14)
             })
             .font_family(theme::MONO_FONT)
-            .text_size(theme::T_MONO)
+            .text_size(theme::mono())
             .text_color(if value.is_empty() {
                 rgba(0xFFFFFF45)
             } else {

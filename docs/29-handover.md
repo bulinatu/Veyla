@@ -1109,3 +1109,66 @@ needs a good host (DSX reaches 1000 Hz).
   `brpnext-engine.exe --engine --bridge-port`, the bridge connects, the
   engine reaches `connecting` and opens the stream window.
 - Tests: `brp_next_tests` ALL PASS (82).
+
+## 2.1.0 - control center in GPUI, live devices, safer settings
+
+- **F10 control center is a GPUI window.** The engine still owns the compact
+  stats card and the disconnect banner, but the expanded panel is a second,
+  frameless, topmost GPUI window docked to the configured side. Tabs: Info, SR,
+  FG, Video, Stream, Audio, Pad. It reads live status at 6-7 Hz and writes the
+  same settings keys, then applies them.
+- **Foreground handling.** While the panel is open the engine hides the DLSS-G
+  worker and stops submitting frames (`overlay_pause_fg_`), because the worker's
+  topmost presenter otherwise steals the foreground and closes the panel. The
+  engine also grants `AllowSetForegroundWindow(ASFW_ANY)` and the shell
+  activates its window with an AttachThreadInput fallback.
+- **Key routing.** F10 is routed by the engine's low-level hook whenever the
+  engine or the worker has the foreground, so it keeps working when the stream
+  window is not focused. While the panel is open the hook routes Esc/F10 to the
+  shell and never arms a disconnect. `ShouldCaptureEsc()` returns false while
+  the panel is open.
+- **Live device lists.** New bridge command `devices` and event
+  `E {"kind":"devices",...}` with WASAPI endpoints, monitors and DXGI adapters.
+  Audio, Monitor and GPU rows open a picker dialog instead of free text/index.
+- **Auto-apply.** A settings edit reaches the engine about 350 ms after the last
+  change (tick-based debounce in the poll loop). Apply still forces immediately.
+- **Text size.** `ui.scale` now scales the whole type scale (90/100/110/125%)
+  and is applied before building a frame.
+- **Settings safety.** A file that fails to parse is quarantined as
+  `next-settings.json.corrupt-<stamp>` instead of being overwritten by defaults,
+  and the shell no longer writes on load.
+- **Pacing telemetry.** Status now carries `loop_p99`, `decode_max`, capability
+  flags (`cuda`, `tensorrt`, `dlss_sr_ready`, `dlss_fg_ready`) and the Advanced
+  page shows a Pacing card with loop p99, cadence, scanout, misses and buffer.
+- **Honesty.** Neural Render is read-only with a capability line; DLSS 5 is
+  still marked unavailable with the 3D-data reason.
+- Bridge protocol additions: `overlay_open`, `overlay_close`, `leave_watch`,
+  `disconnect_now`, `devices`; event `overlay-toggle` (bare line, not JSON).
+
+### Settings audit (2.1.0)
+
+Every control the new shell exposes is read by the engine, except the explicitly
+read-only preview. Removed because nothing consumed them:
+`ai.temporal`, `ai.occlusion`, `ai.adaptive`, `ai.quality`, `overlay.compact`
+and the editable `overlay.hotkey` (F10 is fixed in the stream and now shown as a
+badge). `general.close_to_tray`, `general.update_channel`,
+`general.notifications`, `general.check_updates`, `general.telemetry` and
+`ui.scale`-as-layout were dropped or replaced by working controls. The Neural
+Render card is read-only with a capability line (TensorRT/CUDA/DLSS presence).
+The keys still exist in the JSON for the classic shell; only the new shell
+stopped presenting them as if they did something.
+
+### 2.1.0 package
+
+- Standalone: `dist/BetterRemotePlay-2.1.0-standalone.zip` (921.9 MB)
+  SHA256 `5E4979A90F54511F2C44CB07BABDCBE6FDF40CE4D4E262FDAF4843DAFDAF5AB1`
+- Update **2.0.0 -> 2.1.0**:
+  `dist/BetterRemotePlay-2.0.0-to-2.1.0-update.exe` (5.27 MB)
+  SHA256 `A3821FE1A8F54911E69803AEB2E9071CA39120B161815A887E78C2FFF7EE63A1`
+- `brpnext.exe` (shell)
+  `7FA94639B0C36BA2F0AEB6FA199F5E3EB0FCCB420674B33DC8A1A37B73F1EF90`
+- `brpnext-engine.exe`
+  `E2D887ED9190DFEB4307A30464F8203B4145B594F2C1F02A8C30077B3F21375C`
+- Patch verified: `version=2.1.0`, 0 markers, `files_differ=0`, 4 files changed.
+- Packaged smoke test: shell starts the engine, bridge connects, devices
+  (`audio=5 monitors=3 gpus=4`), stream window opens, shell minimizes.

@@ -3,14 +3,14 @@
 use std::time::Duration;
 
 use gpui::{
-    div, prelude::*, px, relative, rgba, rgb, Animation, AnimationExt as _, AnyElement, App,
-    Context, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, MouseButton, Render, SharedString,
-    StatefulInteractiveElement, Transformation, percentage,
-    Window,
+    div, prelude::*, point, px, relative, rgba, rgb, size, Animation, AnimationExt as _, AnyElement,
+    AnyWindowHandle, App, Bounds, Context, FocusHandle, Focusable, FontWeight, InteractiveElement,
+    IntoElement, MouseButton, Render, SharedString, StatefulInteractiveElement, Window,
+    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
 };
 
 use crate::model::{Preset, Settings, Status};
-use crate::{background, controls, pages, theme, widgets};
+use crate::{background, theme, widgets};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tab {
@@ -51,16 +51,23 @@ impl Tab {
 
     pub fn icon(self) -> &'static str {
         match self {
-            Tab::Home => "◆",
-            Tab::Stream => "▷",
-            Tab::Video => "▣",
-            Tab::Audio => "♪",
-            Tab::Pad => "◎",
-            Tab::Neural => "✦",
-            Tab::Overlay => "▤",
-            Tab::Advanced => "⚙",
+            Tab::Home => "â—†",
+            Tab::Stream => "â–·",
+            Tab::Video => "â–£",
+            Tab::Audio => "â™ª",
+            Tab::Pad => "â—Ž",
+            Tab::Neural => "âœ¦",
+            Tab::Overlay => "â–¤",
+            Tab::Advanced => "âš™",
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PickerKind {
+    Audio,
+    Monitor,
+    Gpu,
 }
 
 pub struct Root {
@@ -76,8 +83,16 @@ pub struct Root {
     pub(crate) last_rev: u64,
     pub(crate) engine_online: bool,
     pub(crate) shell_minimized: bool,
+    pub(crate) picker: Option<PickerKind>,
+    pub(crate) devices_rev: u64,
+    pub(crate) overlay_handle: Option<AnyWindowHandle>,
+    pub(crate) settings_rev: u64,
+    applied_rev: u64,
+    apply_ticks: u8,
+    focus_initialized: bool,
     logged_render: bool,
     boot_timer_started: bool,
+    start_min_done: bool,
 }
 
 impl Root {
@@ -86,12 +101,8 @@ impl Root {
             "root new autoconnect={}",
             std::env::var("BRP_UI_AUTOCONNECT").is_ok()
         ));
-        let mut settings = Settings::load();
-        // The shell owns these keys; make sure an engine-written file that
-        // predates them still opens with sane values.
-        if !settings.dirty {
-            let _ = settings.save();
-        }
+        // Never write on load: a parse failure must not replace the user file.
+        let settings = Settings::load();
         let booting = settings.b("ui.boot_animation", true)
             && !settings.b("ui.reduce_motion", false);
         crate::model::log_line(&format!("root booting={booting}"));
@@ -110,20 +121,63 @@ impl Root {
                     let Some(engine) = this.engine.as_ref() else {
                         return;
                     };
-                    let (rev, status, online) = {
-                        let state = match engine.shared.lock() {
+                    let (rev, status, online, devices_rev, events) = {
+                        let mut state = match engine.shared.lock() {
                             Ok(state) => state,
                             Err(_) => return,
                         };
-                        (state.rev, state.status.clone(), state.online)
+                        (
+                            state.rev,
+                            state.status.clone(),
+                            state.online,
+                            state.devices_rev,
+                            std::mem::take(&mut state.events),
+                        )
                     };
+                    if let Some(handle) = this.overlay_handle {
+                        if handle.update(cx, |_, _, _| {}).is_err() {
+                            this.overlay_handle = None;
+                            this.send("overlay_close");
+                        }
+                    }
+                    for event in events {
+                        if event == "overlay-toggle" {
+                            this.toggle_overlay(cx);
+                        }
+                    }
+                    // Debounced auto-apply: a settings change reaches the
+                    // engine about 350 ms after the last edit.
+                    if this.engine_online && this.settings_rev != this.applied_rev {
+                        if this.apply_ticks == 0 {
+                            this.apply_ticks = 3;
+                        } else {
+                            this.apply_ticks -= 1;
+                            if this.apply_ticks == 0 {
+                                this.applied_rev = this.settings_rev;
+                                this.send("apply");
+                            }
+                        }
+                    } else {
+                        this.apply_ticks = 0;
+                        this.applied_rev = this.settings_rev;
+                    }
+                    let came_online = online && !this.engine_online;
+                    let devices_changed = devices_rev != this.devices_rev;
+                    this.devices_rev = devices_rev;
+                    if devices_changed {
+                        cx.notify();
+                    }
                     if rev != this.last_rev || online != this.engine_online {
                         this.last_rev = rev;
                         this.status = status;
                         this.engine_online = online;
                         if this.shell_minimized && !this.status.streaming {
                             this.shell_minimized = false;
+                            crate::model::log_line("shell restore");
                             restore_shell_window();
+                        }
+                        if came_online {
+                            this.send("devices");
                         }
                         cx.notify();
                     }
@@ -135,6 +189,20 @@ impl Root {
         })
         .detach();
 
+        if let Ok(kind) = std::env::var("BRP_UI_PICKER") {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(1800))
+                    .await;
+                let kind = match kind.as_str() {
+                    "audio" => PickerKind::Audio,
+                    "monitor" => PickerKind::Monitor,
+                    _ => PickerKind::Gpu,
+                };
+                let _ = this.update(cx, |this, cx| this.open_picker(kind, cx));
+            })
+            .detach();
+        }
         if std::env::var("BRP_UI_AUTOCONNECT").is_ok() {
             cx.spawn(async move |this, cx| {
                 cx.background_executor()
@@ -146,9 +214,19 @@ impl Root {
             .detach();
         }
 
+        let initial_tab = match std::env::var("BRP_UI_TAB").unwrap_or_default().as_str() {
+            "stream" => Tab::Stream,
+            "video" => Tab::Video,
+            "audio" => Tab::Audio,
+            "pad" => Tab::Pad,
+            "neural" => Tab::Neural,
+            "overlay" => Tab::Overlay,
+            "advanced" => Tab::Advanced,
+            _ => Tab::Home,
+        };
         Self {
             settings,
-            tab: Tab::Home,
+            tab: initial_tab,
             advanced,
             booting,
             focus,
@@ -159,8 +237,16 @@ impl Root {
             last_rev: 0,
             engine_online: false,
             shell_minimized: false,
+            picker: None,
+            devices_rev: 0,
+            overlay_handle: None,
+            settings_rev: 0,
+            applied_rev: 0,
+            apply_ticks: 0,
+            focus_initialized: false,
             logged_render: false,
             boot_timer_started: false,
+            start_min_done: false,
         }
     }
 
@@ -213,7 +299,7 @@ impl Root {
             self.toast("Entering stream", false, cx);
         } else {
             self.send("connect");
-            self.toast("Connecting to console…", false, cx);
+            self.toast("Connecting to consoleâ€¦", false, cx);
         }
     }
 
@@ -230,6 +316,102 @@ impl Root {
         if self.ensure_engine(cx) {
             self.send("apply");
             self.toast("Settings applied", false, cx);
+        }
+    }
+
+    /// Opens the expanded control center as a second, topmost GPUI window on
+    /// the edge chosen in Overlay settings, or closes it if already open.
+    pub(crate) fn toggle_overlay(&mut self, cx: &mut Context<Self>) {
+        crate::model::log_line("toggle_overlay");
+        if let Some(handle) = self.overlay_handle.take() {
+            if handle
+                .update(cx, |_, window, _| window.remove_window())
+                .is_ok()
+            {
+                self.send("overlay_close");
+                crate::overlay::restore_focus_after(cx);
+                return;
+            }
+            // The window closed itself (Esc or deactivation); fall through and
+            // open a fresh one instead of swallowing the toggle.
+        }
+        let Some(engine) = self.engine.clone() else {
+            self.toast("Engine is not running", true, cx);
+            return;
+        };
+        // Give the engine a moment to hide the DLSS-G worker before the window
+        // appears; the worker's topmost presenter would otherwise steal focus.
+        self.send("overlay_open");
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(160))
+                .await;
+            let _ = this.update(cx, |this, cx| this.open_overlay_window(cx));
+        })
+        .detach();
+    }
+
+    fn open_overlay_window(&mut self, cx: &mut Context<Self>) {
+        let Some(engine) = self.engine.clone() else {
+            return;
+        };
+        if self.overlay_handle.is_some() {
+            return;
+        }
+        let scale = self.settings.i("overlay.scale", 125).clamp(75, 200) as f32 / 100.0;
+        let width = 440.0 * scale;
+        let display = cx.primary_display();
+        let (x, y, w, h) = if let Some(display) = display {
+            let bounds = display.bounds();
+            (
+                bounds.origin.x + bounds.size.width - px(width) - px(18.0),
+                bounds.origin.y + px(18.0),
+                px(width),
+                bounds.size.height - px(36.0),
+            )
+        } else {
+            (px(1000.0), px(30.0), px(width), px(800.0))
+        };
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                point(x, y),
+                size(w, h),
+            ))),
+            titlebar: None,
+            kind: WindowKind::PopUp,
+            is_movable: false,
+            is_resizable: false,
+            is_minimizable: false,
+            window_background: WindowBackgroundAppearance::Opaque,
+            ..Default::default()
+        };
+        let handle = cx.open_window(options, |window, cx| {
+            let view = cx.new(|cx| crate::overlay::OverlayView::new(engine.clone(), cx));
+            window.set_window_title("BetterRemotePlay Overlay");
+            let focus = view.read(cx).focus.clone();
+            window.focus(&focus);
+            view
+        });
+        match handle {
+            Ok(handle) => {
+                crate::model::log_line("overlay opened");
+                self.overlay_handle = Some(handle.into());
+                crate::overlay::make_topmost("BetterRemotePlay Overlay");
+                let any: AnyWindowHandle = handle.into();
+                cx.spawn(async move |_, cx| {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(90))
+                        .await;
+                    let _ = any.update(cx, |_, window, _| window.activate_window());
+                    crate::overlay::activate_by_title("BetterRemotePlay Overlay");
+                })
+                .detach();
+            }
+            Err(error) => {
+                crate::model::log_line(&format!("overlay open failed: {error}"));
+                self.send("overlay_close");
+                self.toast(format!("Control center failed: {error}"), true, cx);
+            }
         }
     }
 
@@ -264,6 +446,9 @@ impl Root {
         let show_labels = width > px(1110.0);
         let mut tabs = div().flex().items_center().gap(px(2.0));
         for tab in Tab::ALL {
+            if tab == Tab::Advanced && !self.advanced {
+                continue;
+            }
             let selected = self.tab == tab;
             let icon = tab.icon();
             let label = tab.label();
@@ -281,7 +466,7 @@ impl Root {
                     } else {
                         rgba(0x00000000)
                     })
-                    .text_size(theme::T_SMALL)
+                    .text_size(theme::small())
                     .font_weight(if selected {
                         FontWeight::SEMIBOLD
                     } else {
@@ -376,7 +561,7 @@ impl Root {
                     .when(!tight, |el| {
                         el.child(
                             div()
-                                .text_size(theme::T_TINY)
+                                .text_size(theme::tiny())
                                 .text_color(theme::dim())
                                 .child(status_text),
                         )
@@ -390,7 +575,7 @@ impl Root {
                     .when(!tight, |el| {
                         el.child(
                             div()
-                                .text_size(theme::T_TINY)
+                                .text_size(theme::tiny())
                                 .text_color(theme::muted())
                                 .child("Basic"),
                         )
@@ -401,6 +586,9 @@ impl Root {
                         cx.listener(move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
                             this.advanced = !this.advanced;
                             this.settings.set_bool("ui.advanced", this.advanced);
+                            if !this.advanced && this.tab == Tab::Advanced {
+                                this.tab = Tab::Home;
+                            }
                             this.persist();
                             cx.notify();
                         }),
@@ -408,7 +596,7 @@ impl Root {
                     .when(!tight, |el| {
                         el.child(
                             div()
-                                .text_size(theme::T_TINY)
+                                .text_size(theme::tiny())
                                 .text_color(if self.advanced { theme::accent() } else { theme::muted() })
                                 .child("Advanced"),
                         )
@@ -416,15 +604,15 @@ impl Root {
             )
             .child(div().w(px(8.0)))
             .child(widgets::button(
-                if tight { "✓" } else { "Apply" },
+                if tight { "âœ“" } else { "Apply" },
                 widgets::Tone::Subtle,
                 cx.listener(|this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
                     this.action_apply(cx);
                 }),
             ))
-            .child(window_button("min", "–", false, |window| window.minimize_window()))
-            .child(window_button("max", "▢", false, |window| window.zoom_window()))
-            .child(window_button("close", "✕", true, |window| window.remove_window()))
+            .child(window_button("min", "â€“", false, |window| window.minimize_window()))
+            .child(window_button("max", "â–¢", false, |window| window.zoom_window()))
+            .child(window_button("close", "âœ•", true, |window| window.remove_window()))
             .into_any_element()
     }
 
@@ -439,6 +627,304 @@ impl Root {
             Tab::Overlay => self.page_overlay(cx),
             Tab::Advanced => self.page_advanced(cx),
         }
+    }
+
+    pub(crate) fn devices(&self) -> crate::bridge::Devices {
+        if let Some(engine) = self.engine.as_ref() {
+            if let Ok(state) = engine.shared.lock() {
+                if let Some(devices) = state.devices.as_ref() {
+                    return devices.clone();
+                }
+            }
+        }
+        crate::bridge::Devices::default()
+    }
+
+    pub(crate) fn audio_label(&self) -> String {
+        let value = self.settings.s("audio.device", "default");
+        if value.is_empty() || value == "default" {
+            return "System default".to_string();
+        }
+        let devices = self.devices();
+        devices
+            .audio
+            .iter()
+            .find(|device| device.id == value)
+            .map(|device| device.name.clone())
+            .unwrap_or(value)
+    }
+
+    pub(crate) fn monitor_label(&self) -> String {
+        let index = self.settings.i("display.monitor", 0);
+        let devices = self.devices();
+        devices
+            .monitors
+            .iter()
+            .find(|monitor| monitor.index == index)
+            .map(|monitor| {
+                format!(
+                    "{}  {}x{}  {} Hz",
+                    monitor.name, monitor.width, monitor.height, monitor.hz
+                )
+            })
+            .unwrap_or_else(|| format!("Display {}", index + 1))
+    }
+
+    pub(crate) fn gpu_label(&self) -> String {
+        let index = self.settings.i("gpu.device", 0).max(0) as usize;
+        let devices = self.devices();
+        devices
+            .gpus
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| format!("GPU {index}"))
+    }
+
+    pub(crate) fn open_picker(&mut self, kind: PickerKind, cx: &mut Context<Self>) {
+        if self.engine.is_none() {
+            self.ensure_engine(cx);
+        }
+        self.send("devices");
+        self.picker = Some(kind);
+        cx.notify();
+    }
+
+    fn apply_pick(&mut self, kind: PickerKind, value: &str, cx: &mut Context<Self>) {
+        match kind {
+            PickerKind::Audio => self.settings.set_str("audio.device", value),
+            PickerKind::Monitor => self
+                .settings
+                .set_int("display.monitor", value.parse().unwrap_or(0)),
+            PickerKind::Gpu => self
+                .settings
+                .set_int("gpu.device", value.parse().unwrap_or(0)),
+        }
+        self.picker = None;
+        self.persist();
+        self.send("apply");
+        cx.notify();
+    }
+
+    fn pick_row(
+        &self,
+        title: &str,
+        detail: &str,
+        value: &str,
+        selected: bool,
+        kind: PickerKind,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let owned = value.to_string();
+        div()
+            .id(SharedString::from(format!("pick-{title}-{value}")))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .p(px(10.0))
+            .rounded(px(9.0))
+            .bg(if selected {
+                rgba(0x8B5CF626)
+            } else {
+                rgba(0xFFFFFF08)
+            })
+            .border_1()
+            .border_color(if selected {
+                rgba(0x8B5CF666)
+            } else {
+                rgba(0xFFFFFF0F)
+            })
+            .cursor_pointer()
+            .hover(|s| s.bg(rgba(0xFFFFFF14)))
+            .on_click(
+                cx.listener(move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                    this.apply_pick(kind, &owned, cx);
+                }),
+            )
+            .child(widgets::dot(if selected { theme::GREEN } else { theme::TEXT_MUTED }))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .child(
+                        div()
+                            .text_size(theme::small())
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme::text())
+                            .child(title.to_string()),
+                    )
+                    .when(!detail.is_empty(), |el| {
+                        el.child(
+                            div()
+                                .text_size(theme::tiny())
+                                .text_color(theme::muted())
+                                .child(detail.to_string()),
+                        )
+                    }),
+            )
+            .when(selected, |el| el.child(widgets::chip("Selected", theme::GREEN)))
+            .into_any_element()
+    }
+
+    fn picker_overlay(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(kind) = self.picker else {
+            return div().into_any_element();
+        };
+        let devices = self.devices();
+        let (title, hint) = match kind {
+            PickerKind::Audio => ("Audio output", "WASAPI render endpoints"),
+            PickerKind::Monitor => ("Display", "Where the stream window opens"),
+            PickerKind::Gpu => ("GPU", "Adapter used by decode and AI"),
+        };
+        let mut rows = div().flex().flex_col().gap(px(5.0));
+        match kind {
+            PickerKind::Audio => {
+                let current = self.settings.s("audio.device", "default");
+                let selected = current.is_empty() || current == "default";
+                rows = rows.child(self.pick_row(
+                    "System default",
+                    "Follows the Windows default device",
+                    "default",
+                    selected,
+                    kind,
+                    cx,
+                ));
+                for device in &devices.audio {
+                    let detail = if device.is_default {
+                        "Windows default endpoint"
+                    } else {
+                        ""
+                    };
+                    rows = rows.child(self.pick_row(
+                        &device.name,
+                        detail,
+                        &device.id,
+                        current == device.id,
+                        kind,
+                        cx,
+                    ));
+                }
+                if devices.audio.is_empty() {
+                    rows = rows.child(
+                        div()
+                            .text_size(theme::small())
+                            .text_color(theme::muted())
+                            .child("No endpoints reported yet. Is the engine running?"),
+                    );
+                }
+            }
+            PickerKind::Monitor => {
+                let current = self.settings.i("display.monitor", 0);
+                for monitor in &devices.monitors {
+                    let detail = format!(
+                        "{}x{}  Â·  {} Hz{}",
+                        monitor.width,
+                        monitor.height,
+                        monitor.hz,
+                        if monitor.primary { "  Â·  Primary" } else { "" }
+                    );
+                    rows = rows.child(self.pick_row(
+                        &monitor.name,
+                        &detail,
+                        &monitor.index.to_string(),
+                        current == monitor.index,
+                        kind,
+                        cx,
+                    ));
+                }
+                if devices.monitors.is_empty() {
+                    rows = rows.child(
+                        div()
+                            .text_size(theme::small())
+                            .text_color(theme::muted())
+                            .child("No displays reported yet."),
+                    );
+                }
+            }
+            PickerKind::Gpu => {
+                let current = self.settings.i("gpu.device", 0);
+                for (index, name) in devices.gpus.iter().enumerate() {
+                    rows = rows.child(self.pick_row(
+                        name,
+                        &format!("Adapter {index}"),
+                        &index.to_string(),
+                        current == index as i64,
+                        kind,
+                        cx,
+                    ));
+                }
+                if devices.gpus.is_empty() {
+                    rows = rows.child(
+                        div()
+                            .text_size(theme::small())
+                            .text_color(theme::muted())
+                            .child("No adapters reported yet."),
+                    );
+                }
+            }
+        }
+
+        div()
+            .absolute()
+            .size_full()
+            .bg(rgba(0x050509C8))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                widgets::card_pad()
+                    .w(px(560.0))
+                    .max_h(px(560.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(2.0))
+                                    .child(
+                                        div()
+                                            .text_size(theme::h3())
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(theme::text())
+                                            .child(title),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(theme::tiny())
+                                            .text_color(theme::muted())
+                                            .child(hint),
+                                    ),
+                            )
+                            .child(widgets::button(
+                                "Close",
+                                widgets::Tone::Subtle,
+                                cx.listener(|this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                                    this.picker = None;
+                                    cx.notify();
+                                }),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .id("picker-scroll")
+                            .flex()
+                            .flex_col()
+                            .gap(px(5.0))
+                            .max_h(px(430.0))
+                            .overflow_y_scroll()
+                            .child(rows),
+                    ),
+            )
+            .into_any_element()
     }
 
     fn connect_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -489,21 +975,21 @@ impl Root {
                     .child(spinner)
                     .child(
                         div()
-                            .text_size(theme::T_H3)
+                            .text_size(theme::h3())
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
                             .child("Connecting"),
                     )
                     .child(
                         div()
-                            .text_size(theme::T_SMALL)
+                            .text_size(theme::small())
                             .text_color(theme::dim())
                             .child(message),
                     )
                     .child(
                         div()
                             .font_family(theme::MONO_FONT)
-                            .text_size(theme::T_TINY)
+                            .text_size(theme::tiny())
                             .text_color(theme::muted())
                             .child(format!("state: {}", self.status.state)),
                     )
@@ -537,7 +1023,7 @@ impl Root {
             )
             .child(
                 div()
-                    .text_size(theme::T_SMALL)
+                    .text_size(theme::small())
                     .text_color(theme::muted())
                     .child("Remote Play, refined"),
             )
@@ -565,53 +1051,6 @@ impl Root {
             .into_any_element()
     }
 
-    fn boot_overlay(&self) -> AnyElement {
-        let splash = div()
-            .absolute()
-            .size_full()
-            .bg(rgba(0x050509FF))
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap(px(18.0))
-            .child(widgets::logo_mark(74.0))
-            .child(
-                div()
-                    .text_size(px(25.0))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::text())
-                    .child("BetterRemotePlay"),
-            )
-            .child(
-                div()
-                    .text_size(theme::T_SMALL)
-                    .text_color(theme::muted())
-                    .child("Remote Play, refined"),
-            )
-            .child(
-                div()
-                    .mt(px(10.0))
-                    .w(px(220.0))
-                    .h(px(3.0))
-                    .rounded(px(2.0))
-                    .bg(rgba(0xFFFFFF10))
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .h_full()
-                            .rounded(px(2.0))
-                            .bg(rgba(0x8B5CF6FF))
-                            .with_animation(
-                                "boot-progress",
-                                Animation::new(Duration::from_millis(1350)),
-                                |el, t| el.w(relative(0.04 + 0.96 * t)),
-                            ),
-                    ),
-            );
-
-        splash.into_any_element()
-    }
 
     fn toast_overlay(&self) -> AnyElement {
         let Some((message, error)) = self.toast.clone() else {
@@ -643,7 +1082,7 @@ impl Root {
                     .child(widgets::dot(if error { theme::RED } else { theme::GREEN }))
                     .child(
                         div()
-                            .text_size(theme::T_SMALL)
+                            .text_size(theme::small())
                             .text_color(theme::text())
                             .child(message),
                     ),
@@ -713,9 +1152,14 @@ impl Render for Root {
         // while playing. Minimizing the shell removes a second animating
         // layer from DWM composition, which is exactly the kind of hidden
         // jitter that shows up as the last few percent of judder.
+        if !self.focus_initialized {
+            self.focus_initialized = true;
+            window.focus(&self.focus);
+        }
         if self.status.streaming && !self.shell_minimized {
             self.shell_minimized = true;
             self.booting = false;
+            crate::model::log_line("shell minimize");
             window.minimize_window();
         }
         if self.booting {
@@ -736,19 +1180,27 @@ impl Render for Root {
             }
             return self.boot_screen();
         }
+        theme::set_text_scale(self.settings.i("ui.scale", 100));
+        if !self.start_min_done {
+            self.start_min_done = true;
+            if self.settings.b("general.start_minimized", false) {
+                window.minimize_window();
+            }
+        }
         let animated = self.settings.b("ui.animated_background", true);
         let reduce = self.settings.b("ui.reduce_motion", false);
         let top = self.top_bar(window, cx);
         let page = self.page(cx);
         let toast = self.toast_overlay();
         let connecting = self.connect_overlay(cx);
+        let picker = self.picker_overlay(cx);
 
         div()
             .relative()
             .size_full()
             .overflow_hidden()
             .font_family(theme::UI_FONT)
-            .text_size(theme::T_BODY)
+            .text_size(theme::body())
             .text_color(theme::text())
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event, window, cx| this.on_key(event, window, cx)))
@@ -779,6 +1231,7 @@ impl Render for Root {
                     ),
             )
             .child(connecting)
+            .child(picker)
             .child(toast)
             .into_any_element()
     }

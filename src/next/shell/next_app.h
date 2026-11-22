@@ -186,8 +186,11 @@ private:
     unsigned short bridge_port_ = 0;
     UiBridge bridge_;
     double bridge_status_at_ = -1.0;
+    bool publish_devices_ = false;
+    bool overlay_pause_fg_ = false;
     void HandleBridgeCommand(const std::string& command);
     void PublishBridgeStatus();
+    void PublishDevices();
     void ReloadSettingsFromDisk();
     OverlayWindow overlay_;
     double last_overlay_update_ = -1.0;

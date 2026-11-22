@@ -2,11 +2,11 @@
 //! already reads, so the new shell is a drop-in front-end.
 
 use gpui::{
-    div, prelude::*, px, rgba, rgb, AnyElement, Context, FontWeight, IntoElement, MouseButton,
+    div, prelude::*, px, rgba, rgb, AnyElement, Context, FontWeight, IntoElement,
     SharedString, Window,
 };
 
-use crate::app::{Root, Tab};
+use crate::app::Root;
 use crate::model::Preset;
 use crate::theme;
 use crate::widgets::{self, Tone};
@@ -21,10 +21,6 @@ fn pct(value: i64) -> String {
 
 fn ms(value: i64) -> String {
     format!("{value} ms")
-}
-
-fn hz(value: i64) -> String {
-    format!("{value} Hz")
 }
 
 fn mbps(value: i64) -> String {
@@ -160,7 +156,7 @@ impl Root {
             .child(
                 div()
                     .font_family(theme::MONO_FONT)
-                    .text_size(theme::T_SMALL)
+                    .text_size(theme::small())
                     .text_color(theme::dim())
                     .child(address),
             )
@@ -175,7 +171,7 @@ impl Root {
             )
             .child(
                 div()
-                    .text_size(theme::T_TINY)
+                    .text_size(theme::tiny())
                     .text_color(theme::muted())
                     .child("Esc arms disconnect  ·  F10 control center  ·  Alt+F4 leave stream"),
             );
@@ -238,7 +234,7 @@ impl Root {
                                 this.preset(preset, cx);                            }))
                             .child(
                                 div()
-                                    .text_size(theme::T_SMALL)
+                                    .text_size(theme::small())
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(theme::text())
                                     .child(preset.label()),
@@ -302,9 +298,9 @@ impl Root {
             .pt(px(4.0))
             .child(
                 div()
-                    .text_size(theme::T_TINY)
+                    .text_size(theme::tiny())
                     .text_color(theme::muted())
-                    .child("BetterRemotePlay Next 2.0 · GPUI shell"),
+                    .child("BetterRemotePlay Next 2.1 · GPUI shell"),
             )
             .child(
                 div()
@@ -402,16 +398,6 @@ impl Root {
                     "Reconnect when the link drops",
                     cx,
                 ),
-                self.stepper_row(
-                    "console.reconnect_delay_ms",
-                    "Reconnect delay",
-                    "Wait before retrying",
-                    250,
-                    10000,
-                    250,
-                    ms,
-                    cx,
-                ),
             ],
         );
 
@@ -451,18 +437,6 @@ impl Root {
                     ],
                     cx,
                 ),
-                self.seg_row(
-                    "streaming.decoder",
-                    "Decoder",
-                    "D3D12VA uses the fixed-function engine",
-                    &[
-                        ("Auto", "auto"),
-                        ("D3D11VA", "d3d11va"),
-                        ("D3D12VA", "d3d12va"),
-                        ("CPU", "software"),
-                    ],
-                    cx,
-                ),
                 self.stepper_row(
                     "streaming.bitrate_kbps",
                     "Bitrate",
@@ -489,6 +463,35 @@ impl Root {
             ],
         );
 
+        let expert = group(
+            "Expert",
+            "Transport details",
+            vec![
+                self.seg_row(
+                    "streaming.decoder",
+                    "Decoder",
+                    "D3D12VA uses the fixed-function engine",
+                    &[
+                        ("Auto", "auto"),
+                        ("D3D11VA", "d3d11va"),
+                        ("D3D12VA", "d3d12va"),
+                        ("CPU", "software"),
+                    ],
+                    cx,
+                ),
+                self.stepper_row(
+                    "console.reconnect_delay_ms",
+                    "Reconnect delay",
+                    "Wait before retrying after a drop",
+                    250,
+                    10000,
+                    250,
+                    ms,
+                    cx,
+                ),
+            ],
+        );
+
         div()
             .flex()
             .flex_col()
@@ -499,6 +502,7 @@ impl Root {
             ))
             .child(console)
             .child(streaming)
+            .when(self.advanced, |el| el.child(expert))
             .into_any_element()
     }
 
@@ -556,15 +560,16 @@ impl Root {
             "Display",
             "Monitor and fullscreen",
             vec![
-                self.stepper_row(
-                    "display.monitor",
+                widgets::row(
                     "Monitor",
-                    "Index of the output display",
-                    0,
-                    3,
-                    1,
-                    |v| format!("Display {}", v + 1),
-                    cx,
+                    "Where the stream window opens",
+                    widgets::button(
+                        self.monitor_label(),
+                        Tone::Ghost,
+                        cx.listener(|this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                            this.open_picker(crate::app::PickerKind::Monitor, cx);
+                        }),
+                    ),
                 ),
                 self.seg_row(
                     "display.refresh",
@@ -625,13 +630,16 @@ impl Root {
             "Audio",
             "Playback and latency",
             vec![
-                self.text_row(
-                    "audio.device",
+                widgets::row(
                     "Output device",
-                    "\"default\" follows the system device",
-                    "default",
-                    220.0,
-                    cx,
+                    "WASAPI render endpoint",
+                    widgets::button(
+                        self.audio_label(),
+                        Tone::Ghost,
+                        cx.listener(|this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                            this.open_picker(crate::app::PickerKind::Audio, cx);
+                        }),
+                    ),
                 ),
                 self.stepper_row(
                     "audio.buffer_ms",
@@ -730,13 +738,6 @@ impl Root {
                     "Run DLSS on the decoded frame",
                     cx,
                 ),
-                self.seg_row(
-                    "ai.sr_model",
-                    "Model",
-                    "DLSS transformer is the only real runtime here",
-                    &[("DLSS", "dlss")],
-                    cx,
-                ),
                 self.seg_int_row(
                     "ai.sr_quality",
                     "Quality",
@@ -760,12 +761,6 @@ impl Root {
                         ("1440p", "1440p"),
                         ("4K", "2160p"),
                     ],
-                    cx,
-                ),
-                self.toggle_row(
-                    "ai.temporal",
-                    "Temporal history",
-                    "Reuse the previous frame for stability",
                     cx,
                 ),
             ],
@@ -799,29 +794,10 @@ impl Root {
                     &[(2, "2x"), (3, "3x"), (4, "4x")],
                     cx,
                 ),
-                self.seg_int_row(
-                    "ai.quality",
-                    "Generated quality",
-                    "Internal generator preset",
-                    &[(0, "Fast"), (1, "Balanced"), (2, "High"), (3, "Ultra")],
-                    cx,
-                ),
-                self.toggle_row(
-                    "ai.occlusion",
-                    "Occlusion hints",
-                    "Reduce artefacts around HUD elements",
-                    cx,
-                ),
                 self.toggle_row(
                     "ai.motion_safety",
                     "Motion safety",
                     "Fall back to real frames on fast cuts",
-                    cx,
-                ),
-                self.toggle_row(
-                    "ai.adaptive",
-                    "Adaptive cadence",
-                    "Follow the source clock instead of a fixed slot",
                     cx,
                 ),
                 self.seg_int_row(
@@ -844,65 +820,66 @@ impl Root {
             ],
         );
 
-        let neural = group(
-            "Neural render",
-            "Depth and motion estimated from the stream",
-            vec![
-                widgets::row(
-                    "Runtime",
-                    "The depth + optical-flow runtime is not installed in this build; the values below are stored for the next milestone",
-                    widgets::chip("Preview", theme::AMBER),
+        let runtime = if self.status.tensorrt {
+            "TensorRT detected"
+        } else {
+            "TensorRT not installed"
+        };
+        let neural = widgets::card_pad()
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .child(widgets::section("Neural render", "Preview"))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(widgets::dot(theme::AMBER))
+                    .child(
+                        div()
+                            .text_size(theme::small())
+                            .text_color(theme::text())
+                            .child("The depth + optical-flow runtime is not installed."),
+                    )
+                    .child(widgets::chip("Read-only", theme::AMBER)),
+            )
+            .child(
+                div()
+                    .text_size(theme::tiny())
+                    .text_color(theme::muted())
+                    .child(format!(
+                        "{} · CUDA {} · DLSS SR {} · DLSS-G {}. The values are stored for the next \
+                         milestone and are not applied to the picture.",
+                        runtime,
+                        if self.status.cuda { "ready" } else { "missing" },
+                        if self.status.dlss_sr_ready { "ready" } else { "missing" },
+                        if self.status.dlss_fg_ready { "ready" } else { "missing" },
+                    )),
+            )
+            .child(widgets::divider())
+            .child(widgets::kv(
+                "Neural render",
+                if self.settings.b("ai.neural_render", false) { "On" } else { "Off" },
+            ))
+            .child(widgets::kv(
+                "Depth",
+                if self.settings.b("ai.neural_depth", true) { "Stored" } else { "Off" },
+            ))
+            .child(widgets::kv(
+                "Optical flow",
+                if self.settings.b("ai.neural_flow", true) { "Stored" } else { "Off" },
+            ))
+            .child(widgets::kv(
+                "Relight / stability / denoise",
+                format!(
+                    "{}% / {}% / {}%",
+                    self.settings.i("ai.neural_relight", 35),
+                    self.settings.i("ai.neural_stability", 60),
+                    self.settings.i("ai.neural_denoise", 40)
                 ),
-                self.toggle_row(
-                    "ai.neural_render",
-                    "Neural render",
-                    "Relight and stabilise using estimated depth + optical flow",
-                    cx,
-                ),
-                self.toggle_row(
-                    "ai.neural_depth",
-                    "Monocular depth",
-                    "Depth Anything class model, per frame",
-                    cx,
-                ),
-                self.toggle_row(
-                    "ai.neural_flow",
-                    "Optical flow",
-                    "GPU optical flow for real motion vectors",
-                    cx,
-                ),
-                self.stepper_row(
-                    "ai.neural_relight",
-                    "Relight strength",
-                    "How much neural lighting is mixed in",
-                    0,
-                    100,
-                    5,
-                    pct,
-                    cx,
-                ),
-                self.stepper_row(
-                    "ai.neural_stability",
-                    "Temporal stability",
-                    "History blend; higher is calmer",
-                    0,
-                    100,
-                    5,
-                    pct,
-                    cx,
-                ),
-                self.stepper_row(
-                    "ai.neural_denoise",
-                    "Denoise",
-                    "Smooth estimation noise",
-                    0,
-                    100,
-                    5,
-                    pct,
-                    cx,
-                ),
-            ],
-        );
+            ))
+            .into_any_element();
 
         let dlss5 = div()
             .flex()
@@ -921,7 +898,7 @@ impl Root {
                     .child(widgets::dot(theme::AMBER))
                     .child(
                         div()
-                            .text_size(theme::T_BODY)
+                            .text_size(theme::body())
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
                             .child("DLSS 5 Neural Rendering"),
@@ -930,7 +907,7 @@ impl Root {
             )
             .child(
                 div()
-                    .text_size(theme::T_SMALL)
+                    .text_size(theme::small())
                     .text_color(theme::dim())
                     .child(
                         "DLSS 5 is 3D-guided: it needs the game's depth, motion vectors and camera \
@@ -1005,7 +982,6 @@ impl Root {
                     ms,
                     cx,
                 ),
-                self.toggle_row("overlay.compact", "Compact", "Hide hints and secondary rows", cx),
             ],
         );
 
@@ -1035,13 +1011,10 @@ impl Root {
             "While streaming",
             vec![
                 self.toggle_row("overlay.enabled", "Enable overlay", "Panel available in the stream", cx),
-                self.text_row(
-                    "overlay.hotkey",
+                widgets::row(
                     "Hotkey",
-                    "Default F10",
-                    "F10",
-                    140.0,
-                    cx,
+                    "Fixed F10 while streaming; Esc arms disconnect",
+                    widgets::chip("F10", theme::ACCENT_BRIGHT),
                 ),
             ],
         );
@@ -1067,9 +1040,9 @@ impl Root {
             vec![
                 self.seg_int_row(
                     "ui.scale",
-                    "UI scale",
-                    "Layout scale for large displays",
-                    &[(100, "100%"), (110, "110%"), (125, "125%")],
+                    "Text size",
+                    "Scales every label and value in the shell",
+                    &[(90, "90%"), (100, "100%"), (110, "110%"), (125, "125%")],
                     cx,
                 ),
                 self.toggle_row(
@@ -1093,21 +1066,44 @@ impl Root {
                 self.toggle_row(
                     "general.start_minimized",
                     "Start minimized",
-                    "Open straight to the tray",
+                    "Open the shell minimized; use Connect from the taskbar",
                     cx,
                 ),
-                self.toggle_row(
-                    "general.close_to_tray",
-                    "Close to tray",
-                    "Keep the engine running when the window closes",
-                    cx,
+            ],
+        );
+
+        let pacing = group(
+            "Pacing",
+            "Live measurements",
+            vec![
+                widgets::kv("UI loop p99", format!("{:.2} ms", self.status.loop_p99)),
+                widgets::kv(
+                    "Cadence p50 / p99",
+                    format!(
+                        "{:.1} / {:.1} ms",
+                        self.status.cadence_p50, self.status.cadence_p99
+                    ),
                 ),
-                self.seg_int_row(
-                    "general.update_channel",
-                    "Update channel",
-                    "Stable is recommended",
-                    &[(0, "Stable"), (1, "Beta")],
-                    cx,
+                widgets::kv(
+                    "Scanout",
+                    if self.status.scanout_hz > 0.0 {
+                        format!("{:.0} Hz", self.status.scanout_hz)
+                    } else {
+                        "—".to_string()
+                    },
+                ),
+                widgets::kv(
+                    "Present misses",
+                    format!("{:.0}/s", self.status.present_misses),
+                ),
+                widgets::kv("Shown", format!("{:.0} fps", self.status.shown_fps)),
+                widgets::kv(
+                    "Decode avg / max",
+                    format!("{:.1} / {:.1} ms", self.status.decode_ms, self.status.decode_max),
+                ),
+                widgets::kv(
+                    "Frame buffer",
+                    format!("{}", self.settings.i("streaming.frame_buffer", 1)),
                 ),
             ],
         );
@@ -1157,15 +1153,16 @@ impl Root {
             "GPU",
             "Device selection",
             vec![
-                self.stepper_row(
-                    "gpu.device",
+                widgets::row(
                     "Device",
-                    "Index in the adapter list",
-                    0,
-                    3,
-                    1,
-                    |v| format!("GPU {}", v),
-                    cx,
+                    "Adapter used by decode and AI",
+                    widgets::button(
+                        self.gpu_label(),
+                        Tone::Ghost,
+                        cx.listener(|this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                            this.open_picker(crate::app::PickerKind::Gpu, cx);
+                        }),
+                    ),
                 ),
                 self.toggle_row("gpu.fp16", "FP16", "Half precision inference", cx),
                 self.toggle_row("gpu.int8", "INT8", "Quantised inference where supported", cx),
@@ -1229,6 +1226,7 @@ impl Root {
                 "Shell, diagnostics, GPU and reset",
             ))
             .child(shell)
+            .child(pacing)
             .child(diagnostics)
             .child(gpu)
             .child(widgets::card_pad().child(reset))

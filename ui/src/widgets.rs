@@ -31,14 +31,14 @@ pub fn page_title(title: &'static str, subtitle: &'static str) -> AnyElement {
         .gap(px(6.0))
         .child(
             div()
-                .text_size(theme::T_H1)
+                .text_size(theme::h1())
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text())
                 .child(title),
         )
         .child(
             div()
-                .text_size(theme::T_SMALL)
+                .text_size(theme::small())
                 .text_color(theme::dim())
                 .child(subtitle),
         )
@@ -58,7 +58,7 @@ pub fn section(title: &'static str, hint: &'static str) -> AnyElement {
                 .gap(px(10.0))
                 .child(
                     div()
-                        .text_size(theme::T_TINY)
+                        .text_size(theme::tiny())
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::accent())
                         .child(title.to_uppercase()),
@@ -67,7 +67,7 @@ pub fn section(title: &'static str, hint: &'static str) -> AnyElement {
         )
         .child(
             div()
-                .text_size(theme::T_TINY)
+                .text_size(theme::tiny())
                 .text_color(theme::muted())
                 .child(hint),
         )
@@ -91,14 +91,14 @@ pub fn row(label: impl Into<SharedString>, hint: impl Into<SharedString>, contro
                 .min_w(px(0.0))
                 .child(
                     div()
-                        .text_size(theme::T_BODY)
+                        .text_size(theme::body())
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(theme::text())
                         .child(label.into()),
                 )
                 .child(
                     div()
-                        .text_size(theme::T_SMALL)
+                        .text_size(theme::small())
                         .text_color(theme::muted())
                         .child(hint.into()),
                 ),
@@ -145,7 +145,7 @@ pub fn button(
         .rounded(px(11.0))
         .bg(rgba(bg))
         .when(border != 0, |el| el.border_1().border_color(rgba(border)))
-        .text_size(theme::T_SMALL)
+        .text_size(theme::small())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(rgb(fg))
         .cursor_pointer()
@@ -199,7 +199,7 @@ pub fn chip(label: impl Into<SharedString>, color: u32) -> AnyElement {
         .bg(rgba((color << 8) | 0x22))
         .border_1()
         .border_color(rgba((color << 8) | 0x44))
-        .text_size(theme::T_TINY)
+        .text_size(theme::tiny())
         .font_weight(FontWeight::MEDIUM)
         .text_color(rgb(color))
         .child(label.into())
@@ -229,7 +229,7 @@ pub fn stat_tile(label: &'static str, value: impl Into<SharedString>, color: u32
         .border_color(rgba(0xFFFFFF0D))
         .child(
             div()
-                .text_size(theme::T_TINY)
+                .text_size(theme::tiny())
                 .text_color(theme::muted())
                 .child(label.to_uppercase()),
         )
@@ -252,14 +252,14 @@ pub fn kv(label: &'static str, value: impl Into<SharedString>) -> AnyElement {
         .py(px(6.0))
         .child(
             div()
-                .text_size(theme::T_SMALL)
+                .text_size(theme::small())
                 .text_color(theme::muted())
                 .child(label),
         )
         .child(
             div()
                 .font_family(theme::MONO_FONT)
-                .text_size(theme::T_MONO)
+                .text_size(theme::mono())
                 .text_color(theme::dim())
                 .child(value.into()),
         )

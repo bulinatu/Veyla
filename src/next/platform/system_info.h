@@ -29,6 +29,8 @@ struct DisplayInfo {
     RECT bounds{};
 };
 
+std::vector<std::string> EnumerateAdapterNames();
+
 struct SystemInfo {
     std::string os;
     std::string cpu;

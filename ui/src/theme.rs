@@ -11,8 +11,8 @@ pub const MONO_FONT: &str = "JetBrains Mono";
 // Base surfaces.
 pub const BG: u32 = 0x07070D;
 pub const BG_DEEP: u32 = 0x050509;
-pub const PANEL: u32 = 0xFFFFFF0A;
-pub const PANEL_STRONG: u32 = 0xFFFFFF10;
+pub const PANEL: u32 = 0x0C0C16E6;
+pub const PANEL_STRONG: u32 = 0x161622E6;
 pub const PANEL_HOVER: u32 = 0xFFFFFF14;
 pub const FIELD: u32 = 0x00000059;
 pub const BORDER: u32 = 0xFFFFFF14;
@@ -34,14 +34,27 @@ pub const AMBER: u32 = 0xFBBF24;
 pub const RED: u32 = 0xF87171;
 
 // Type scale. Deliberately larger than the old shell: 15px body, 13.5 small.
-pub const T_HERO: Pixels = px(40.0);
-pub const T_H1: Pixels = px(26.0);
-pub const T_H2: Pixels = px(20.0);
-pub const T_H3: Pixels = px(16.5);
-pub const T_BODY: Pixels = px(15.0);
-pub const T_SMALL: Pixels = px(13.5);
-pub const T_TINY: Pixels = px(11.5);
-pub const T_MONO: Pixels = px(13.0);
+// The whole scale follows the "Text size" setting (75-150%).
+use std::sync::atomic::{AtomicU32, Ordering};
+
+static TEXT_SCALE: AtomicU32 = AtomicU32::new(100);
+
+pub fn set_text_scale(percent: i64) {
+    TEXT_SCALE.store(percent.clamp(75, 150) as u32, Ordering::Relaxed);
+}
+
+pub fn sp(value: f32) -> Pixels {
+    px(value * TEXT_SCALE.load(Ordering::Relaxed) as f32 / 100.0)
+}
+
+pub fn hero() -> Pixels { sp(40.0) }
+pub fn h1() -> Pixels { sp(26.0) }
+pub fn h2() -> Pixels { sp(20.0) }
+pub fn h3() -> Pixels { sp(16.5) }
+pub fn body() -> Pixels { sp(15.0) }
+pub fn small() -> Pixels { sp(13.5) }
+pub fn tiny() -> Pixels { sp(11.5) }
+pub fn mono() -> Pixels { sp(13.0) }
 
 pub const RADIUS: Pixels = px(16.0);
 pub const RADIUS_SM: Pixels = px(10.0);

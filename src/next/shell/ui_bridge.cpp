@@ -76,7 +76,12 @@ bool UiBridge::TakeCommand(std::string& out) {
 void UiBridge::Publish(std::string status) {
     {
         std::lock_guard<std::mutex> lock(out_mutex_);
-        outbox_ = std::move(status);
+        outbox_.push_back(std::move(status));
+        // Status snapshots are replacable; events are not. Bound the queue so a
+        // stalled shell cannot grow it without limit, and keep the newest.
+        while (outbox_.size() > 16) {
+            outbox_.pop_front();
+        }
         out_pending_ = true;
     }
     out_cv_.notify_one();
@@ -223,12 +228,13 @@ void UiBridge::WriterMain() {
             if (!running_.load() || !link_.load()) {
                 break;
             }
-            if (!out_pending_) {
+            if (outbox_.empty()) {
+                out_pending_ = false;
                 continue;
             }
-            line = std::move(outbox_);
-            outbox_.clear();
-            out_pending_ = false;
+            line = std::move(outbox_.front());
+            outbox_.pop_front();
+            out_pending_ = !outbox_.empty();
         }
         line.push_back('\n');
         std::size_t offset = 0;

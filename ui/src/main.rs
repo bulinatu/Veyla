@@ -3,6 +3,7 @@ mod bridge;
 mod background;
 mod controls;
 mod model;
+mod overlay;
 mod pages;
 mod theme;
 mod widgets;
