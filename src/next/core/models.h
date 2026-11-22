@@ -66,6 +66,16 @@ struct AiSettings {
     int rife_model = 0;  // 0 lite, 1 heavy
     int blend = 10;
     bool motion_safety = true;
+    // DLSS Neural Rendering (NGX feature 18) through the NeuralScreen worker.
+    // A video has no 3D guides, so the worker runs with synthetic depth/motion
+    // and resets history each frame: a real but subtle video enhancer.
+    bool neural_render = false;
+    int neural_style = 2;        // 0 default, 1 natural, 2 cinematic
+    int neural_intensity = 100;  // 0..200 %
+    int neural_passes = 1;       // 1..4 cascade depth
+    int neural_scale = 100;      // 50..100 % network work size
+    bool neural_ui = false;
+    bool neural_mask = false;
 };
 
 struct GpuSettings {

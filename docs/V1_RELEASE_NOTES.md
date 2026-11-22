@@ -186,3 +186,12 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
 - Panics are written to the shell log.
 - Audio/monitor/GPU lists refresh while a picker is open.
 - The control center opens on the display used for streaming.
+
+## 2.4.0
+
+- DLSS 5 Neural Rendering is back and real: the NGX feature-18 worker runs on
+  the 2D stream with synthetic depth/motion (9.4 ms at 1080p), before DLSS SR.
+- Neural page: style, intensity, passes, work scale, UI correction, auto mask;
+  live status in Settings and in the F10 control center.
+- HDR frames bypass the 8-bit worker; the worker stops on Leave Watch and on
+  neural setting changes.

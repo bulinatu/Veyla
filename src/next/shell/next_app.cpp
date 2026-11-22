@@ -4,6 +4,7 @@
 #include "overlay/overlay_view.h"
 #include "diagnostics/metrics.h"
 #include "media/nv_dlss_sr.h"
+#include "media/nv_dlssnr.h"
 #include "media/pipeline.h"
 #include "media/rife.h"
 #include "media/rgba_scale.h"
@@ -48,7 +49,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"2.3.0";
+constexpr wchar_t kVersion[] = L"2.4.0";
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -233,6 +234,7 @@ NextApp::NextApp(bool engine_mode, unsigned short bridge_port)
 }
 
 NextApp::~NextApp() {
+    StopNr();
     StopRifeThread();
     StopDlssFg();
 }
@@ -306,6 +308,7 @@ int NextApp::Run() {
     }
     g_hook_app = nullptr;
     StopPadThread();
+    StopNr();
     StopRifeThread();
     StopDlssFg();
     overlay_.Destroy();
@@ -693,6 +696,7 @@ void NextApp::Frame() {
         watching_ = false;
         StopRifeThread();
         StopDlssFg();
+        StopNr();
         streaming_->Disconnect();
         Toast(L"GPU device lost; restart the app", true);
     }
@@ -922,7 +926,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  2.3.0", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  2.4.0", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -1036,7 +1040,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"BetterRemotePlay Next 2.3.0",
+        renderer_->Text(L"BetterRemotePlay Next 2.4.0",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -2181,7 +2185,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"BetterRemotePlay Next 2.3.0  |  stable release", L"STABLE", true);
+               L"BetterRemotePlay Next 2.4.0  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -2190,7 +2194,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay Next", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 2.3.0  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 2.4.0  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -2326,6 +2330,16 @@ bool NextApp::Apply() {
         StopRifeThread();
         rife_failed_ = false;
         dlss_fg_failed_ = false;
+    }
+    if (previous_ai.neural_render != settings_.ai.neural_render ||
+        previous_ai.neural_style != settings_.ai.neural_style ||
+        previous_ai.neural_intensity != settings_.ai.neural_intensity ||
+        previous_ai.neural_passes != settings_.ai.neural_passes ||
+        previous_ai.neural_scale != settings_.ai.neural_scale ||
+        previous_ai.neural_ui != settings_.ai.neural_ui ||
+        previous_ai.neural_mask != settings_.ai.neural_mask) {
+        StopNr();
+        nr_failed_ = false;
     }
     if (scope == ApplyScope::StreamRestart && streaming_ && streaming_->Connected()) {
         stream_restart_pending_ = true;
@@ -3261,6 +3275,7 @@ void NextApp::PresentVideo() {
             video_frame_ = std::move(frame);
             have_frame_ = true;
             new_frame = true;
+            EnhanceNeural(video_frame_);
         }
 
         auto publish = [&](std::vector<std::uint8_t>&& rgba, int width, int height) {
@@ -3397,6 +3412,7 @@ void NextApp::PresentVideo() {
             video_frame_ = std::move(frame);
             have_frame_ = true;
             new_frame = true;
+            EnhanceNeural(video_frame_);
         }
         if (new_frame) {
             ScheduleRifeFrame(video_frame_);
@@ -3439,6 +3455,7 @@ void NextApp::PresentVideo() {
         video_frame_ = std::move(frame);
         have_frame_ = true;
         new_frame = true;
+        EnhanceNeural(video_frame_);
     }
     if (!have_frame_ || video_frame_.rgba.empty()) {
         const float background[4] = {0.015f, 0.017f, 0.022f, 1.0f};
@@ -3493,6 +3510,122 @@ void NextApp::PresentVideo() {
     // jumps backwards. This redraw is one full-screen pass and keeps both
     // swapchain buffers on the newest image.
     video->Render(now_);
+}
+
+bool NextApp::EnsureNr(int width, int height) {
+    if (nr_failed_) {
+        return false;
+    }
+    if (nr_ready_ && width == nr_w_ && height == nr_h_) {
+        return true;
+    }
+    if (nr_ready_) {
+        StopNr();
+    }
+    if (!settings_.ai.neural_render) {
+        return false;
+    }
+    if (width > 2560 || height > 1440) {
+        Toast(L"Neural render is capped at 2560x1440", true);
+        nr_failed_ = true;
+        return false;
+    }
+    std::filesystem::path dir;
+    if (const char* env = std::getenv("BRP_NR_DIR")) {
+        dir = std::filesystem::path(env);
+    }
+    const std::filesystem::path exe_dir(system_.exe_dir);
+    if (dir.empty()) {
+        const std::filesystem::path candidates[] = {
+            exe_dir / "nr" / "native",
+            exe_dir / "neuralscreen" / "native",
+            exe_dir / ".." / "third_party" / "neuralscreen" / "native",
+        };
+        for (const auto& candidate : candidates) {
+            std::error_code ec;
+            if (std::filesystem::exists(candidate / "nvngx.dll", ec) &&
+                std::filesystem::exists(candidate / "nvngx_dlssnr.dll", ec)) {
+                dir = candidate;
+                break;
+            }
+        }
+    }
+    if (dir.empty()) {
+        std::error_code ec;
+        const std::filesystem::path cwd = std::filesystem::current_path(ec);
+        if (!ec) {
+            const std::filesystem::path candidate =
+                cwd / "third_party" / "neuralscreen" / "native";
+            if (std::filesystem::exists(candidate / "nvngx.dll", ec) &&
+                std::filesystem::exists(candidate / "nvngx_dlssnr.dll", ec)) {
+                dir = candidate;
+            }
+        }
+    }
+    if (dir.empty()) {
+        Toast(L"Neural render runtime missing (nr\\native)", true);
+        nr_failed_ = true;
+        return false;
+    }
+    brp::media::NvDlssnr::Options options;
+    options.style = std::clamp(settings_.ai.neural_style, 0, 2);
+    options.intensity = std::clamp(settings_.ai.neural_intensity, 0, 200) / 100.0f;
+    options.local_tone = 1.0f;
+    options.local_structure = 0.5f;
+    options.skin_structure = 0.75f;
+    options.auto_mask = settings_.ai.neural_mask;
+    options.ui_correction = settings_.ai.neural_ui;
+    options.passes = std::clamp(settings_.ai.neural_passes, 1, 4);
+    options.work_scale = std::clamp(settings_.ai.neural_scale, 50, 100) / 100.0f;
+    // The signed DLSS-G runtime stays in place; the SM86 proxy is only for
+    // multipliers above 2x, which is not the stable path here.
+    options.inject_fg_proxy = false;
+
+    dlssnr_ = std::make_unique<brp::media::NvDlssnr>();
+    std::string detail;
+    if (!dlssnr_->Start((dir / "nvngx.dll").wstring(), dir.wstring(), width, height,
+                        options, detail)) {
+        Toast(L"Neural render: " + Widen(detail), true);
+        dlssnr_.reset();
+        nr_failed_ = true;
+        return false;
+    }
+    nr_ready_ = true;
+    nr_w_ = width;
+    nr_h_ = height;
+    nr_ms_ = 0.0;
+    return true;
+}
+
+void NextApp::StopNr() {
+    if (dlssnr_) {
+        dlssnr_->Stop();
+        dlssnr_.reset();
+    }
+    nr_ready_ = false;
+    nr_w_ = 0;
+    nr_h_ = 0;
+}
+
+void NextApp::EnhanceNeural(media::DecodedFrame& frame) {
+    if (!settings_.ai.neural_render || nr_failed_ || frame.rgba.empty() || frame.pq) {
+        // HDR frames go straight through: the worker's video mode is 8-bit.
+        return;
+    }
+    if (!EnsureNr(frame.width, frame.height)) {
+        return;
+    }
+    std::vector<std::uint8_t> out;
+    std::string detail;
+    if (dlssnr_->Process(frame.rgba.data(), frame.width, frame.height, out, detail) &&
+        !out.empty()) {
+        frame.rgba = std::move(out);
+        nr_ms_ = dlssnr_->last_ms();
+    } else {
+        Toast(L"Neural render stopped: " + Widen(detail), true);
+        nr_failed_ = true;
+        StopNr();
+    }
 }
 
 bool NextApp::EnsureRife() {
@@ -3773,6 +3906,7 @@ void NextApp::ToggleWatch(bool watching) {
         have_frame_ = false;
         SetOverlayControl(false);
         StopRifeThread();
+        StopNr();
         if (dlss_fg_) {
             dlss_fg_->Hide();
         }
@@ -4235,6 +4369,9 @@ void NextApp::PublishBridgeStatus() {
     flag("tensorrt", system_.tensorrt_runtime, true);
     flag("dlss_fg_ready", system_.dlss_fg, true);
     flag("dlss_sr_ready", system_.dlss_sr, true);
+    flag("nr_runtime", system_.nr_worker, true);
+    flag("nr_ready", nr_ready_, true);
+    number("nr_ms", nr_ms_, true);
     text("gpu", system_.gpu.name, true);
     text("driver", system_.gpu.driver, true);
     integer("vram_mb", static_cast<long long>(system_.gpu.vram_mb), false);

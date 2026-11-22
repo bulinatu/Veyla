@@ -362,7 +362,7 @@ impl Root {
                 div()
                     .text_size(theme::tiny())
                     .text_color(theme::muted())
-                    .child("BetterRemotePlay Next 2.3 · GPUI shell"),
+                    .child("BetterRemotePlay Next 2.4 · GPUI shell"),
             )
             .child(
                 div()
@@ -893,67 +893,94 @@ impl Root {
             ],
         );
 
-        let runtime = if self.status.tensorrt {
-            "TensorRT detected"
+        let runtime_text = if self.status.nr_runtime {
+            if self.status.nr_ready {
+                format!("worker active Â· {:.1} ms", self.status.nr_ms)
+            } else {
+                "runtime present".to_string()
+            }
         } else {
-            "TensorRT not installed"
+            "runtime missing (nr\\native)".to_string()
         };
         let neural = widgets::card_pad()
             .flex()
             .flex_col()
             .gap(px(10.0))
-            .child(widgets::section("Neural render", "Preview"))
+            .child(widgets::section(
+                "DLSS 5 neural rendering",
+                "NGX feature 18 Â· video mode",
+            ))
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(widgets::dot(theme::AMBER))
+                    .child(widgets::dot(if self.status.nr_runtime {
+                        theme::GREEN
+                    } else {
+                        theme::AMBER
+                    }))
                     .child(
                         div()
                             .text_size(theme::small())
                             .text_color(theme::text())
-                            .child("The depth + optical-flow runtime is not installed."),
+                            .child(runtime_text),
                     )
-                    .child(widgets::chip("Read-only", theme::AMBER)),
+                    .child(widgets::chip("2D guides", theme::AMBER)),
             )
-            .child(
-                div()
-                    .text_size(theme::tiny())
-                    .text_color(theme::muted())
-                    .child(format!(
-                        "{} · CUDA {} · DLSS SR {} · DLSS-G {}. The values are stored for the next \
-                         milestone and are not applied to the picture.",
-                        runtime,
-                        if self.status.cuda { "ready" } else { "missing" },
-                        if self.status.dlss_sr_ready { "ready" } else { "missing" },
-                        if self.status.dlss_fg_ready { "ready" } else { "missing" },
-                    )),
-            )
-            .child(widgets::divider())
-            .child(widgets::kv(
-                "Neural render",
-                if self.settings.b("ai.neural_render", false) { "On" } else { "Off" },
+            .child(self.toggle_row(
+                "ai.neural_render",
+                "Neural rendering",
+                "Enhances the frame before SR; adds about 10 ms",
+                cx,
             ))
-            .child(widgets::kv(
-                "Depth",
-                if self.settings.b("ai.neural_depth", true) { "Stored" } else { "Off" },
+            .child(self.seg_int_row(
+                "ai.neural_style",
+                "Style",
+                "Network character",
+                &[(0, "Default"), (1, "Natural"), (2, "Cinematic")],
+                cx,
             ))
-            .child(widgets::kv(
-                "Optical flow",
-                if self.settings.b("ai.neural_flow", true) { "Stored" } else { "Off" },
+            .child(self.stepper_row(
+                "ai.neural_intensity",
+                "Intensity",
+                "Mix of the enhanced frame",
+                0,
+                200,
+                10,
+                pct,
+                cx,
             ))
-            .child(widgets::kv(
-                "Relight / stability / denoise",
-                format!(
-                    "{}% / {}% / {}%",
-                    self.settings.i("ai.neural_relight", 35),
-                    self.settings.i("ai.neural_stability", 60),
-                    self.settings.i("ai.neural_denoise", 40)
-                ),
+            .child(self.seg_int_row(
+                "ai.neural_passes",
+                "Passes",
+                "Cascade depth (Boost)",
+                &[(1, "1"), (2, "2"), (3, "3"), (4, "4")],
+                cx,
+            ))
+            .child(self.stepper_row(
+                "ai.neural_scale",
+                "Work scale",
+                "Network resolution; lower is cheaper",
+                50,
+                100,
+                5,
+                pct,
+                cx,
+            ))
+            .child(self.toggle_row(
+                "ai.neural_ui",
+                "UI correction",
+                "Protect HUD edges from the network",
+                cx,
+            ))
+            .child(self.toggle_row(
+                "ai.neural_mask",
+                "Auto mask",
+                "Derive a soft mask from the frame",
+                cx,
             ))
             .into_any_element();
-
         let dlss5 = div()
             .flex()
             .flex_col()
@@ -976,18 +1003,18 @@ impl Root {
                             .text_color(theme::text())
                             .child("DLSS 5 Neural Rendering"),
                     )
-                    .child(widgets::chip("Unavailable", theme::AMBER)),
+                    .child(widgets::chip("Video mode", theme::ACCENT_BRIGHT)),
             )
             .child(
                 div()
                     .text_size(theme::small())
                     .text_color(theme::dim())
                     .child(
-                        "DLSS 5 is 3D-guided: it needs the game's depth, motion vectors and camera \
-                         matrices inside the renderer. A Remote Play stream is an already-rendered \
-                         2D image, so the feature cannot run here. The Neural Render stack above is \
-                         the closest real equivalent: estimated depth, real optical flow and a \
-                         temporal pass feeding DLSS SR and DLSS-G.",
+                        "The vendor runtime is running, but a Remote Play frame has no G-buffer: \
+                         depth and motion are synthetic, history is reset every frame, and the \
+                         network can only enrich lighting and material detail, not invent scene \
+                         structure. In-game DLSS 5 guides (albedo, normals, camera matrices) are \
+                         unavailable by definition here.",
                     ),
             );
 

@@ -31,6 +31,7 @@ class Renderer;
 }
 namespace media {
 class NvDlssSr;
+class NvDlssnr;
 class Rife;
 }
 }  // namespace brp
@@ -175,6 +176,15 @@ private:
     std::vector<std::uint8_t> sr_scaled_;
     std::vector<std::uint16_t> sr_scale_temp_;
     std::unique_ptr<DlssFg> dlss_fg_;
+    std::unique_ptr<brp::media::NvDlssnr> dlssnr_;
+    bool nr_ready_ = false;
+    bool nr_failed_ = false;
+    int nr_w_ = 0;
+    int nr_h_ = 0;
+    double nr_ms_ = 0.0;
+    bool EnsureNr(int width, int height);
+    void StopNr();
+    void EnhanceNeural(media::DecodedFrame& frame);
     bool dlss_fg_failed_ = false;
     bool fg_covering_ = false;
     int fg_actual_mult_ = 0;

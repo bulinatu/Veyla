@@ -222,6 +222,13 @@ FlatMap SettingsToFlat(const AppSettings& s) {
     FlatJson::PutInt(f, "ai.rife_model", s.ai.rife_model);
     FlatJson::PutInt(f, "ai.blend", s.ai.blend);
     FlatJson::PutBool(f, "ai.motion_safety", s.ai.motion_safety);
+    FlatJson::PutBool(f, "ai.neural_render", s.ai.neural_render);
+    FlatJson::PutInt(f, "ai.neural_style", s.ai.neural_style);
+    FlatJson::PutInt(f, "ai.neural_intensity", s.ai.neural_intensity);
+    FlatJson::PutInt(f, "ai.neural_passes", s.ai.neural_passes);
+    FlatJson::PutInt(f, "ai.neural_scale", s.ai.neural_scale);
+    FlatJson::PutBool(f, "ai.neural_ui", s.ai.neural_ui);
+    FlatJson::PutBool(f, "ai.neural_mask", s.ai.neural_mask);
 
     FlatJson::PutInt(f, "gpu.device", s.gpu.device);
     FlatJson::PutBool(f, "gpu.fp16", s.gpu.fp16);
@@ -346,6 +353,19 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
     s.ai.blend = ClampInt(FlatJson::GetInt(f, "ai.blend", s.ai.blend), 0, 40);
     s.ai.motion_safety =
         FlatJson::GetBool(f, "ai.motion_safety", s.ai.motion_safety);
+    s.ai.neural_render =
+        FlatJson::GetBool(f, "ai.neural_render", s.ai.neural_render);
+    s.ai.neural_style =
+        ClampInt(FlatJson::GetInt(f, "ai.neural_style", s.ai.neural_style), 0, 2);
+    s.ai.neural_intensity = ClampInt(
+        FlatJson::GetInt(f, "ai.neural_intensity", s.ai.neural_intensity), 0, 200);
+    s.ai.neural_passes =
+        ClampInt(FlatJson::GetInt(f, "ai.neural_passes", s.ai.neural_passes), 1, 4);
+    s.ai.neural_scale =
+        ClampInt(FlatJson::GetInt(f, "ai.neural_scale", s.ai.neural_scale), 50, 100);
+    s.ai.neural_ui = FlatJson::GetBool(f, "ai.neural_ui", s.ai.neural_ui);
+    s.ai.neural_mask =
+        FlatJson::GetBool(f, "ai.neural_mask", s.ai.neural_mask);
 
     s.gpu.device = ClampInt(FlatJson::GetInt(f, "gpu.device", s.gpu.device), 0, 15);
     s.gpu.fp16 = FlatJson::GetBool(f, "gpu.fp16", s.gpu.fp16);

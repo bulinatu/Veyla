@@ -11,7 +11,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $release = Join-Path $root "build\Release"
 $distRoot = Join-Path $root "dist"
 $dest = Join-Path $distRoot "BetterRemotePlay"
-$version = "2.3.0"
+$version = "2.4.0"
 
 function Require-File([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -195,9 +195,11 @@ Video and AI
   Frame Generation 2x/3x/4x, RIFE, occlusion and motion safety, blend.
 - Neural Render is the real depth + optical-flow path. Until its runtime is
   installed the toggles are labelled and do not claim to be active.
-- DLSS 5 is shown as unavailable: it is 3D-guided and needs the game's depth,
-  motion vectors and camera matrices inside the renderer. A Remote Play stream
-  is an already-rendered 2D image, so it cannot run there.
+- DLSS 5 Neural Rendering runs in video mode through the vendor NGX feature-18
+  worker: synthetic depth/motion, history reset each frame, about 10 ms at
+  1080p. It enhances lighting and material detail but cannot invent scene
+  structure without the game's albedo, normals and camera matrices. HDR frames
+  bypass it (8-bit worker). Turn it on under Neural; recommended at 30 fps.
 
 Audio, controller, overlay
 --------------------------

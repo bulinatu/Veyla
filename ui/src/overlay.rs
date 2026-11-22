@@ -356,6 +356,16 @@ impl OverlayView {
                         "Off".to_string()
                     },
                 ));
+                rows.push(widgets::kv(
+                    "Neural render",
+                    if self.status.nr_ready {
+                        format!("on · {:.1} ms", self.status.nr_ms)
+                    } else if self.settings.b("ai.neural_render", false) {
+                        "starting".to_string()
+                    } else {
+                        "Off".to_string()
+                    },
+                ));
             }
             1 => {
                 rows.push(self.toggle_row(

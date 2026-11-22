@@ -1218,3 +1218,51 @@ stopped presenting them as if they did something.
   `4EC104986C3832980D03151935679710548E8755BD596B965445A852D255A171`
 - Patch verified: `version=2.3.0`, 0 markers, `files_differ=0`.
 - Packaged single-instance check: second launch exits 0, one shell remains.
+
+## 2.4.0 - DLSS 5 Neural Rendering returns
+
+- **Correction to 2.0-2.3.** DLSS 5 NR *does* run on a 2D stream through the
+  vendor runtime in video mode, exactly as the legacy `brp.exe` did. The earlier
+  "unavailable" card was wrong: NGX feature 18 (`nvngx_dlssnr.dll`, NeuralScreen
+  worker) accepts a frame with synthetic depth/motion and history reset each
+  frame. It is a real video enhancer, measured at **9.4 ms** for 1080p on this
+  RTX 4090, not full 3D-guided NR.
+- **Engine integration.** `NextApp` owns `media::NvDlssnr`:
+  `EnsureNr()` discovers `nr/native` (packaged), `neuralscreen/native`,
+  `third_party/neuralscreen/native` or `BRP_NR_DIR`, starts the worker at the
+  frame size (capped 2560x1440) and `EnhanceNeural()` runs before DLSS SR on
+  every path: DLSS-G feed, RIFE feed and the parent presenter. HDR (`pq`) frames
+  bypass it because the worker is 8-bit. The worker is stopped on leaving Watch,
+  on a GPU reset and on a neural settings change.
+- **Settings.** `ai.neural_render`, `ai.neural_style` (0 default/1 natural/2
+  cinematic), `ai.neural_intensity` (0-200%), `ai.neural_passes` (1-4),
+  `ai.neural_scale` (50-100%), `ai.neural_ui`, `ai.neural_mask`, serialized and
+  validated like the rest.
+- **UI.** The Neural page now has real controls (style, intensity, passes, work
+  scale, UI correction, auto mask) and a status line coming from the engine
+  (`nr_ready`, `nr_ms`, `nr_runtime`). The control center's Info page shows
+  `Neural render on · X ms` live.
+- **Cost and guidance.** ~9-10 ms per 1080p frame, spikes to 20-25 ms. At 30 fps
+  it fits comfortably; at 60 fps it competes with SR and FG. The toggle is
+  opt-in; the page says so. The effect is subtle (mean delta ~2.6/255), which is
+  expected without real guides.
+- **Honesty.** The card now says "Video mode": the vendor network runs, but
+  albedo/normals/camera matrices are unavailable, so it cannot invent scene
+  detail like an in-game DLSS 5 title.
+
+### 2.4.0 package
+
+- Standalone: `dist/BetterRemotePlay-2.4.0-standalone.zip` (922.0 MB)
+  SHA256 `77ABA5A5401D36309EC6EDFA293C7787A4433F1251E0B188D8193232C026C28A`
+- Update **2.0.0 -> 2.4.0** (universal; also fine from 2.1-2.3):
+  `dist/BetterRemotePlay-2.0.0-to-2.4.0-update.exe` (5.3 MB)
+  SHA256 `C6EA8E7DBD21B00B70C3A2EC3A153B165DE7E1160DF1B72A1D4A0B75A562DD78`
+- `brpnext.exe`
+  `A6E5D46F5190AF69D9FFEC90E17B4B086741AD210627B1079DF4B31718EA9825`
+- `brpnext-engine.exe`
+  `D6E99A5B7F95758C99BE4B4CB05622C36C73E40F7469001E28923F873EE51471`
+- Patch verified: `version=2.4.0`, 0 markers, `files_differ=0`.
+- Packaged smoke test: stream up, control center shows
+  `Neural render on · 10.1 ms`, cadence 33.4/49.7 ms.
+- Note: the user's settings had `ai.neural_render` enabled during the test and
+  were left enabled on purpose; it is the feature they asked for.
