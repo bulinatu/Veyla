@@ -10,6 +10,7 @@ struct DecodedFrame {
     int width = 0;
     int height = 0;
     bool pq = false;             // source transfer is PQ (HDR10)
+    double arrived_ms = 0.0;     // steady_clock, when the video packet arrived
     std::vector<uint8_t> rgba;  // tightly packed RGBA
 };
 

@@ -417,6 +417,8 @@ void Streaming::DecodeThreadMain() {
             }
             last_decoded_at_ = arrived;
             have_last_decoded_ = true;
+            frame.arrived_ms =
+                std::chrono::duration<double, std::milli>(arrived.time_since_epoch()).count();
 
             {
                 std::lock_guard<std::mutex> lock(frame_mutex_);

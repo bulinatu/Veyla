@@ -65,11 +65,6 @@ public:
                  std::string& detail);
 
     bool ready() const { return ready_; }
-    // Pipelined form: returns 1 with the previous frame's output, 0 while the
-    // first frame is in flight (no output yet), -1 on failure. The worker runs
-    // one frame behind, so the presentation loop never waits for it.
-    int ProcessPipelined(const uint8_t* rgba, int width, int height, std::vector<uint8_t>& out,
-                         std::string& detail);
     double last_ms() const { return last_ms_; }
     const std::string& status() const { return status_; }
     int width() const { return full_w_; }

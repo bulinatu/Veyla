@@ -78,6 +78,7 @@ private:
                       bool good = true);
     void PresentVideo();
     bool PullFrame(media::DecodedFrame& out);
+    bool PullFrameRaw(media::DecodedFrame& out);
     void StartPadThread();
     void StopPadThread();
     void ToggleWatch(bool watching);
@@ -167,6 +168,9 @@ private:
     double playout_integral_ = 0.0;
     double playout_clock_ = -1.0;
     int playout_depth_ = 0;
+    double probe_age_sum_ = 0.0;
+    double probe_age_max_ = 0.0;
+    int probe_age_n_ = 0;
     double probe_wait_ms_ = 0.0;
     double probe_frame_ms_ = 0.0;
     bool watching_ = false;

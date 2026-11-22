@@ -768,18 +768,4 @@ bool NvDlssnr::Process(const uint8_t* rgba, int width, int height, std::vector<u
     return Collect(out, detail);
 }
 
-int NvDlssnr::ProcessPipelined(const uint8_t* rgba, int width, int height,
-                               std::vector<uint8_t>& out, std::string& detail) {
-    if (!pending_) {
-        // First frame: nothing is in flight yet, so there is no output to return.
-        return Submit(rgba, width, height, detail) ? 0 : -1;
-    }
-    // The worker computed the previous frame while the loop did the rest of
-    // its work, so this collect does not wait. Then the current frame goes out.
-    if (!Collect(out, detail)) {
-        return -1;
-    }
-    return Submit(rgba, width, height, detail) ? 1 : -1;
-}
-
 }  // namespace brp::media

@@ -787,7 +787,7 @@ void NextApp::Frame() {
                              "shown %d  |  holds 7:%u 8:%u 9:%u 10:%u 16:%u  |  sr submit %.2f ms  |  "
                              "sr cpu %.2f ms  |  dec %.2f/%.2f ms  |  "
                              "net jitter %.2f ms loss %.2f%% drops %d  |  queue %d  trim %+.3f%%  |  "
-                             "wait max %.1f ms  frame max %.1f ms\n",
+                             "wait max %.1f ms  frame max %.1f ms  |  age avg %.1f max %.1f ms\n",
                              loop_intervals_.Percentile(0.50), loop_p99_,
                              loop_intervals_.Max(), cadence_p50_, cadence_p99_,
                              present_refresh_hz_, present_misses_rate_, display_rate_,
@@ -796,9 +796,13 @@ void NextApp::Frame() {
                              probe.decode_ms, probe.decode_ms_max,
                              probe.jitter_ms, probe.loss_percent, probe.decoder_drops,
                              playout_depth_, playout_trim_ * 100.0, probe_wait_ms_,
-                             probe_frame_ms_);
+                             probe_frame_ms_, probe_age_n_ > 0 ? probe_age_sum_ / probe_age_n_ : 0.0,
+                             probe_age_max_);
                 probe_wait_ms_ = 0.0;
                 probe_frame_ms_ = 0.0;
+                probe_age_sum_ = 0.0;
+                probe_age_max_ = 0.0;
+                probe_age_n_ = 0;
             }
         }
     }
@@ -3223,6 +3227,25 @@ std::wstring NextApp::Summary(const Profile& profile) const {
 }
 
 bool NextApp::PullFrame(media::DecodedFrame& out) {
+    if (!PullFrameRaw(out)) {
+        return false;
+    }
+    // Age of the frame's pixels since the video packet arrived: decode, queue
+    // and pipelining time that the picture carries before it reaches the screen.
+    const double now_ms =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    const double age = now_ms - out.arrived_ms;
+    if (age >= 0.0 && age < 2000.0) {
+        probe_age_sum_ += age;
+        probe_age_max_ = std::max(probe_age_max_, age);
+        ++probe_age_n_;
+    }
+    return true;
+}
+
+bool NextApp::PullFrameRaw(media::DecodedFrame& out) {
     const int frame_buffer = std::clamp(settings_.streaming.frame_buffer, 0, 3);
     if (frame_buffer <= 0) {
         // Lowest latency without skipping: every decoded frame is delivered in
@@ -3379,7 +3402,7 @@ void NextApp::PresentVideo() {
                         input = sr_scaled_.data();
                     }
                     if (dlss_sr_->Process(input, iw, ih, sr_frame, detail) &&
-                        dlss_sr_->ReadbackCompleted(rgba, detail)) {
+                        dlss_sr_->Readback(rgba, detail)) {
                         feed_w = dlss_sr_->out_width();
                         feed_h = dlss_sr_->out_height();
                         have_rgba = true;
@@ -3663,20 +3686,15 @@ void NextApp::EnhanceNeural(media::DecodedFrame& frame) {
     }
     std::vector<std::uint8_t> out;
     std::string detail;
-    // One frame in flight: the output is the previous frame's enhancement, so
-    // the loop only copies data and never waits for the NR worker.
-    const int result = dlssnr_->ProcessPipelined(frame.rgba.data(), frame.width,
-                                                 frame.height, out, detail);
-    if (result < 0) {
+    if (dlssnr_->Process(frame.rgba.data(), frame.width, frame.height, out, detail) &&
+        !out.empty()) {
+        frame.rgba = std::move(out);
+        nr_ms_ = dlssnr_->last_ms();
+    } else {
         Toast(L"Neural render stopped: " + Widen(detail), true);
         nr_failed_ = true;
         StopNr();
-        return;
     }
-    if (result == 1 && !out.empty()) {
-        frame.rgba = std::move(out);
-    }
-    nr_ms_ = dlssnr_->last_ms();
 }
 
 bool NextApp::EnsureRife() {
