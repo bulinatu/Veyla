@@ -1316,3 +1316,26 @@ stopped presenting them as if they did something.
 - `brpnext.exe`
   `6CE32A41326D03ABB3F4EC3C96677E7C34A1E4320F0EC972AF59FF24A0D846DC`
 - Patch verified: `version=2.4.2`, 0 markers, `files_differ=0`.
+
+## 2.4.3 - no console window
+
+- The Rust shell is now built as a Windows GUI application in release
+  (`#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`).
+  Double-clicking `brpnext.exe` no longer opens a terminal window; the engine
+  was already `WIN32_EXECUTABLE`.
+- Debug builds keep the console for panics and `eprintln!`; the shell still
+  logs to `%APPDATA%\BetterRemotePlayNext\ui.log`.
+- Verified with the PE optional header: subsystem 2 (GUI), not 3 (console).
+
+### 2.4.3 package
+
+- Standalone: `dist/BetterRemotePlay-2.4.3-standalone.zip` (922.0 MB)
+  SHA256 `CE2E513EF2871BEC346D24E689F66FEFA28D17435773CF6E505792CCBA0F28AC`
+- Update **2.4.2 -> 2.4.3**:
+  `dist/BetterRemotePlay-2.4.2-to-2.4.3-update.exe` (5.3 MB)
+  SHA256 `63B1BB84D2E59C7B64BA52FFC79B7B2FA668A0C6836D9559841153B89A346395`
+- `brpnext.exe`
+  `8D6327AA81A9C4C93C50AC74744BF09FBE275957DBC83DF09638A4769BFC59E2`
+- Patch verified: `version=2.4.3`, 0 markers, `files_differ=0`.
+- Packaged PE subsystem = 2 (GUI); launch test leaves the window alive and no
+  console host is created.

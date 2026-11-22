@@ -1,3 +1,7 @@
+// Release builds are GUI applications: no console window when double-clicked.
+// Debug builds keep the console so panics and eprintln! stay visible.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod app;
 mod bridge;
 mod background;

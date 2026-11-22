@@ -205,3 +205,7 @@ See `KNOWN_LIMITATIONS.md` and `KNOWN_ISSUES.md`.
 ## 2.4.2
 
 - Home drops the duplicate Console card; live telemetry gets the full width.
+
+## 2.4.3
+
+- The shell runs as a GUI application: no console/terminal window on launch.
