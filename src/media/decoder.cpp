@@ -4,11 +4,16 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/hwcontext.h>
+#include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
 }
 
+#include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <thread>
 
 namespace brp::media {
 namespace {
@@ -20,6 +25,43 @@ AVFrame* Frm(void* p) { return static_cast<AVFrame*>(p); }
 SwsContext* Sws(void* p) { return static_cast<SwsContext*>(p); }
 AVCodecParserContext* Parser(void* p) { return static_cast<AVCodecParserContext*>(p); }
 
+namespace {
+
+// Optional per-stage decode timing (BRP_DECODE_PROBE=1). The live path is
+// single-threaded, so plain counters are enough; the probe is compiled in but
+// costs one steady_clock read per stage only when the variable is set.
+struct DecodeProbe {
+    bool enabled = std::getenv("BRP_DECODE_PROBE") != nullptr;
+    int frames = 0;
+    double receive = 0.0;
+    double transfer = 0.0;
+    double resize = 0.0;
+    double scale = 0.0;
+
+    static double Ms(std::chrono::steady_clock::time_point from,
+                     std::chrono::steady_clock::time_point to) {
+        return std::chrono::duration<double, std::milli>(to - from).count();
+    }
+
+    void Report() {
+        if (!enabled) {
+            return;
+        }
+        if (++frames < 60) {
+            return;
+        }
+        const double n = static_cast<double>(frames);
+        std::fprintf(stderr,
+                     "[decode-probe] recv %.2f transfer %.2f resize %.2f scale %.2f ms\n",
+                     receive / n, transfer / n, resize / n, scale / n);
+        frames = 0;
+        receive = transfer = resize = scale = 0.0;
+    }
+};
+
+DecodeProbe g_decode_probe;
+
+}  // namespace
 }  // namespace
 
 Decoder::~Decoder() {
@@ -332,9 +374,15 @@ bool Decoder::Receive(DecodedFrame& frame) {
 
 bool Decoder::Drain(DecodedFrame& out) {
     while (true) {
+        const auto receive_started = std::chrono::steady_clock::now();
         const int received = avcodec_receive_frame(Ctx(codec_), Frm(frame_));
+        if (g_decode_probe.enabled) {
+            g_decode_probe.receive +=
+                DecodeProbe::Ms(receive_started, std::chrono::steady_clock::now());
+        }
         if (received == 0) {
             const bool ok = Convert(Frm(frame_), out);
+            g_decode_probe.Report();
             av_frame_unref(Frm(frame_));
             return ok;
         }
@@ -350,6 +398,7 @@ bool Decoder::Convert(const void* frame_ptr, DecodedFrame& out) {
     auto* frame = static_cast<AVFrame*>(const_cast<void*>(frame_ptr));
     AVFrame* source = frame;
 
+    const auto transfer_started = std::chrono::steady_clock::now();
     if (frame->hw_frames_ctx) {
         if (!sw_frame_) {
             sw_frame_ = av_frame_alloc();
@@ -360,18 +409,26 @@ bool Decoder::Convert(const void* frame_ptr, DecodedFrame& out) {
         }
         source = Frm(sw_frame_);
     }
+    const auto transfer_done = std::chrono::steady_clock::now();
+    if (g_decode_probe.enabled) {
+        g_decode_probe.transfer += DecodeProbe::Ms(transfer_started, transfer_done);
+    }
 
     out.width = source->width;
     out.height = source->height;
     out.pq = source->color_trc == AVCOL_TRC_SMPTE2084;
     out.rgba.resize(static_cast<size_t>(source->width) * source->height * 4);
+    const auto resize_done = std::chrono::steady_clock::now();
+    if (g_decode_probe.enabled) {
+        g_decode_probe.resize += DecodeProbe::Ms(transfer_done, resize_done);
+    }
 
-    // Chroma upsampling runs synchronously on chiaki's video receive thread.
-    // Measured at 1080p NV12 -> RGBA on this machine:
-    //   bilinear 2.6 ms, bicubic 2.1 ms, lanczos+accurate 5.6 ms,
-    //   bicubic + SWS_FULL_CHR_H_INT 10.0 ms (the old default!).
-    // FULL_CHR_H_INT was removed after it pushed decode past the 16.7 ms budget
-    // on high-motion frames, which drained the socket and dropped frames.
+    // Chroma upsampling and the YUV->RGBA colour conversion are pure per-row
+    // work, and swscale is single threaded: at 1080p this box spends ~5.8 ms
+    // per frame in it, on the latency path of every frame. The frame is split
+    // into even horizontal slices; each worker owns its own SwsContext (created
+    // for the full frame, so the vertical filter reads across slice edges) and
+    // scales its band with srcSliceY.
     int sws_flags = SWS_BICUBIC;
     if (chroma_quality_ == 0) {
         sws_flags = SWS_BILINEAR;
@@ -387,30 +444,37 @@ bool Decoder::Convert(const void* frame_ptr, DecodedFrame& out) {
         return false;
     }
 
-        // Explicit colour handling: the stream is limited-range BT.709 (BT.2020 for
+    // Explicit colour handling: the stream is limited-range BT.709 (BT.2020 for
     // HDR). Without this swscale assumes BT.601 limited and colours wash out.
-    {
-        const int* src_coeffs = sws_getCoefficients(SWS_CS_ITU709);
-        switch (source->colorspace) {
-            case AVCOL_SPC_BT2020_NCL:
-            case AVCOL_SPC_BT2020_CL:
-                src_coeffs = sws_getCoefficients(SWS_CS_BT2020);
-                break;
-            case AVCOL_SPC_SMPTE170M:
-            case AVCOL_SPC_BT470BG:
-                src_coeffs = sws_getCoefficients(SWS_CS_ITU601);
-                break;
-            default:
-                break;
-        }
-        const int src_range = source->color_range == AVCOL_RANGE_JPEG ? 1 : 0;
-        sws_setColorspaceDetails(Sws(scaler_), src_coeffs, src_range,
-                                 sws_getCoefficients(SWS_CS_DEFAULT), 1, 0, 1 << 16, 1 << 16);
+    const int* src_coeffs = sws_getCoefficients(SWS_CS_ITU709);
+    switch (source->colorspace) {
+        case AVCOL_SPC_BT2020_NCL:
+        case AVCOL_SPC_BT2020_CL:
+            src_coeffs = sws_getCoefficients(SWS_CS_BT2020);
+            break;
+        case AVCOL_SPC_SMPTE170M:
+        case AVCOL_SPC_BT470BG:
+            src_coeffs = sws_getCoefficients(SWS_CS_ITU601);
+            break;
+        default:
+            break;
     }
-uint8_t* dst[4] = {out.rgba.data(), nullptr, nullptr, nullptr};
+    const int src_range = source->color_range == AVCOL_RANGE_JPEG ? 1 : 0;
+    auto apply_colorspace = [&](SwsContext* ctx) {
+        sws_setColorspaceDetails(ctx, src_coeffs, src_range,
+                                 sws_getCoefficients(SWS_CS_DEFAULT), 1, 0, 1 << 16, 1 << 16);
+    };
+    apply_colorspace(Sws(scaler_));
+
+    // sws_scale is single threaded, and its slice API is not safe to drive from
+    // several contexts at once: a slice that starts in the middle of the frame
+    // reads across the slice edge, and a slice-local buffer loses the frame edge
+    // handling at the bottom (measured both, so the parallel path was removed).
+    // Bicubic is also the fastest option on this machine (bilinear and lanczos
+    // both cost more), so one call is what stays.
+    uint8_t* dst[4] = {out.rgba.data(), nullptr, nullptr, nullptr};
     int dst_linesize[4] = {source->width * 4, 0, 0, 0};
     sws_scale(Sws(scaler_), source->data, source->linesize, 0, source->height, dst, dst_linesize);
-
     width_ = out.width;
     height_ = out.height;
     ++frame_count_;

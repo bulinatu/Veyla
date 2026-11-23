@@ -82,3 +82,71 @@ cadence at the cost of roughly 60 ms.
   presenter, plus a CPU path still for SR/NR.
 - Buffer 0 has no spare frame; a single late decode is a repeated frame. If
   that shows up, buffer 1 is the middle ground (+16.7 ms at 60 fps).
+
+## Round 2: decode breakdown and the DLSS "Max" preset
+
+Measured again with `BRP_DECODE_PROBE=1` (per-stage timing inside the decoder)
+and `fg <ms> <mult>x drops <n>` appended to the frame probe.
+
+### Where the 8.4 ms of decode goes (1080p HEVC, d3d11va)
+
+| Stage | ms |
+|---|---|
+| `avcodec_receive_frame` (hardware decode wait) | 0.00 |
+| `av_hwframe_transfer_data` (GPU -> CPU NV12) | 1.4 |
+| `out.rgba.resize` (8 MB zero fill) | 0.9 |
+| `sws_scale` NV12 -> RGBA | 5.8 |
+
+Chroma filter comparison on the same clip (software decode, ms/frame):
+bilinear 11.17, **bicubic 10.57**, lanczos 14.18. Bicubic is already the best
+choice; there is no cheaper filter to switch to.
+
+Parallel `sws_scale` was implemented and rejected. Two variants were tested
+against a bit-exact reference:
+
+- slicing with `srcSliceY` and per-thread contexts: swscale warns "Slices
+  start in the middle!" and the result differs from row `height/workers`
+  onward (max 255), so it cannot be used;
+- slice-local source pointers with an overlap: correct except the last three
+  rows, because the scaler keeps the full-frame height and reads past the
+  sub-image. The path was removed again; the conversion stays one call.
+
+### DLSS SR "Max" was silently disabling SR
+
+`NVSDK_NGX_PerfQuality_Value` 4 (Ultra Quality) no longer exists in the DLSS
+2.x+ API. `CreateFeature` returned `0xBAD00010` (`FAIL_UnsupportedParameter`)
+for the "Max" quality row, which set `dlss_failed_` and turned SR off for the
+whole session with only a toast. The mapping now uses `MaxQuality` (2) for both
+66 % and 77 % and relies on the explicit sizes: with SR 1440p the feature is
+created at 1920x1080 -> 2560x1440 and runs.
+
+### Neural Render inside the DLSS-G worker has a 1440p ceiling
+
+`fg <ms>` is the worker's own `Process` time. At 60 fps that must stay under
+16.7 ms or the newest-frame slot starts dropping inputs:
+
+| Worker input | NR | Process ms | Inputs dropped |
+|---|---|---|---|
+| 1080p (DLAA) | off | 7-8 | none |
+| 1080p (DLAA) | on | 8.5 | none |
+| 1440p (SR Max) | **on** | **16-19** | ~50/s |
+| 1440p (SR Max) | off | 6.5-7.8 | none |
+
+NR costs ~10 ms at 1440p and is not reduced by halving `neural_passes`
+(measured 16-17 ms at 2 passes). So 1440p and NR do not fit together at 60 fps
+into a 120 Hz FG output. The applied configuration is **SR 1440p + NR off**;
+the alternative that keeps NR is **SR 1080p (DLAA)**, where the worker has
+headroom.
+
+## Round 2 settings
+
+`streaming.fps = 60`, `streaming.frame_buffer = 0`, `ai.fg_multiplier = 2`,
+`ai.sr_output = 1440p`, `ai.sr_quality = 4` (Max), `ai.neural_render = false`.
+
+Remaining latency is the console's capture/encode, the LAN hop, the 8.4 ms
+decode, the ~6 ms SR readback at 1440p and the DLSS-G worker's own display
+window. The next real lever is keeping the frame on the GPU end to end:
+D3D11VA decode into a texture shared with the presenter, a YUV->RGB shader
+pass, and a GPU path into DLSS SR. That removes the 1.4 ms transfer and the
+5.8 ms swscale from every frame.
+

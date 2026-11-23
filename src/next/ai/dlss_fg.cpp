@@ -206,7 +206,13 @@ void DlssFg::WorkerMain() {
         nr_->SetFrameGeneration(multiplier_.load());
         std::vector<std::uint8_t> ignored;
         std::string detail;
-        if (!nr_->Process(job.rgba.data(), job.width, job.height, ignored, detail)) {
+        const auto process_started = std::chrono::steady_clock::now();
+        const bool processed =
+            nr_->Process(job.rgba.data(), job.width, job.height, ignored, detail);
+        process_ms_.store(std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - process_started)
+                              .count());
+        if (!processed) {
             failed_.store(true);
             {
                 std::lock_guard<std::mutex> lock(note_mutex_);

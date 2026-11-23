@@ -72,6 +72,7 @@ public:
     int actual_multiplier() const;
     double displayed_fps() const;
     unsigned long long dropped() const { return dropped_.load(); }
+    double process_ms() const { return process_ms_.load(); }
     DWORD worker_pid() const;
     std::wstring note() const;
 
@@ -118,6 +119,7 @@ private:
     double next_attach_ = 0.0;
 
     std::atomic<double> displayed_fps_{0.0};
+    std::atomic<double> process_ms_{0.0};
     std::atomic<int> actual_multiplier_{0};
     mutable std::mutex note_mutex_;
     std::wstring note_;

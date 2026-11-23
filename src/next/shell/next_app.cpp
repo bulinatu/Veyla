@@ -281,7 +281,12 @@ int NextApp::Run() {
                     // The timer is at 1 ms (timeBeginPeriod), so this adds at most
                     // about one millisecond of pickup jitter.
                     streaming_->WaitForFrame(4);
-                    std::this_thread::sleep_for(std::chrono::microseconds(500));
+                    // Buffer 0 pulls on every tick and consumes what arrived;
+                    // the pause only exists for the phase-gated modes, where
+                    // the loop would otherwise spin against the gate.
+                    if (settings_.streaming.frame_buffer > 0) {
+                        std::this_thread::sleep_for(std::chrono::microseconds(500));
+                    }
                 } else {
                     std::this_thread::sleep_for(std::chrono::milliseconds(4));
                 }
@@ -779,7 +784,8 @@ void NextApp::Frame() {
                              "shown %d  |  holds 7:%u 8:%u 9:%u 10:%u 16:%u  |  sr submit %.2f ms  |  "
                              "sr cpu %.2f ms  |  dec %.2f/%.2f ms  |  "
                              "net jitter %.2f ms loss %.2f%% drops %d  |  queue %d  trim %+.3f%%  |  "
-                             "wait max %.1f ms  frame max %.1f ms  |  age avg %.1f max %.1f ms\n",
+                             "wait max %.1f ms  frame max %.1f ms  |  age avg %.1f max %.1f ms  |  "
+                             "fg %.1f ms %dx drops %llu out %.0f fps\n",
                              loop_intervals_.Percentile(0.50), loop_p99_,
                              loop_intervals_.Max(), cadence_p50_, cadence_p99_,
                              present_refresh_hz_, present_misses_rate_, display_rate_,
@@ -789,7 +795,11 @@ void NextApp::Frame() {
                              probe.jitter_ms, probe.loss_percent, probe.decoder_drops,
                              playout_depth_, playout_trim_ * 100.0, probe_wait_ms_,
                              probe_frame_ms_, probe_age_n_ > 0 ? probe_age_sum_ / probe_age_n_ : 0.0,
-                             probe_age_max_);
+                             probe_age_max_,
+                             dlss_fg_ ? dlss_fg_->process_ms() : 0.0,
+                             dlss_fg_ ? dlss_fg_->actual_multiplier() : 0,
+                             dlss_fg_ ? dlss_fg_->dropped() : 0,
+                             dlss_fg_ ? dlss_fg_->displayed_fps() : 0.0);
                 probe_wait_ms_ = 0.0;
                 probe_frame_ms_ = 0.0;
                 probe_age_sum_ = 0.0;
@@ -3393,13 +3403,15 @@ void NextApp::PresentVideo() {
                                                   sr_scale_temp_);
                         input = sr_scaled_.data();
                     }
-                    if (dlss_sr_->Process(input, iw, ih, sr_frame, detail) &&
-                        dlss_sr_->Readback(rgba, detail)) {
+                    const bool sr_ok = dlss_sr_->Process(input, iw, ih, sr_frame, detail);
+                    if (sr_ok && dlss_sr_->Readback(rgba, detail)) {
                         feed_w = dlss_sr_->out_width();
                         feed_h = dlss_sr_->out_height();
                         have_rgba = true;
                     } else {
                         dlss_failed_ = true;
+                        std::fprintf(stderr, "[next] DLSS SR frame %dx%d: %s\n", iw, ih,
+                                     detail.c_str());
                         Toast(L"DLSS SR readback: " + Widen(detail), true);
                     }
                 }
@@ -4139,7 +4151,12 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
             out_h = 1440;
         }
         static const int kPercent[6] = {33, 50, 58, 66, 77, 100};
-        static const int kQuality[6] = {3, 0, 1, 2, 4, 5};
+        // NVSDK_NGX_PerfQuality_Value 4 (Ultra Quality) was retired with DLSS
+        // 2.x: CreateFeature rejects it with FAIL_UnsupportedParameter, which
+        // silently disabled SR for the "Max" preset. The explicit sizes set on
+        // the feature decide the ratio, so MaxQuality is the right hint for
+        // both 66 % and 77 %.
+        static const int kQuality[6] = {3, 0, 1, 2, 2, 5};
         const int index = std::clamp(settings_.ai.sr_quality, 0, 5);
         const int pct = kPercent[index];
         quality = kQuality[index];
@@ -4163,6 +4180,7 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
         std::string detail;
         if (!dlss_sr_->LoadRuntime(directory.wstring(), detail)) {
             dlss_failed_ = true;
+            std::fprintf(stderr, "[next] DLSS runtime: %s\n", detail.c_str());
             Toast(L"DLSS runtime: " + Widen(detail), true);
             return false;
         }
@@ -4171,6 +4189,8 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
     if (!dlss_sr_->Initialize(ActivePresenter()->device(), ActivePresenter()->context(), in_w,
                               in_h, out_w, out_h, 12, quality, detail)) {
         dlss_failed_ = true;
+        std::fprintf(stderr, "[next] DLSS SR init %dx%d -> %dx%d quality %d: %s\n", in_w, in_h,
+                     out_w, out_h, quality, detail.c_str());
         Toast(L"DLSS SR: " + Widen(detail), true);
         return false;
     }
