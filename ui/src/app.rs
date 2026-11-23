@@ -5,9 +5,8 @@ use std::time::Duration;
 use gpui::{
     div, hsla, point, prelude::*, px, relative, rgba, rgb, size, Animation, AnimationExt as _,
     AnyElement, AnyWindowHandle, App, Bounds, BoxShadow, Context, FocusHandle, Focusable,
-    FontWeight, InteractiveElement, IntoElement, MouseButton, Render, SharedString,
-    StatefulInteractiveElement, Window, WindowBackgroundAppearance, WindowBounds, WindowKind,
-    WindowOptions,
+    FontWeight, InteractiveElement, IntoElement, Render, SharedString, StatefulInteractiveElement,
+    Window, WindowBackgroundAppearance, WindowBounds, WindowControlArea, WindowKind, WindowOptions,
 };
 
 use crate::model::{Preset, Settings, Status};
@@ -530,7 +529,10 @@ impl Root {
                     .items_center()
                     .gap(px(11.0))
                     .cursor_move()
-                    .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
+                    // HTCAPTION, not start_window_move(): the Windows platform
+                    // layer in gpui 0.2 has no implementation for the latter, so
+                    // the custom title bar could not move the window at all.
+                    .window_control_area(WindowControlArea::Drag)
                     .child(widgets::logo_mark(30.0))
                     .when(!tight, |el| {
                         el.child(
@@ -555,7 +557,15 @@ impl Root {
                     }),
             )
             .child(tabs)
-            .child(div().flex_1())
+            // The empty middle of the bar is a second grab handle, so the
+            // window can be dragged from anywhere that is not a control.
+            .child(
+                div()
+                    .flex_1()
+                    .h(px(60.0))
+                    .cursor_move()
+                    .window_control_area(WindowControlArea::Drag),
+            )
             .child(
                 div()
                     .flex()
@@ -1236,7 +1246,6 @@ impl Render for Root {
             .font_family(theme::UI_FONT)
             .text_size(theme::body())
             .text_color(theme::text())
-            .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event, window, cx| this.on_key(event, window, cx)))
             .child(background::aurora(animated, reduce))
             .child(
@@ -1252,6 +1261,12 @@ impl Render for Root {
                             .flex_1()
                             .min_h(px(0.0))
                             .overflow_y_scroll()
+                            // Focus lives on the page, not on the whole
+                            // window: track_focus() registers a mouse-down
+                            // handler that calls prevent_default(), and on
+                            // Windows that silently cancels the HTCAPTION
+                            // drag of the custom title bar.
+                            .track_focus(&self.focus)
                             .child(
                                 div()
                                     .w_full()
@@ -1261,27 +1276,28 @@ impl Render for Root {
                                     .pt(px(16.0))
                                     .pb(px(40.0))
                                     .child(
-                                        // Frosted sheet: a translucent slab over
-                                        // the aurora with a wide gaussian shadow,
-                                        // so the content area reads as glass
-                                        // instead of floating on hard blobs.
+                                        // The page floats directly on the
+                                        // aurora. The old opaque slab cut a hard
+                                        // rectangle out of the animation; what
+                                        // is left is a gaussian rim only — no
+                                        // fill, no border, no seam — so the text
+                                        // keeps its contrast while the circles
+                                        // keep moving underneath.
                                         div()
+                                            .relative()
                                             .rounded(px(26.0))
-                                            .border_1()
-                                            .border_color(rgba(0xFFFFFF0D))
-                                            .bg(rgba(0x08080FB8)).relative()
                                             .shadow(vec![
                                                 BoxShadow {
-                                                    color: hsla(0.0, 0.0, 0.0, 0.55),
-                                                    offset: point(px(0.0), px(24.0)),
-                                                    blur_radius: px(70.0),
-                                                    spread_radius: px(-16.0),
+                                                    color: hsla(0.0, 0.0, 0.0, 0.13),
+                                                    offset: point(px(0.0), px(18.0)),
+                                                    blur_radius: px(180.0),
+                                                    spread_radius: px(-34.0),
                                                 },
                                                 BoxShadow {
-                                                    color: hsla(0.72, 0.70, 0.60, 0.05),
+                                                    color: hsla(0.72, 0.70, 0.62, 0.04),
                                                     offset: point(px(0.0), px(0.0)),
-                                                    blur_radius: px(90.0),
-                                                    spread_radius: px(-30.0),
+                                                    blur_radius: px(140.0),
+                                                    spread_radius: px(-46.0),
                                                 },
                                             ])
                                             .p(px(22.0))

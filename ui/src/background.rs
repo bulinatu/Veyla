@@ -1,10 +1,11 @@
 //! Animated aurora backdrop.
 //!
 //! GPUI has no blur pass, so each blob is a stack of concentric translucent
-//! circles: the falloff reads as a soft glow and costs only quads on the GPU.
-//! The whole layer is skipped when the user disables it or asks for reduced
-//! motion, and it never runs while the stream window has focus (the shell is
-//! minimized then anyway).
+//! circles: the alpha of every ring is solved from a smoothstep coverage curve,
+//! so the rim melts into the backdrop the way an out-of-focus disc does and
+//! costs only quads on the GPU. The whole layer is skipped when the user
+//! disables it or asks for reduced motion, and it never runs while the stream
+//! window has focus (the shell is minimized then anyway).
 
 use std::time::Duration;
 
@@ -96,11 +97,28 @@ fn blob_stack(blob: &Blob) -> Div {
         .w(px(blob.size))
         .h(px(blob.size));
 
-    for step in 0..16 {
-        let scale = 1.0 - step as f32 * 0.044;
+    // Out-of-focus disc. The rings are not a linear ramp any more: their
+    // per-ring alpha is solved from a smoothstep coverage curve, so the rim
+    // melts into the backdrop over half the radius instead of showing a
+    // stack of hard concentric edges. That soft shoulder is what the eye
+    // reads as blur.
+    const STEPS: usize = 44;
+    const SHOULDER: f32 = 0.58;
+    let peak = (blob.alpha as f32 / 255.0) * 3.6;
+    let mut prev = 0.0f32;
+    for step in 0..STEPS {
+        let s = (step + 1) as f32 / STEPS as f32;
+        let t = (s / SHOULDER).clamp(0.0, 1.0);
+        let coverage = peak * t * t * (3.0 - 2.0 * t);
+        let alpha = ((coverage - prev) / (1.0 - prev)).clamp(0.0, 1.0);
+        prev = coverage;
+        if alpha <= 0.003 {
+            continue;
+        }
+        let scale = 1.0 - (1.0 - s) * 0.985;
         let inner = blob.size * scale;
         let offset = (blob.size - inner) * 0.5;
-        let alpha = (blob.alpha * (1.0 - step as f32 * 0.058)).max(1.0) as u32;
+        let value = (alpha * 255.0).round().max(1.0) as u32;
         stack = stack.child(
             div()
                 .absolute()
@@ -109,7 +127,7 @@ fn blob_stack(blob: &Blob) -> Div {
                 .w(px(inner))
                 .h(px(inner))
                 .rounded(px(inner * 0.5))
-                .bg(rgba((blob.color << 8) | alpha)),
+                .bg(rgba((blob.color << 8) | value)),
         );
     }
 
