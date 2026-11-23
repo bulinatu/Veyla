@@ -645,14 +645,6 @@ bool NextApp::EnsureStreamSurface() {
 }
 
 void NextApp::Frame() {
-    static int frame_probe = 0;
-    if (engine_mode_ && (frame_probe++ % 300) == 0) {
-        FILE* dbg = nullptr;
-        if (fopen_s(&dbg, "C:\\Users\\Cosmin\\Desktop\\BetterRemotePlay\\build\\engine-frame.log", "a") == 0 && dbg) {
-            std::fprintf(dbg, "frame engine_mode=%d watching=%d now=%.2f\\n", engine_mode_ ? 1 : 0, watching_ ? 1 : 0, now_);
-            std::fclose(dbg);
-        }
-    }
     if (engine_mode_) {
         std::string command;
         while (bridge_.TakeCommand(command)) {

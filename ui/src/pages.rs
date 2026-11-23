@@ -482,18 +482,6 @@ impl Root {
                     &[(30, "30"), (60, "60"), (120, "120")],
                     cx,
                 ),
-                self.seg_row(
-                    "streaming.codec",
-                    "Codec",
-                    "Auto negotiates with the console",
-                    &[
-                        ("Auto", "auto"),
-                        ("H.264", "h264"),
-                        ("H.265", "h265"),
-                        ("AV1", "av1"),
-                    ],
-                    cx,
-                ),
                 self.stepper_row(
                     "streaming.bitrate_kbps",
                     "Bitrate",
@@ -1230,21 +1218,8 @@ impl Root {
 
         let diagnostics = group(
             "Diagnostics",
-            "Logging and compatibility",
+            "Logging",
             vec![
-                self.toggle_row("advanced.debug_log", "Debug log", "Verbose engine log file", cx),
-                self.toggle_row(
-                    "advanced.experimental",
-                    "Experimental",
-                    "Enable unfinished paths",
-                    cx,
-                ),
-                self.toggle_row(
-                    "advanced.prefer_gpu_present",
-                    "GPU present",
-                    "Prefer the GPU present path",
-                    cx,
-                ),
                 self.seg_row(
                     "advanced.log_level",
                     "Log level",
@@ -1265,59 +1240,6 @@ impl Root {
                             .arg(crate::model::config_dir())
                             .spawn();
                     }),
-                ),
-            ],
-        );
-
-        let gpu = group(
-            "GPU",
-            "Device selection",
-            vec![
-                widgets::row(
-                    "Device",
-                    "Adapter used by decode and AI",
-                    widgets::button(
-                        self.gpu_label(),
-                        Tone::Ghost,
-                        cx.listener(|this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
-                            this.open_picker(crate::app::PickerKind::Gpu, cx);
-                        }),
-                    ),
-                ),
-                self.toggle_row("gpu.fp16", "FP16", "Half precision inference", cx),
-                self.toggle_row("gpu.int8", "INT8", "Quantised inference where supported", cx),
-                self.stepper_row(
-                    "gpu.frame_buffers",
-                    "GPU buffers",
-                    "Pool size for the decoder and AI passes",
-                    1,
-                    8,
-                    1,
-                    plain,
-                    cx,
-                ),
-                self.stepper_row(
-                    "gpu.memory_limit_mb",
-                    "Memory limit",
-                    "0 uses the driver budget",
-                    0,
-                    24576,
-                    512,
-                    |v| {
-                        if v == 0 {
-                            "Auto".to_string()
-                        } else {
-                            format!("{} MB", v)
-                        }
-                    },
-                    cx,
-                ),
-                self.seg_int_row(
-                    "gpu.priority",
-                    "Priority",
-                    "Above normal can reduce hitches",
-                    &[(0, "Normal"), (1, "Above")],
-                    cx,
                 ),
             ],
         );
@@ -1343,12 +1265,11 @@ impl Root {
             .gap(px(20.0))
             .child(widgets::page_title(
                 "Advanced",
-                "Shell, diagnostics, GPU and reset",
+                "Shell, measurements, diagnostics and reset",
             ))
             .child(shell)
             .child(pacing)
             .child(diagnostics)
-            .child(gpu)
             .child(widgets::card_pad().child(reset))
             .into_any_element()
     }

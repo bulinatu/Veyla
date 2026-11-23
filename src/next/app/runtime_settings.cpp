@@ -38,7 +38,6 @@ ApplyScope ClassifySettingsChange(const AppSettings& before, const AppSettings& 
         bump(ApplyScope::StreamRestart);
     }
     if (a.streaming.input != b.streaming.input || a.streaming.fps != b.streaming.fps ||
-        a.streaming.codec != b.streaming.codec ||
         a.streaming.decoder != b.streaming.decoder ||
         a.streaming.bitrate_kbps != b.streaming.bitrate_kbps ||
         a.streaming.hdr != b.streaming.hdr) {
@@ -78,13 +77,6 @@ ApplyScope ClassifySettingsChange(const AppSettings& before, const AppSettings& 
         bump(ApplyScope::Immediate);
     }
 
-    if (a.gpu.device != b.gpu.device || a.gpu.fp16 != b.gpu.fp16 ||
-        a.gpu.int8 != b.gpu.int8 || a.gpu.frame_buffers != b.gpu.frame_buffers ||
-        a.gpu.memory_limit_mb != b.gpu.memory_limit_mb ||
-        a.gpu.priority != b.gpu.priority) {
-        bump(ApplyScope::ApplicationRestart);
-    }
-
     if (a.audio.buffer_ms != b.audio.buffer_ms || a.audio.device != b.audio.device) {
         bump(ApplyScope::StreamRestart);
     }
@@ -112,11 +104,6 @@ ApplyScope ClassifySettingsChange(const AppSettings& before, const AppSettings& 
 
     if (a.advanced.log_level != b.advanced.log_level) {
         bump(ApplyScope::Immediate);
-    }
-    if (a.advanced.experimental != b.advanced.experimental ||
-        a.advanced.debug_log != b.advanced.debug_log ||
-        a.advanced.prefer_gpu_present != b.advanced.prefer_gpu_present) {
-        bump(ApplyScope::ApplicationRestart);
     }
 
     bump(ApplyScope::Immediate);
