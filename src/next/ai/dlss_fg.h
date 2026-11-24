@@ -45,7 +45,13 @@ public:
     void SetMultiplier(int multiplier);
     // true: the worker runs Neural Render on the frames it presents, so NR sits
     // after generation in its pipeline. false: the worker presents raw frames.
-    void SetNeuralInWorker(bool on) { neural_in_worker_ = on; }
+    void SetNeuralInWorker(bool on) {
+        std::lock_guard<std::mutex> lock(options_mutex_);
+        if (neural_in_worker_ != on) {
+            neural_in_worker_ = on;
+            neural_dirty_ = true;
+        }
+    }
     bool neural_in_worker() const { return neural_in_worker_; }
     // The NR parameters the worker uses when it runs NR. Applied on Start (and
     // by SetMultiplier reconfigurations for the rest of the settings).

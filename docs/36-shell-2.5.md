@@ -124,3 +124,23 @@ display (it used to follow the shell's monitor), and `video.vsync` now reaches
 the presenter (`Present(1)` vs `Present(0, ALLOW_TEARING)`). Removed as dead:
 input resolution, HDR transport, colour space, VRR, refresh rate, bit depth and
 colour format.
+
+## Live neural tuning (fix)
+
+Sliders in the Neural page/overlay did nothing until a reconnect. The root
+cause was in `NextApp::Apply()`: it captured `previous_ai` from `settings_`,
+which the caller (`ReloadSettingsFromDisk`) had already replaced with the new
+file, instead of from `host_->Settings()` (the configuration the engine is
+running with). Every `previous_ai.neural_* != settings_.ai.neural_*` comparison
+was therefore false and the SR/FG/NR rebuild blocks never executed. This also
+silently delayed SR-output and frame-generation changes until a reconnect.
+
+Fixed by taking `previous_ai` from `before.ai`, and by updating the DLSS-G
+worker in place: `SetNeuralInWorker` now marks the worker dirty so the feed
+thread applies `SetNeuralBypass` together with the RNSZ reconfigure.
+
+Verified live: intensity 200 -> 0 -> 200 while streaming; the engine log shows
+one `[nr] RNSZ 1920x1080 (full 2560x1440, 1 pass, 0 ms)` per change, and screen
+captures of the worker output change accordingly (A-B-A). Fine tuning (tone,
+structure, skin, passes) travels in the same command; style changes rebuild the
+network style inside the worker.

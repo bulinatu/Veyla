@@ -2352,7 +2352,11 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
 bool NextApp::Apply() {
     const AppSettings before = host_->Settings();
     const ApplyScope scope = ClassifySettingsChange(before, settings_);
-    const AiSettings previous_ai = settings_.ai;
+    // The "previous" values must come from the settings the engine is actually
+    // running with (host), not from `settings_`, which the caller has already
+    // replaced with the new file. With settings_ on both sides every AI
+    // comparison was false and live changes were ignored until a reconnect.
+    const AiSettings previous_ai = before.ai;
     const Status status = host_->ApplySettings(settings_);
     if (!status.ok()) {
         Toast(Widen(status.message()), true);
@@ -2408,6 +2412,7 @@ bool NextApp::Apply() {
         StopNr();
         nr_failed_ = false;
         if (dlss_fg_) {
+            dlss_fg_->SetNeuralInWorker(NeuralInWorkerWanted());
             dlss_fg_->SetNeuralOptions(NeuralOptionsFrom(settings_.ai));
         }
     }

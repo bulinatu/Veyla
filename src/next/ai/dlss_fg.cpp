@@ -212,10 +212,12 @@ void DlssFg::WorkerMain() {
         {
             brp::media::NvDlssnr::Options options;
             bool reconfigure = false;
+            bool in_worker = true;
             {
                 std::lock_guard<std::mutex> lock(options_mutex_);
                 if (neural_dirty_) {
                     options = neural_options_;
+                    in_worker = neural_in_worker_;
                     neural_dirty_ = false;
                     reconfigure = true;
                 }
@@ -225,6 +227,9 @@ void DlssFg::WorkerMain() {
                 if (!nr_->Reconfigure(options, detail)) {
                     std::fprintf(stderr, "[next] NR reconfigure: %s\n", detail.c_str());
                 }
+                // The bypass is a per-frame flag: toggling neural rendering
+                // must reach the worker without recreating it.
+                nr_->SetNeuralBypass(!in_worker);
             }
         }
         nr_->SetFrameGeneration(multiplier_.load());
