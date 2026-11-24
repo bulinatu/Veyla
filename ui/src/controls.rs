@@ -12,6 +12,105 @@ use crate::theme;
 use crate::widgets;
 
 impl Root {
+    /// Numeric slider row used by the Neural page. The range depends on the
+    /// "unlock limits" switch; the value itself is free up to the hard 9999 cap.
+    pub fn neural_range(&self, key: &str) -> (i64, i64) {
+        let unlock = self.settings.b("ai.neural_unlock", false);
+        match key {
+            "ai.neural_intensity" | "ai.neural_tone" | "ai.neural_structure"
+            | "ai.neural_skin" => {
+                if unlock {
+                    (0, 9999)
+                } else {
+                    (0, 200)
+                }
+            }
+            "ai.neural_passes" => {
+                if unlock {
+                    (1, 9999)
+                } else {
+                    (1, 20)
+                }
+            }
+            "ai.neural_scale" => {
+                if unlock {
+                    (1, 9999)
+                } else {
+                    (50, 100)
+                }
+            }
+            _ => (0, 9999),
+        }
+    }
+
+    pub fn slider_row(
+        &self,
+        key: &'static str,
+        label: &'static str,
+        hint: &'static str,
+        suffix: &'static str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (min, max) = self.neural_range(key);
+        let value = self.settings.i(key, min).clamp(min, max);
+        let editing = self.num_edit == Some(key);
+        let shown = if editing {
+            format!("{}\u{258F}", self.num_text)
+        } else {
+            format!("{value}{suffix}")
+        };
+        let weak = cx.entity().downgrade();
+        let slider = widgets::slider(key, value, min, max, 210.0, move |next, _window, cx| {
+            let _ = weak.update(cx, |this, cx| {
+                this.settings.set_int(key, next);
+                this.settings_rev = this.settings_rev.wrapping_add(1);
+                cx.notify();
+            });
+        });
+        let number = div()
+            .id(SharedString::from(format!("num-{key}")))
+            .flex()
+            .items_center()
+            .justify_center()
+            .min_w(px(78.0))
+            .h(px(30.0))
+            .px(px(9.0))
+            .rounded(px(8.0))
+            .bg(if editing {
+                rgba(0x8B5CF626)
+            } else {
+                rgba(0x00000040)
+            })
+            .border_1()
+            .border_color(if editing {
+                rgba(0x8B5CF6CC)
+            } else {
+                rgba(0xFFFFFF10)
+            })
+            .font_family(theme::MONO_FONT)
+            .text_size(theme::mono())
+            .text_color(theme::text())
+            .cursor_text()
+            .on_click(
+                cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    this.num_edit = Some(key);
+                    this.num_text = this.settings.i(key, min).to_string();
+                    this.num_fresh = true;
+                    window.focus(&this.focus);
+                    cx.notify();
+                }),
+            )
+            .child(shown);
+        let control = div()
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .child(slider)
+            .child(number)
+            .into_any_element();
+        widgets::row(label, hint, control)
+    }
+
     pub fn persist(&mut self) {
         let _ = self.settings.save();
         self.settings_mtime = self.settings.file_mtime();
@@ -385,16 +484,66 @@ impl Root {
 
     /// Keyboard routing for the single active inline editor.
     pub fn on_key(&mut self, event: &gpui::KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(key) = self.num_edit {
+            match event.keystroke.key.as_str() {
+                "escape" => {
+                    self.num_edit = None;
+                    cx.notify();
+                    return;
+                }
+                "enter" => {
+                    if let Ok(parsed) = self.num_text.trim().parse::<i64>() {
+                        let (min, max) = self.neural_range(key);
+                        self.settings.set_int(key, parsed.clamp(min, max));
+                        self.persist();
+                    }
+                    self.num_edit = None;
+                    cx.notify();
+                    return;
+                }
+                "backspace" => {
+                    if self.num_fresh {
+                        self.num_text.clear();
+                        self.num_fresh = false;
+                    } else {
+                        self.num_text.pop();
+                    }
+                    cx.notify();
+                    return;
+                }
+                _ => {
+                    if let Some(ch) = event.keystroke.key_char.as_ref() {
+                        if !ch.is_empty()
+                            && ch.chars().all(|c| c.is_ascii_digit())
+                            && self.num_text.len() < 4
+                        {
+                            if self.num_fresh {
+                                self.num_text.clear();
+                                self.num_fresh = false;
+                            }
+                            self.num_text.push_str(ch);
+                            cx.notify();
+                        }
+                    }
+                    return;
+                }
+            }
+        }
         let Some(key) = self.editing else {
             if event.keystroke.modifiers.control {
                 match event.keystroke.key.as_str() {
-                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" => {
-                        let index = event
-                            .keystroke
-                            .key
-                            .parse::<usize>()
-                            .unwrap_or(1)
-                            .saturating_sub(1);
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "0" => {
+                        // 1..9 pick the first nine visible tabs, 0 picks the last.
+                        let index = if event.keystroke.key == "0" {
+                            crate::app::Tab::ALL.len() - 1
+                        } else {
+                            event
+                                .keystroke
+                                .key
+                                .parse::<usize>()
+                                .unwrap_or(1)
+                                .saturating_sub(1)
+                        };
                         let visible: Vec<crate::app::Tab> = crate::app::Tab::ALL
                             .iter()
                             .copied()
@@ -402,6 +551,11 @@ impl Root {
                                 *tab != crate::app::Tab::Advanced || self.advanced
                             })
                             .collect();
+                        let index = if event.keystroke.key == "0" {
+                            visible.len().saturating_sub(1)
+                        } else {
+                            index
+                        };
                         if let Some(tab) = visible.get(index).copied() {
                             self.tab = tab;
                             cx.notify();

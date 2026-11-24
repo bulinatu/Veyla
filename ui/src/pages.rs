@@ -113,19 +113,11 @@ impl Root {
             }),
         );
 
-        let hero = div()
+        let hero = widgets::card()
             .flex()
             .flex_col()
             .gap(px(16.0))
             .p(px(24.0))
-            .rounded(px(20.0))
-            .border_1()
-            .border_color(rgba(0x8B5CF63D))
-            .bg(gpui::linear_gradient(
-                135.0,
-                gpui::linear_color_stop(rgba(0x2A1655FF), 0.0),
-                gpui::linear_color_stop(rgba(0x0B0B14FF), 1.0),
-            ))
             .child(
                 div()
                     .flex()
@@ -216,7 +208,7 @@ impl Root {
                 let mut row = div().flex().gap(px(8.0));
                 for &preset in pair {
                     row = row.child(
-                        div()
+                        widgets::card()
                             .id(SharedString::from(format!("preset-{}", preset.label())))
                             .flex()
                             .flex_col()
@@ -224,12 +216,8 @@ impl Root {
                             .flex_1()
                             .min_w(px(0.0))
                             .p(px(12.0))
-                            .rounded(px(12.0))
-                            .bg(rgba(0xFFFFFF08))
-                            .border_1()
-                            .border_color(rgba(0xFFFFFF12))
                             .cursor_pointer()
-                            .hover(|s| s.bg(rgba(0xFFFFFF12)).border_color(rgba(0x8B5CF666)))
+                            .hover(|s| s.bg(rgba(0xFFFFFF16)).border_color(rgba(0x8B5CF666)))
                             .on_click(cx.listener(move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
                                 this.preset(preset, cx);                            }))
                             .child(
@@ -784,7 +772,7 @@ impl Root {
             .into_any_element()
     }
 
-    pub(crate) fn page_neural(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn page_upscaling(&self, cx: &mut Context<Self>) -> AnyElement {
         let sr = group(
             "Super resolution",
             "Per-frame reconstruction",
@@ -823,6 +811,18 @@ impl Root {
             ],
         );
 
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(20.0))
+            .child(widgets::page_title(
+                "Upscaling",
+                "DLSS Super Resolution and DLAA",
+            ))
+            .child(sr)
+            .into_any_element()
+    }
+    pub(crate) fn page_frame_gen(&self, cx: &mut Context<Self>) -> AnyElement {
         let rife_backend = self.settings.s("ai.fg_backend", "none") == "rife";
         let dlss_backend = self.settings.s("ai.fg_backend", "none") == "dlss-fg";
         let mut fg_rows: Vec<AnyElement> = vec![
@@ -913,6 +913,18 @@ impl Root {
             fg_rows,
         );
 
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(20.0))
+            .child(widgets::page_title(
+                "Frame generation",
+                "Generated frames between the decoded ones",
+            ))
+            .child(fg)
+            .into_any_element()
+    }
+    pub(crate) fn page_neural(&self, cx: &mut Context<Self>) -> AnyElement {
         let runtime_text = if self.status.nr_runtime {
             if self.status.nr_ready {
                 format!("worker active - {:.1} ms", self.status.nr_ms)
@@ -951,7 +963,7 @@ impl Root {
             .child(self.toggle_row(
                 "ai.neural_render",
                 "Neural rendering",
-                "Enhances the frame before SR; adds about 10 ms",
+                "Run the network on every presented frame",
                 cx,
             ))
             .child(self.seg_int_row(
@@ -961,31 +973,46 @@ impl Root {
                 &[(0, "Default"), (1, "Natural"), (2, "Cinematic")],
                 cx,
             ))
-            .child(self.stepper_row(
+            .child(self.slider_row(
                 "ai.neural_intensity",
                 "Intensity",
                 "Mix of the enhanced frame",
-                0,
-                200,
-                10,
-                pct,
+                "%",
                 cx,
             ))
-            .child(self.seg_int_row(
+            .child(self.slider_row(
+                "ai.neural_tone",
+                "Local tone",
+                "How much the local tone curve is applied",
+                "%",
+                cx,
+            ))
+            .child(self.slider_row(
+                "ai.neural_structure",
+                "Local structure",
+                "Edge and texture emphasis",
+                "%",
+                cx,
+            ))
+            .child(self.slider_row(
+                "ai.neural_skin",
+                "Skin structure",
+                "Detail preserved on skin",
+                "%",
+                cx,
+            ))
+            .child(self.slider_row(
                 "ai.neural_passes",
                 "Passes",
                 "Cascade depth (Boost)",
-                &[(1, "1"), (2, "2"), (3, "3"), (4, "4")],
+                "",
                 cx,
             ))
-            .child(self.stepper_row(
+            .child(self.slider_row(
                 "ai.neural_scale",
                 "Work scale",
                 "Network resolution; lower is cheaper",
-                50,
-                100,
-                5,
-                pct,
+                "%",
                 cx,
             ))
             .child(self.toggle_row(
@@ -1000,8 +1027,7 @@ impl Root {
                 "Derive a soft mask from the frame",
                 cx,
             ))
-            .into_any_element();
-        let dlss5 = div()
+            .into_any_element();        let dlss5 = div()
             .flex()
             .flex_col()
             .gap(px(8.0))
@@ -1038,21 +1064,54 @@ impl Root {
                     ),
             );
 
+        let unlock = div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .p(px(16.0))
+            .rounded(px(14.0))
+            .bg(rgba(0xF8717112))
+            .border_1()
+            .border_color(rgba(0xF8717140))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .text_size(theme::tiny())
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(theme::RED))
+                            .child("USE AT YOUR OWN RISK"),
+                    )
+                    .child(div().flex_1())
+                    .child(self.toggle("ai.neural_unlock", cx)),
+            )
+            .child(
+                div()
+                    .text_size(theme::small())
+                    .text_color(theme::dim())
+                    .child(
+                        "Unlocks every neural slider and typed value up to a hard 9999 \
+                         ceiling. Anything above what the network can hold is accepted: it can \
+                         stutter, fail to initialise or exhaust GPU memory.",
+                    ),
+            );
+
         div()
             .flex()
             .flex_col()
             .gap(px(20.0))
             .child(widgets::page_title(
-                "Neural",
-                "Super resolution, frame generation and neural render",
+                "Neural rendering",
+                "DLSS 5 Neural Rendering - video mode",
             ))
-            .child(sr)
-            .child(fg)
             .child(neural)
             .child(dlss5)
+            .child(unlock)
             .into_any_element()
     }
-
     pub(crate) fn page_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
         let layout = group(
             "Layout",
@@ -1192,6 +1251,51 @@ impl Root {
             ],
         );
 
+        let system = group(
+            "System",
+            "Detected hardware",
+            vec![
+                widgets::kv(
+                    "GPU",
+                    if self.status.gpu.is_empty() {
+                        "Not detected".to_string()
+                    } else {
+                        self.status.gpu.clone()
+                    },
+                ),
+                widgets::kv(
+                    "VRAM",
+                    if self.status.vram_mb > 0 {
+                        format!("{} MB", self.status.vram_mb)
+                    } else {
+                        "\u{2014}".to_string()
+                    },
+                ),
+                widgets::kv("Display", self.monitor_label()),
+                widgets::kv(
+                    "DLSS",
+                    format!(
+                        "SR {} / Frame Gen {}",
+                        yes_no(self.status.dlss_sr_ready),
+                        yes_no(self.status.dlss_fg_ready)
+                    ),
+                ),
+                widgets::row(
+                    "Optimize for this PC",
+                    "Sets transport, output and the AI stages to what this machine can hold",
+                    widgets::button(
+                        "Optimize",
+                        Tone::Primary,
+                        cx.listener(
+                            |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                                this.start_optimize(cx);
+                            },
+                        ),
+                    ),
+                ),
+            ],
+        );
+
         let pacing = group(
             "Pacing",
             "Live measurements",
@@ -1277,8 +1381,9 @@ impl Root {
             .gap(px(20.0))
             .child(widgets::page_title(
                 "Advanced",
-                "Shell, measurements, diagnostics and reset",
+                "System, shell, measurements, diagnostics and reset",
             ))
+            .child(system)
             .child(shell)
             .child(pacing)
             .child(diagnostics)

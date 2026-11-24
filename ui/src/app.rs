@@ -19,18 +19,22 @@ pub enum Tab {
     Video,
     Audio,
     Pad,
+    Upscaling,
+    FrameGen,
     Neural,
     Overlay,
     Advanced,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 8] = [
+    pub const ALL: [Tab; 10] = [
         Tab::Home,
         Tab::Stream,
         Tab::Video,
         Tab::Audio,
         Tab::Pad,
+        Tab::Upscaling,
+        Tab::FrameGen,
         Tab::Neural,
         Tab::Overlay,
         Tab::Advanced,
@@ -43,6 +47,8 @@ impl Tab {
             Tab::Video => "Video",
             Tab::Audio => "Audio",
             Tab::Pad => "Controller",
+            Tab::Upscaling => "Upscaling",
+            Tab::FrameGen => "Frame Gen",
             Tab::Neural => "Neural",
             Tab::Overlay => "Overlay",
             Tab::Advanced => "Advanced",
@@ -76,6 +82,12 @@ pub struct Root {
     pub(crate) profiles_rev: u64,
     pub(crate) devices_tick: u8,
     pub(crate) settings_mtime: Option<std::time::SystemTime>,
+    pub(crate) num_edit: Option<&'static str>,
+    pub(crate) num_text: String,
+    pub(crate) num_fresh: bool,
+    pub(crate) overlay_tab: usize,
+    pub(crate) pending_optimize: bool,
+    pub(crate) optimize_ticks: u8,
     pub(crate) overlay_handle: Option<AnyWindowHandle>,
     pub(crate) settings_rev: u64,
     applied_rev: u64,
@@ -112,6 +124,11 @@ impl Root {
                     .timer(Duration::from_millis(120))
                     .await;
                 let result = this.update(cx, |this, cx| {
+                    // Slider drags only touch memory; write the file at the poll
+                    // rate so a drag does not produce one write per pixel.
+                    if this.settings.dirty && this.num_edit.is_none() {
+                        let _ = this.settings.save();
+                    }
                     let Some(engine) = this.engine.as_ref() else {
                         return;
                     };
@@ -149,6 +166,7 @@ impl Root {
                             this.apply_ticks -= 1;
                             if this.apply_ticks == 0 {
                                 this.applied_rev = this.settings_rev;
+                                let _ = this.settings.save();
                                 this.send("apply");
                             }
                         }
@@ -170,6 +188,24 @@ impl Root {
                     this.devices_rev = devices_rev;
                     let profiles_changed = profiles_rev != this.profiles_rev;
                     this.profiles_rev = profiles_rev;
+                    if this.pending_optimize {
+                        this.optimize_ticks = this.optimize_ticks.saturating_add(1);
+                        // Wait for the engine's first status snapshot: the DLSS
+                        // capability flags live there, and optimizing before they
+                        // arrive would disable AI on a capable machine.
+                        let hardware_known = online && rev > 0 && devices_rev > 0;
+                        if hardware_known && (devices_changed || this.optimize_ticks >= 12) {
+                            this.pending_optimize = false;
+                            // The capability flags live in this snapshot; the
+                            // status assignment below happens later in the loop.
+                            this.status = status.clone();
+                            this.engine_online = online;
+                            this.optimize_for_pc(cx);
+                        } else if this.optimize_ticks >= 60 {
+                            this.pending_optimize = false;
+                            this.toast("Optimize: the engine did not report hardware", true, cx);
+                        }
+                    }
                     if devices_changed || profiles_changed {
                         cx.notify();
                     }
@@ -187,6 +223,9 @@ impl Root {
                         if this.shell_minimized && !this.status.streaming {
                             this.shell_minimized = false;
                             crate::model::log_line("shell restore");
+                            // A new game session starts the control center on
+                            // its first tab again.
+                            crate::overlay::reset_overlay_tab();
                             restore_shell_window();
                         }
                         if came_online {
@@ -233,11 +272,25 @@ impl Root {
             "video" => Tab::Video,
             "audio" => Tab::Audio,
             "pad" => Tab::Pad,
+            "upscaling" => Tab::Upscaling,
+            "framegen" => Tab::FrameGen,
             "neural" => Tab::Neural,
             "overlay" => Tab::Overlay,
             "advanced" => Tab::Advanced,
             _ => Tab::Home,
         };
+        // First run on a new machine: probe the hardware once and pick a sane
+        // profile. The result is stored in `system.auto_optimized` so it never
+        // overrides the user again; the Advanced page has the on-demand button.
+        if !settings.b("system.auto_optimized", false) {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(700))
+                    .await;
+                let _ = this.update(cx, |this, cx| this.start_optimize(cx));
+            })
+            .detach();
+        }
         let settings_mtime = settings.file_mtime();
         Self {
             settings,
@@ -257,6 +310,12 @@ impl Root {
             profiles_rev: 0,
             devices_tick: 0,
             settings_mtime,
+            num_edit: None,
+            num_text: String::new(),
+            num_fresh: false,
+            overlay_tab: 0,
+            pending_optimize: false,
+            optimize_ticks: 0,
             overlay_handle: None,
             settings_rev: 0,
             applied_rev: 0,
@@ -326,6 +385,7 @@ impl Root {
             return;
         }
         self.send("disconnect");
+        crate::overlay::reset_overlay_tab();
         self.toast("Disconnecting", false, cx);
     }
 
@@ -334,6 +394,129 @@ impl Root {
             self.send("apply");
             self.toast("Settings applied", false, cx);
         }
+    }
+
+    /// Spawns the engine if needed and asks for a fresh device list. The poll
+    /// loop runs `optimize_for_pc` as soon as the devices arrive.
+    pub(crate) fn start_optimize(&mut self, cx: &mut Context<Self>) {
+        if self.engine.is_none() && !self.ensure_engine(cx) {
+            return;
+        }
+        self.send("devices");
+        self.pending_optimize = true;
+        self.optimize_ticks = 0;
+        self.toast("Detecting hardware...", false, cx);
+    }
+
+    /// Picks transport, output and AI stages from the actual machine. This is
+    /// the same routine for the first-run pass and the Advanced button, so both
+    /// end at the same configuration.
+    pub(crate) fn optimize_for_pc(&mut self, cx: &mut Context<Self>) {
+        let devices = self.devices();
+        let monitor = devices
+            .monitors
+            .iter()
+            .find(|monitor| monitor.primary)
+            .or_else(|| devices.monitors.first());
+        let (width, height, hz) = monitor
+            .map(|monitor| (monitor.width, monitor.height, monitor.hz))
+            .unwrap_or((1920, 1080, 60));
+        let gpu = if !self.status.gpu.is_empty() {
+            self.status.gpu.clone()
+        } else {
+            devices.gpus.first().cloned().unwrap_or_default()
+        };
+        let nvidia = gpu.to_lowercase().contains("nvidia");
+        let sr_ok = nvidia && self.status.dlss_sr_ready;
+        let fg_ok = nvidia && self.status.dlss_fg_ready;
+        let nr_ok = self.status.nr_runtime;
+        let hd_plus = height >= 1300;
+
+        let settings = &mut self.settings;
+        // The console caps at 1080p; 60 fps halves the input interval.
+        settings.set_str("streaming.input", "1080p");
+        settings.set_int("streaming.fps", 60);
+        // Buffer 0 measured 58 ms less frame age than the primed queue.
+        settings.set_int("streaming.frame_buffer", 0);
+        settings.set_int("streaming.bitrate_kbps", if hd_plus { 100000 } else { 60000 });
+        settings.set_str("streaming.decoder", "auto");
+        settings.set_str("streaming.codec", "hevc");
+        settings.set_bool("streaming.hdr", false);
+
+        let output = if height >= 2000 {
+            "2160p"
+        } else if hd_plus {
+            "1440p"
+        } else if height >= 900 {
+            "1080p"
+        } else {
+            "720p"
+        };
+        settings.set_str("video.output", output);
+        settings.set_int("video.render_target", 0);
+        settings.set_bool("video.vsync", true);
+        settings.set_bool("video.vrr", hz >= 100);
+        settings.set_bool("display.vsync", true);
+        settings.set_bool("display.vrr", hz >= 100);
+        settings.set_bool("display.fullscreen_on_play", true);
+        settings.set_str("display.refresh", "match");
+        settings.set_int("controller.poll_hz", 1000);
+        settings.set_int("audio.buffer_ms", 10);
+
+        if fg_ok {
+            settings.set_bool("ai.frame_generation", true);
+            settings.set_str("ai.fg_backend", "dlss-fg");
+            // 2x is the only cadence that stays clean at 60 fps on 240 Hz.
+            settings.set_int("ai.fg_multiplier", 2);
+            settings.set_bool("ai.super_resolution", sr_ok);
+            if sr_ok {
+                settings.set_str("ai.sr_model", "dlss");
+                if hd_plus {
+                    // SR 1440p fills the worker: NR must stay off there.
+                    settings.set_str("ai.sr_output", "1440p");
+                    settings.set_int("ai.sr_quality", 4);
+                    settings.set_bool("ai.neural_render", false);
+                } else {
+                    settings.set_str("ai.sr_output", "native");
+                    settings.set_int("ai.sr_quality", 5);
+                    settings.set_bool("ai.neural_render", nr_ok);
+                }
+            } else {
+                settings.set_bool("ai.super_resolution", false);
+                settings.set_bool("ai.neural_render", nr_ok);
+            }
+        } else if sr_ok {
+            settings.set_bool("ai.frame_generation", false);
+            settings.set_bool("ai.super_resolution", true);
+            settings.set_str("ai.sr_model", "dlss");
+            settings.set_str("ai.sr_output", "native");
+            settings.set_int("ai.sr_quality", 5);
+            settings.set_bool("ai.neural_render", nr_ok);
+        } else {
+            settings.set_bool("ai.frame_generation", false);
+            settings.set_bool("ai.super_resolution", false);
+            settings.set_bool("ai.neural_render", false);
+        }
+        settings.set_bool("system.auto_optimized", true);
+        self.persist();
+        self.send("apply");
+
+        let label = if gpu.is_empty() { "auto".to_string() } else { gpu };
+        let ai = if fg_ok {
+            "DLSS-G 2x"
+        } else if sr_ok {
+            "DLSS SR"
+        } else {
+            "no AI"
+        };
+        self.toast(
+            format!(
+                "Optimized: {} | {}x{} @ {} Hz | {}",
+                label, width, height, hz, ai
+            ),
+            false,
+            cx,
+        );
     }
 
     /// Opens the expanded control center as a second, topmost GPUI window on
@@ -643,6 +826,8 @@ impl Root {
             Tab::Video => self.page_video(cx),
             Tab::Audio => self.page_audio(cx),
             Tab::Pad => self.page_controller(cx),
+            Tab::Upscaling => self.page_upscaling(cx),
+            Tab::FrameGen => self.page_frame_gen(cx),
             Tab::Neural => self.page_neural(cx),
             Tab::Overlay => self.page_overlay(cx),
             Tab::Advanced => self.page_advanced(cx),

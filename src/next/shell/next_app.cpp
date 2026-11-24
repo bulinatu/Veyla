@@ -42,6 +42,23 @@ constexpr float kSidebarCollapsed = 68.0f;
 constexpr float kPad = 28.0f;
 NextApp* g_hook_app = nullptr;
 
+// One source of truth for the NR parameters: the standalone NR worker and the
+// NR stage inside the DLSS-G worker must see exactly the same values.
+brp::media::NvDlssnr::Options NeuralOptionsFrom(const AiSettings& ai) {
+    brp::media::NvDlssnr::Options options;
+    options.style = std::clamp(ai.neural_style, 0, 2);
+    options.intensity = std::clamp(ai.neural_intensity, 0, 9999) / 100.0f;
+    options.local_tone = std::clamp(ai.neural_tone, 0, 9999) / 100.0f;
+    options.local_structure = std::clamp(ai.neural_structure, 0, 9999) / 100.0f;
+    options.skin_structure = std::clamp(ai.neural_skin, 0, 9999) / 100.0f;
+    options.auto_mask = ai.neural_mask;
+    options.ui_correction = ai.neural_ui;
+    options.passes = std::clamp(ai.neural_passes, 1, 9999);
+    options.work_scale = std::clamp(ai.neural_scale, 1, 9999) / 100.0f;
+    options.inject_fg_proxy = false;
+    return options;
+}
+
 void HideNvidiaOverlay() {
     // The NVIDIA App overlay is a full-screen CEF window. It reappears when a
     // game-like window starts, so hide it while we own the stream surface.
@@ -49,7 +66,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"2.4.7";
+constexpr wchar_t kVersion[] = L"2.5.0";
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -951,7 +968,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  2.4.7", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  2.5.0", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -1065,7 +1082,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"BetterRemotePlay Next 2.4.7",
+        renderer_->Text(L"BetterRemotePlay Next 2.5.0",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -2210,7 +2227,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"BetterRemotePlay Next 2.4.7  |  stable release", L"STABLE", true);
+               L"BetterRemotePlay Next 2.5.0  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -2219,7 +2236,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"BetterRemotePlay Next", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 2.4.7  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 2.5.0  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -2359,12 +2376,22 @@ bool NextApp::Apply() {
     if (previous_ai.neural_render != settings_.ai.neural_render ||
         previous_ai.neural_style != settings_.ai.neural_style ||
         previous_ai.neural_intensity != settings_.ai.neural_intensity ||
+        previous_ai.neural_tone != settings_.ai.neural_tone ||
+        previous_ai.neural_structure != settings_.ai.neural_structure ||
+        previous_ai.neural_skin != settings_.ai.neural_skin ||
         previous_ai.neural_passes != settings_.ai.neural_passes ||
         previous_ai.neural_scale != settings_.ai.neural_scale ||
+        previous_ai.neural_unlock != settings_.ai.neural_unlock ||
         previous_ai.neural_ui != settings_.ai.neural_ui ||
         previous_ai.neural_mask != settings_.ai.neural_mask) {
+        // The standalone worker is rebuilt on the next frame; the worker that
+        // runs NR inside DLSS-G gets the new values live, so a slider move does
+        // not restart frame generation.
         StopNr();
         nr_failed_ = false;
+        if (dlss_fg_) {
+            dlss_fg_->SetNeuralOptions(NeuralOptionsFrom(settings_.ai));
+        }
     }
     if (scope == ApplyScope::StreamRestart && streaming_ && streaming_->Connected()) {
         stream_restart_pending_ = true;
@@ -3640,19 +3667,7 @@ bool NextApp::EnsureNr(int width, int height) {
         nr_failed_ = true;
         return false;
     }
-    brp::media::NvDlssnr::Options options;
-    options.style = std::clamp(settings_.ai.neural_style, 0, 2);
-    options.intensity = std::clamp(settings_.ai.neural_intensity, 0, 200) / 100.0f;
-    options.local_tone = 1.0f;
-    options.local_structure = 0.5f;
-    options.skin_structure = 0.75f;
-    options.auto_mask = settings_.ai.neural_mask;
-    options.ui_correction = settings_.ai.neural_ui;
-    options.passes = std::clamp(settings_.ai.neural_passes, 1, 4);
-    options.work_scale = std::clamp(settings_.ai.neural_scale, 50, 100) / 100.0f;
-    // The signed DLSS-G runtime stays in place; the SM86 proxy is only for
-    // multipliers above 2x, which is not the stable path here.
-    options.inject_fg_proxy = false;
+    brp::media::NvDlssnr::Options options = NeuralOptionsFrom(settings_.ai);
 
     dlssnr_ = std::make_unique<brp::media::NvDlssnr>();
     std::string detail;
@@ -4240,6 +4255,7 @@ bool NextApp::EnsureDlssFg(int width, int height) {
     }
     dlss_fg_ = std::make_unique<DlssFg>();
     dlss_fg_->SetNeuralInWorker(NeuralInWorkerWanted());
+    dlss_fg_->SetNeuralOptions(NeuralOptionsFrom(settings_.ai));
     std::string detail;
     if (!dlss_fg_->Start(system_.nr_dir, width, height, multiplier, detail)) {
         dlss_fg_.reset();

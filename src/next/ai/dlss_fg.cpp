@@ -65,9 +65,15 @@ bool DlssFg::Start(const std::wstring& runtime_dir, int width, int height, int m
 
     nr_ = std::make_unique<brp::media::NvDlssnr>();
     brp::media::NvDlssnr::Options options;
-    options.style = 2;
-    options.passes = 1;
-    options.work_scale = 1.0f;
+    {
+        std::lock_guard<std::mutex> lock(options_mutex_);
+        options = neural_options_;
+        neural_dirty_ = false;
+    }
+    options.style = std::clamp(options.style, 0, 2);
+    if (options.passes <= 0) {
+        options.passes = 1;
+    }
     // 2x is the clean cadence; keep the official NVIDIA runtime. The SM86
     // proxy is only needed to ask for more than 2x.
     options.inject_fg_proxy =
@@ -202,6 +208,24 @@ void DlssFg::WorkerMain() {
         }
         if (!nr_) {
             return;
+        }
+        {
+            brp::media::NvDlssnr::Options options;
+            bool reconfigure = false;
+            {
+                std::lock_guard<std::mutex> lock(options_mutex_);
+                if (neural_dirty_) {
+                    options = neural_options_;
+                    neural_dirty_ = false;
+                    reconfigure = true;
+                }
+            }
+            if (reconfigure) {
+                std::string detail;
+                if (!nr_->Reconfigure(options, detail)) {
+                    std::fprintf(stderr, "[next] NR reconfigure: %s\n", detail.c_str());
+                }
+            }
         }
         nr_->SetFrameGeneration(multiplier_.load());
         std::vector<std::uint8_t> ignored;

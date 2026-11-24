@@ -11,7 +11,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $release = Join-Path $root "build\Release"
 $distRoot = Join-Path $root "dist"
 $dest = Join-Path $distRoot "BetterRemotePlay"
-$version = "2.4.7"
+$version = "2.5.0"
 
 function Require-File([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -132,10 +132,30 @@ if (Test-Path $rife) {
 }
 # --- readme -----------------------------------------------------------------
 $readme = @"
-BetterRemotePlay 2.1 - standalone build
+BetterRemotePlay 2.5 - standalone build
 =======================================
 
 Run brpnext.exe. No installer, no console window, no background service.
+
+What changed in 2.5
+-------------------
+- The shell now picks a profile from the actual machine: first launch optimizes
+  once, and Advanced > System > Optimize runs it again on demand. It reads the
+  GPU, the DLSS runtimes and the primary display, then sets the source (1080p60,
+  buffer 0), the output, VSync/VRR and the AI stages (DLSS-G 2x + SR, or DLSS SR
+  alone) accordingly.
+- Upscaling, Frame Gen and Neural Rendering have separate pages; the Neural tab
+  exposes every parameter of the NGX feature-18 worker (style, intensity, local
+  tone, local structure, skin structure, passes, work scale, UI correction, auto
+  mask) as sliders with editable numbers. Passes go up to 20 normally.
+- "Use at your own risk" at the bottom of the Neural page lifts every neural
+  limit to a hard 9999 (sliders and typed values).
+- The in-game control center has a Neural tab and remembers the tab you were on
+  while the game session lasts (it resets on disconnect).
+- All cards on all pages share one frost look: translucent over the aurora, a
+  hairline border and a soft gaussian rim.
+- Latency work: buffer 0, 60 fps, DLSS-G 2x; the DLSS SR "Max" preset now
+  actually initializes (it used to disable SR silently).
 
 What changed in 2.0
 -------------------
@@ -156,7 +176,7 @@ What changed in 2.0
   (Apply still forces it immediately).
 - Saved profiles from the engine store are listed on Home and in the control
   center, with Apply and Save current.
-- Ctrl+1..8 switches tabs, Ctrl+Enter connects.
+- Ctrl+1..9 and Ctrl+0 switch tabs, Ctrl+Enter connects.
 - The stream window and all media work stay in the C++ engine. The shell
   minimizes itself while you play so it cannot add composition jitter.
 

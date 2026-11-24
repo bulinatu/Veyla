@@ -72,8 +72,12 @@ struct AiSettings {
     bool neural_render = false;
     int neural_style = 2;        // 0 default, 1 natural, 2 cinematic
     int neural_intensity = 100;  // 0..200 %
-    int neural_passes = 1;       // 1..4 cascade depth
-    int neural_scale = 100;      // 50..100 % network work size
+    int neural_tone = 100;       // 0..200 %, local tone
+    int neural_structure = 50;   // 0..200 %, local structure
+    int neural_skin = 75;        // 0..200 %, skin structure
+    int neural_passes = 1;       // 1..20 cascade depth
+    int neural_scale = 100;      // 50..100 % network work size (up to 9999 unlocked)
+    bool neural_unlock = false;  // lift every neural limit to 9999 (use at your own risk)
     bool neural_ui = false;
     bool neural_mask = false;
 };

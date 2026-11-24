@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include "media/nv_dlssnr.h"
+
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -11,10 +13,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
-namespace brp::media {
-class NvDlssnr;
-}
 
 namespace brp::next {
 
@@ -49,6 +47,13 @@ public:
     // after generation in its pipeline. false: the worker presents raw frames.
     void SetNeuralInWorker(bool on) { neural_in_worker_ = on; }
     bool neural_in_worker() const { return neural_in_worker_; }
+    // The NR parameters the worker uses when it runs NR. Applied on Start (and
+    // by SetMultiplier reconfigurations for the rest of the settings).
+    void SetNeuralOptions(const brp::media::NvDlssnr::Options& options) {
+        std::lock_guard<std::mutex> lock(options_mutex_);
+        neural_options_ = options;
+        neural_dirty_ = true;
+    }
 
     // Moves the frame into the one-slot queue; the newest frame wins. Moving
     // avoids a second 8 MB copy on the presentation thread.
@@ -103,6 +108,9 @@ private:
     std::atomic<bool> failed_{false};
     std::atomic<int> multiplier_{2};
     bool neural_in_worker_ = false;
+    brp::media::NvDlssnr::Options neural_options_{};
+    std::mutex options_mutex_;
+    bool neural_dirty_ = false;
     std::atomic<unsigned long long> dropped_{0};
     bool ready_ = false;
     bool proxy_runtime_ = false;

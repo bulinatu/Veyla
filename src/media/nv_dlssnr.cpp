@@ -29,7 +29,9 @@ constexpr uint32_t kOutBytesInShm = 0xFFFFFFFF;  // OUT1 byte_count sentinel
 // RNSZ flags word (the same 4-byte slot the VIDEO header uses for frame_count).
 constexpr uint32_t kResizeFlagNrSmall = 0x1;  // network at work size, upscaled back
 constexpr uint32_t kResizePassesShift = 2;
-constexpr int kMaxPasses = 4;
+// No practical ceiling in the client: the worker decides what it can run.
+// The UI exposes 1..20 normally and up to 9999 behind "unlock limits".
+constexpr int kMaxPasses = 9999;
 
 #pragma pack(push, 1)
 struct VideoHeader {

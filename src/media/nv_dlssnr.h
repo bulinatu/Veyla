@@ -29,7 +29,7 @@ public:
         float skin_structure = 0.75f;
         bool auto_mask = false;
         bool ui_correction = false;
-        int passes = 1;             // 1..4, the cascade depth (Boost)
+        int passes = 1;             // cascade depth (Boost); the UI caps at 20, unlocked 9999
         float work_scale = 1.0f;    // 1.0 = full-res network, < 1 = Boost
         // Inject the user-supplied DLSSG-SM86 proxy. It raises the multiplier
         // ceiling above 2x, but replaces the official runtime. Callers that

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 
 namespace brp::next {
@@ -225,8 +226,12 @@ FlatMap SettingsToFlat(const AppSettings& s) {
     FlatJson::PutBool(f, "ai.neural_render", s.ai.neural_render);
     FlatJson::PutInt(f, "ai.neural_style", s.ai.neural_style);
     FlatJson::PutInt(f, "ai.neural_intensity", s.ai.neural_intensity);
+    FlatJson::PutInt(f, "ai.neural_tone", s.ai.neural_tone);
+    FlatJson::PutInt(f, "ai.neural_structure", s.ai.neural_structure);
+    FlatJson::PutInt(f, "ai.neural_skin", s.ai.neural_skin);
     FlatJson::PutInt(f, "ai.neural_passes", s.ai.neural_passes);
     FlatJson::PutInt(f, "ai.neural_scale", s.ai.neural_scale);
+    FlatJson::PutBool(f, "ai.neural_unlock", s.ai.neural_unlock);
     FlatJson::PutBool(f, "ai.neural_ui", s.ai.neural_ui);
     FlatJson::PutBool(f, "ai.neural_mask", s.ai.neural_mask);
 
@@ -357,12 +362,21 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
         FlatJson::GetBool(f, "ai.neural_render", s.ai.neural_render);
     s.ai.neural_style =
         ClampInt(FlatJson::GetInt(f, "ai.neural_style", s.ai.neural_style), 0, 2);
+    // Neural limits are only enforced by the UI: the file may carry anything up
+    // to the hard 9999 ceiling the "unlock limits" switch exposes.
     s.ai.neural_intensity = ClampInt(
-        FlatJson::GetInt(f, "ai.neural_intensity", s.ai.neural_intensity), 0, 200);
+        FlatJson::GetInt(f, "ai.neural_intensity", s.ai.neural_intensity), 0, 9999);
+    s.ai.neural_tone =
+        ClampInt(FlatJson::GetInt(f, "ai.neural_tone", s.ai.neural_tone), 0, 9999);
+    s.ai.neural_structure = ClampInt(
+        FlatJson::GetInt(f, "ai.neural_structure", s.ai.neural_structure), 0, 9999);
+    s.ai.neural_skin = ClampInt(
+        FlatJson::GetInt(f, "ai.neural_skin", s.ai.neural_skin), 0, 9999);
     s.ai.neural_passes =
-        ClampInt(FlatJson::GetInt(f, "ai.neural_passes", s.ai.neural_passes), 1, 4);
+        ClampInt(FlatJson::GetInt(f, "ai.neural_passes", s.ai.neural_passes), 1, 9999);
     s.ai.neural_scale =
-        ClampInt(FlatJson::GetInt(f, "ai.neural_scale", s.ai.neural_scale), 50, 100);
+        ClampInt(FlatJson::GetInt(f, "ai.neural_scale", s.ai.neural_scale), 1, 9999);
+    s.ai.neural_unlock = FlatJson::GetBool(f, "ai.neural_unlock", s.ai.neural_unlock);
     s.ai.neural_ui = FlatJson::GetBool(f, "ai.neural_ui", s.ai.neural_ui);
     s.ai.neural_mask =
         FlatJson::GetBool(f, "ai.neural_mask", s.ai.neural_mask);
@@ -554,13 +568,29 @@ Status SettingsStore::Save(const AppSettings& settings) {
     if (file_.has_parent_path()) {
         std::filesystem::create_directories(file_.parent_path(), ec);
     }
+    // Merge instead of replace: the shell owns keys this store does not know
+    // (ui.*, system.*), and a rewrite used to drop them whenever the engine
+    // recreated the file.
+    FlatMap merged;
+    {
+        std::ifstream existing(file_, std::ios::binary);
+        if (existing) {
+            const std::string text((std::istreambuf_iterator<char>(existing)),
+                                   std::istreambuf_iterator<char>());
+            std::string error;
+            FlatJson::Parse(text, merged, error);
+        }
+    }
+    for (const auto& [key, value] : SettingsToFlat(settings)) {
+        merged[key] = value;
+    }
     const std::filesystem::path temp = file_.string() + ".tmp";
     {
         std::ofstream file(temp, std::ios::binary | std::ios::trunc);
         if (!file) {
             return Status::Error("cannot write " + temp.string());
         }
-        file << FlatJson::Serialize(SettingsToFlat(settings));
+        file << FlatJson::Serialize(merged);
         if (!file) {
             return Status::Error("write failed: " + temp.string());
         }

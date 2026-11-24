@@ -5,6 +5,7 @@
 //! stream focused is forwarded by the engine as `E overlay-toggle`.
 
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use gpui::{
@@ -16,7 +17,17 @@ use crate::bridge::{Devices, Engine, ProfileInfo, Shared};
 use crate::model::{Settings, Status};
 use crate::{theme, widgets};
 
-const TABS: [&str; 8] = ["Info", "SR", "FG", "Video", "Stream", "Audio", "Pad", "Profile"];
+const TABS: [&str; 9] = [
+    "Info", "SR", "FG", "Neural", "Video", "Stream", "Audio", "Pad", "Profile",
+];
+
+// The focused tab survives closing and reopening the control center for the
+// current game session; a disconnect resets it.
+static OVERLAY_TAB: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) fn reset_overlay_tab() {
+    OVERLAY_TAB.store(0, Ordering::Relaxed);
+}
 
 pub struct OverlayView {
     engine: Engine,
@@ -27,6 +38,10 @@ pub struct OverlayView {
     profiles: Vec<ProfileInfo>,
     profiles_rev: u64,
     tab: usize,
+    num_edit: Option<&'static str>,
+    num_text: String,
+    num_fresh: bool,
+    dirty_at: Option<std::time::Instant>,
     pub(crate) focus: FocusHandle,
     last_rev: u64,
     last_devices_rev: u64,
@@ -54,7 +69,11 @@ impl OverlayView {
             devices,
             profiles,
             profiles_rev,
-            tab: 0,
+            tab: OVERLAY_TAB.load(Ordering::Relaxed).min(TABS.len() - 1),
+            num_edit: None,
+            num_text: String::new(),
+            num_fresh: false,
+            dirty_at: None,
             focus,
             last_rev: 0,
             last_devices_rev: devices_rev,
@@ -64,6 +83,13 @@ impl OverlayView {
                 .timer(Duration::from_millis(150))
                 .await;
             let result = this.update(cx, |this, cx| {
+                if let Some(at) = this.dirty_at {
+                    if at.elapsed() >= Duration::from_millis(220) {
+                        this.dirty_at = None;
+                        let _ = this.settings.save();
+                        this.engine.send("apply");
+                    }
+                }
                 let (rev, status, devices_rev, devices, profiles_rev, profiles) = {
                     let state = match this.shared.lock() {
                         Ok(state) => state,
@@ -207,6 +233,150 @@ impl OverlayView {
             )
             .child(plus);
         widgets::row(label, hint, control.into_any_element())
+    }
+
+    fn neural_range(&self, key: &str) -> (i64, i64) {
+        let unlock = self.settings.b("ai.neural_unlock", false);
+        match key {
+            "ai.neural_intensity" | "ai.neural_tone" | "ai.neural_structure"
+            | "ai.neural_skin" => {
+                if unlock {
+                    (0, 9999)
+                } else {
+                    (0, 200)
+                }
+            }
+            "ai.neural_passes" => {
+                if unlock {
+                    (1, 9999)
+                } else {
+                    (1, 20)
+                }
+            }
+            "ai.neural_scale" => {
+                if unlock {
+                    (1, 9999)
+                } else {
+                    (50, 100)
+                }
+            }
+            _ => (0, 9999),
+        }
+    }
+
+    fn slider_row(
+        &self,
+        key: &'static str,
+        label: &'static str,
+        suffix: &'static str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (min, max) = self.neural_range(key);
+        let value = self.settings.i(key, min).clamp(min, max);
+        let editing = self.num_edit == Some(key);
+        let shown = if editing {
+            format!("{}\u{258F}", self.num_text)
+        } else {
+            format!("{value}{suffix}")
+        };
+        let weak = cx.entity().downgrade();
+        let slider = widgets::slider(key, value, min, max, 168.0, move |next, _window, cx| {
+            let _ = weak.update(cx, |this, cx| {
+                this.settings.set_int(key, next);
+                this.dirty_at = Some(std::time::Instant::now());
+                cx.notify();
+            });
+        });
+        let number = div()
+            .id(SharedString::from(format!("ov-num-{key}")))
+            .flex()
+            .items_center()
+            .justify_center()
+            .min_w(px(64.0))
+            .h(px(26.0))
+            .px(px(7.0))
+            .rounded(px(7.0))
+            .bg(if editing {
+                rgba(0x8B5CF626)
+            } else {
+                rgba(0x00000040)
+            })
+            .border_1()
+            .border_color(if editing {
+                rgba(0x8B5CF6CC)
+            } else {
+                rgba(0xFFFFFF10)
+            })
+            .font_family(theme::MONO_FONT)
+            .text_size(theme::mono())
+            .text_color(theme::text())
+            .cursor_text()
+            .on_click(
+                cx.listener(move |this, _: &gpui::ClickEvent, window, cx| {
+                    this.num_edit = Some(key);
+                    this.num_text = this.settings.i(key, min).to_string();
+                    this.num_fresh = true;
+                    window.focus(&this.focus);
+                    cx.notify();
+                }),
+            )
+            .child(shown);
+        let control = div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(slider)
+            .child(number)
+            .into_any_element();
+        widgets::row(
+            label,
+            "Drag, or click the value to type and press Enter",
+            control,
+        )
+    }
+
+    fn unlock_box(&self, cx: &mut Context<Self>) -> AnyElement {
+        let on = self.settings.b("ai.neural_unlock", false);
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .p(px(12.0))
+            .rounded(px(10.0))
+            .bg(rgba(0xF8717112))
+            .border_1()
+            .border_color(rgba(0xF8717140))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(theme::tiny())
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(theme::RED))
+                            .child("USE AT YOUR OWN RISK"),
+                    )
+                    .child(div().flex_1())
+                    .child(widgets::switch(
+                        "ov-ai.neural_unlock",
+                        on,
+                        cx.listener(
+                            |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                                this.settings.flip("ai.neural_unlock");
+                                this.commit(cx);
+                            },
+                        ),
+                    )),
+            )
+            .child(
+                div()
+                    .text_size(theme::tiny())
+                    .text_color(theme::dim())
+                    .child("Lifts every neural limit to a hard 9999."),
+            )
+            .into_any_element()
     }
 
     fn pill(
@@ -425,6 +595,40 @@ impl OverlayView {
                 ));
             }
             3 => {
+                rows.push(self.toggle_row(
+                    "ai.neural_render",
+                    "Neural rendering",
+                    "Run the network on every frame",
+                    cx,
+                ));
+                rows.push(self.seg_row(
+                    "ai.neural_style",
+                    "Style",
+                    "Network character",
+                    &[(0, "Default"), (1, "Natural"), (2, "Cinematic")],
+                    cx,
+                ));
+                rows.push(self.slider_row("ai.neural_intensity", "Intensity", "%", cx));
+                rows.push(self.slider_row("ai.neural_tone", "Local tone", "%", cx));
+                rows.push(self.slider_row("ai.neural_structure", "Local structure", "%", cx));
+                rows.push(self.slider_row("ai.neural_skin", "Skin structure", "%", cx));
+                rows.push(self.slider_row("ai.neural_passes", "Passes", "", cx));
+                rows.push(self.slider_row("ai.neural_scale", "Work scale", "%", cx));
+                rows.push(self.toggle_row(
+                    "ai.neural_ui",
+                    "UI correction",
+                    "Protect HUD edges",
+                    cx,
+                ));
+                rows.push(self.toggle_row(
+                    "ai.neural_mask",
+                    "Auto mask",
+                    "Soft mask from the frame",
+                    cx,
+                ));
+                rows.push(self.unlock_box(cx));
+            }
+            4 => {
                 rows.push(self.stepper_row(
                     "overlay.scale",
                     "Panel scale",
@@ -459,7 +663,7 @@ impl OverlayView {
                     cx,
                 ));
             }
-            4 => {
+            5 => {
                 rows.push(self.seg_row(
                     "streaming.fps",
                     "Source fps",
@@ -485,7 +689,7 @@ impl OverlayView {
                     cx,
                 ));
             }
-            5 => {
+            6 => {
                 rows.push(self.stepper_row(
                     "audio.volume",
                     "Volume",
@@ -511,7 +715,7 @@ impl OverlayView {
                     },
                 ));
             }
-            6 => {
+            7 => {
                 rows.push(self.stepper_row(
                     "controller.rumble_strength",
                     "Rumble",
@@ -626,6 +830,7 @@ impl Render for OverlayView {
                     .on_click(cx.listener(
                         move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
                             this.tab = index;
+                            OVERLAY_TAB.store(index, Ordering::Relaxed);
                             cx.notify();
                         },
                     ))
@@ -647,6 +852,51 @@ impl Render for OverlayView {
             .track_focus(&self.focus)
             .on_key_down(cx.listener(
                 |this, event: &gpui::KeyDownEvent, window, cx| {
+                    if let Some(key) = this.num_edit {
+                        match event.keystroke.key.as_str() {
+                            "escape" => {
+                                this.num_edit = None;
+                                cx.notify();
+                                return;
+                            }
+                            "enter" => {
+                                if let Ok(parsed) = this.num_text.trim().parse::<i64>() {
+                                    let (min, max) = this.neural_range(key);
+                                    this.settings.set_int(key, parsed.clamp(min, max));
+                                    this.commit(cx);
+                                }
+                                this.num_edit = None;
+                                cx.notify();
+                                return;
+                            }
+                            "backspace" => {
+                                if this.num_fresh {
+                                    this.num_text.clear();
+                                    this.num_fresh = false;
+                                } else {
+                                    this.num_text.pop();
+                                }
+                                cx.notify();
+                                return;
+                            }
+                            _ => {
+                                if let Some(ch) = event.keystroke.key_char.as_ref() {
+                                    if !ch.is_empty()
+                                        && ch.chars().all(|c| c.is_ascii_digit())
+                                        && this.num_text.len() < 4
+                                    {
+                                        if this.num_fresh {
+                                            this.num_text.clear();
+                                            this.num_fresh = false;
+                                        }
+                                        this.num_text.push_str(ch);
+                                        cx.notify();
+                                    }
+                                }
+                                return;
+                            }
+                        }
+                    }
                     if event.keystroke.key == "escape" || event.keystroke.key == "f10" {
                         this.close(window, cx);
                     }
