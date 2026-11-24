@@ -1420,3 +1420,29 @@ stopped presenting them as if they did something.
 - brpnext.exe 1C2C38F829C72F446F1F166063BAE3D8604EA85ED2C1BC445F8D6D8CAF9D056A
 - brpnext-engine.exe D69F5E2C45158EA8F0AC0A306D4E92FAA1B758A3B17BD9F8AD3F36B51D296E4D
 - Patch verified: version=2.4.7, 0 markers, files_differ=0. Shell subsystem 2 (GUI). Smoke: shell alive after 6 s.
+## 2.5.0 - shell: system optimization, split AI pages, neural panel, overlay tabs
+
+- System optimizer: first launch reads GPU/VRAM/DLSS runtimes + primary display
+  and writes a profile (1080p60, buffer 0, output by panel, DLSS-G 2x + SR, NR
+  only where it fits); `system.auto_optimized` keeps it one-time. Advanced >
+  System has the on-demand button and the detected hardware. Waits for the
+  engine status before deciding (otherwise it saw false capabilities).
+- Neural Rendering has its own page; Upscaling and Frame Gen are separate.
+  Every NGX feature-18 parameter is exposed as a slider with an editable number
+  (click the value, type, Enter). Passes 1..20 normally; a red "USE AT YOUR OWN
+  RISK" switch lifts every neural limit to a hard 9999.
+- Control center: Neural tab, and the focused tab persists across close/open
+  for the current session, reset on disconnect.
+- One card look on every page: translucent frost over the aurora, hairline
+  border, soft gaussian rim.
+- DLSS SR "Max" now initialises (NGX PerfQuality 4 was retired and silently
+  disabled SR); the engine's settings writer merges instead of replacing, so
+  shell-only keys survive.
+- Standalone: `dist/BetterRemotePlay-2.5.0-standalone.zip` (922.1 MB)
+  SHA256 `9CD7E88B69F8A048EA8545201F28172CE1D2221DCB29946F4E7C7C92C732CCF6`
+- Update **2.4.7 -> 2.5.0**: `dist/BetterRemotePlay-2.4.7-to-2.5.0-update.exe` (5.3 MB)
+  SHA256 `C7C5A31E1D242321C4A204915F5FB9F7920F8D21ECD27A813B7C710B963F6F0B`
+- `brpnext.exe` `02E8C105447B5D9459E71F4B1C5425019C98CED8B80BE12C6501718BFF35350F`
+- `brpnext-engine.exe` `97FA01B15A7ABC665AB28D63959074935CD7E79AD4C5825D2D992539E6894701`
+- Patch verified: `version=2.5.0`, 0 markers, patched files identical to dist.
+- Details: docs/36-shell-2.5.md and docs/35-latency-audit.md.
