@@ -820,7 +820,7 @@ void NextApp::Frame() {
                              "sr cpu %.2f ms  |  dec %.2f/%.2f ms  |  "
                              "net jitter %.2f ms loss %.2f%% drops %d  |  queue %d  trim %+.3f%%  |  "
                              "wait max %.1f ms  frame max %.1f ms  |  age avg %.1f max %.1f ms  |  "
-                             "fg %.1f ms %dx drops %llu out %.0f fps\n",
+                             "nr %.1f ms  |  fg %.1f ms %dx drops %llu out %.0f fps\n",
                              loop_intervals_.Percentile(0.50), loop_p99_,
                              loop_intervals_.Max(), cadence_p50_, cadence_p99_,
                              present_refresh_hz_, present_misses_rate_, display_rate_,
@@ -830,7 +830,7 @@ void NextApp::Frame() {
                              probe.jitter_ms, probe.loss_percent, probe.decoder_drops,
                              playout_depth_, playout_trim_ * 100.0, probe_wait_ms_,
                              probe_frame_ms_, probe_age_n_ > 0 ? probe_age_sum_ / probe_age_n_ : 0.0,
-                             probe_age_max_,
+                             probe_age_max_, nr_ms_,
                              dlss_fg_ ? dlss_fg_->process_ms() : 0.0,
                              dlss_fg_ ? dlss_fg_->actual_multiplier() : 0,
                              dlss_fg_ ? dlss_fg_->dropped() : 0,
@@ -3714,6 +3714,9 @@ void NextApp::StopNr() {
 }
 
 bool NextApp::NeuralInWorkerWanted() const {
+    if (std::getenv("BRP_NR_MAIN")) {
+        return false;  // diagnostic: force the standalone NR path
+    }
     return settings_.ai.neural_render && settings_.ai.frame_generation &&
            settings_.ai.fg_backend == AiBackend::DlssFg;
 }

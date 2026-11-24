@@ -941,14 +941,14 @@ impl Root {
             .child(self.slider_row(
                 "ai.neural_passes",
                 "Passes",
-                "Cascade depth (Boost)",
+                "Cascade depth; above 1 needs Boost (work scale below 100%) and multiplies the cost",
                 "",
                 cx,
             ))
             .child(self.slider_row(
                 "ai.neural_scale",
                 "Work scale",
-                "Network resolution; lower is cheaper",
+                "75% runs the network at 1080p on a 1440p frame and keeps frame generation at 120 fps",
                 "%",
                 cx,
             ))

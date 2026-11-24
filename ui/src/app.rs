@@ -468,14 +468,25 @@ impl Root {
             if sr_ok {
                 settings.set_str("ai.sr_model", "dlss");
                 if hd_plus {
-                    // SR 1440p fills the worker: NR must stay off there.
+                    // SR 1440p fills the worker. NR still fits, but only with
+                    // Boost (work scale 75 % = a 1080p network) and one pass:
+                    // measured 15.6-17.3 ms per input and a steady 120 fps out.
+                    // Full-size NR at 1440p costs 16-19 ms and drops inputs.
                     settings.set_str("ai.sr_output", "1440p");
                     settings.set_int("ai.sr_quality", 4);
-                    settings.set_bool("ai.neural_render", false);
+                    settings.set_bool("ai.neural_render", nr_ok);
+                    if nr_ok {
+                        settings.set_int("ai.neural_scale", 75);
+                        settings.set_int("ai.neural_passes", 1);
+                    }
                 } else {
                     settings.set_str("ai.sr_output", "native");
                     settings.set_int("ai.sr_quality", 5);
                     settings.set_bool("ai.neural_render", nr_ok);
+                    if nr_ok {
+                        settings.set_int("ai.neural_scale", 100);
+                        settings.set_int("ai.neural_passes", 1);
+                    }
                 }
             } else {
                 settings.set_bool("ai.super_resolution", false);

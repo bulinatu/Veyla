@@ -22,8 +22,8 @@ refresh). What it writes:
 | `video.vsync` / `vrr`, `display.*` | on / on for 100 Hz+, match refresh, fullscreen on play |
 | `controller.poll_hz`, `audio.buffer_ms` | 1000 / 10 |
 | DLSS-G | on, 2x (only when the FG runtime is present) |
-| DLSS SR | on; 1440p Max without NR on a 1440p+ panel, otherwise native DLAA |
-| NR | on only where it fits (DLAA), off at 1440p SR |
+| DLSS SR | on; 1440p Max on a 1440p+ panel, otherwise native DLAA |
+| NR | on; at 1440p SR it uses Boost (work scale 75 %) and one pass |
 
 The optimizer waits for `online && status rev > 0 && devices rev > 0` before it
 runs; without that gate it saw the default (all-false) capability flags and
@@ -47,6 +47,16 @@ The first keystroke replaces the prefilled value (select-all behaviour), Escape
 cancels. The same settings apply to NR when it runs inside the DLSS-G worker:
 that worker now receives the parameters on Start and reconfigures them live
 through the RNSZ command instead of being restarted for every change.
+
+### Boost and passes
+
+The worker's multi-pass cascade only engages with Boost (work scale below
+100 %). At 100 % the worker logs `Boost is off: the network runs on the whole
+frame` and executes a single pass, so passes above 1 have no effect there.
+At 1440p the tested combination is **work scale 75 % + 1 pass**: the network
+runs at 1080p on the 1440p frame, the worker takes 15.6-17.3 ms per input and
+holds 119.7-120.1 fps out. Raising passes multiplies the cost (75 % + 4 passes
+measured 33 ms), and 100 % at 1440p is 16-19 ms with dropped inputs.
 
 ### Unlock limits
 
@@ -104,7 +114,8 @@ Measured on the user's PS5 through the harness: 1920x1080p60 HEVC at
 | DLSS SR DLAA | submit 0.55 ms, output view used directly (no readback) | clean |
 | DLSS SR 1440p Max | submit 0.5-0.9 ms, 5.5-8.7 ms per frame incl. worker readback | GPU-bound, correct |
 | DLSS-G 1440p, NR off | worker 6.9-7.7 ms, worker log: `displayed 119.8 FPS (real + generated, 2x)` | exactly 2 refreshes per frame on 240 Hz |
-| DLSS-G 1440p, NR on | worker 16-19 ms, ~50 dropped inputs/s | why NR stays off at 1440p |
+| DLSS-G 1440p, NR on (scale 100 %) | worker 16-19 ms, ~50 dropped inputs/s | full-size NR does not fit 60 fps |
+| DLSS-G 1440p, NR on (Boost 75 %, 1 pass) | worker 15.6-17.3 ms, log: `displayed 119.7-120.1 FPS (2x)` | NR at 1440p works; this is the shipped default |
 | Presentation | scanout 239.8 Hz, present misses 0 steady, cadence p50 16.6 ms | clean |
 | Startup | one-time NGX SR init 5.2 s + worker start; frames queued meanwhile are trimmed | known cost, no steady-state effect |
 
