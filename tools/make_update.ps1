@@ -9,10 +9,14 @@
 # Run it inside the app folder; it extracts itself over brp.exe.
 
 param(
-    [Parameter(Mandatory = $true)][string]$BaselineZip,
+    [string]$BaselineZip = "",
     [string]$NewFolder = "dist\BetterRemotePlay",
     [Parameter(Mandatory = $true)][string]$Version,
-    [string]$Out = ""
+    [string]$Out = "",
+    # Use an unpacked folder instead of expanding BaselineZip. The files are
+    # hardlinked, so a full-size tree costs no disk; only the entries that differ
+    # from NewFolder end up in the payload.
+    [string]$BaselineFolder = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,9 +27,14 @@ function Resolve-UnderRoot([string]$path) {
     return (Join-Path $root $path)
 }
 
-$baseline = Resolve-UnderRoot $BaselineZip
+$baseline = if ([string]::IsNullOrWhiteSpace($BaselineZip)) { "" } else { Resolve-UnderRoot $BaselineZip }
 $new = Resolve-UnderRoot $NewFolder
-if (-not (Test-Path -LiteralPath $baseline)) { throw "Baseline zip not found: $baseline" }
+if ($baseline -eq "" -and [string]::IsNullOrWhiteSpace($BaselineFolder)) {
+    throw "Pass either -BaselineZip or -BaselineFolder"
+}
+if ($baseline -ne "" -and -not (Test-Path -LiteralPath $baseline)) {
+    throw "Baseline zip not found: $baseline"
+}
 if (-not (Test-Path -LiteralPath $new)) { throw "New folder not found: $new" }
 
 $updateExe = Join-Path $root "build\Release\brp_update.exe"
@@ -39,10 +48,20 @@ $stage = Join-Path $temp "stage"
 New-Item -ItemType Directory -Path $baseDir, $stage -Force | Out-Null
 
 try {
-    Expand-Archive -LiteralPath $baseline -DestinationPath $baseDir -Force
-    $inner = @(Get-ChildItem -LiteralPath $baseDir)
-    if ($inner.Count -eq 1 -and $inner[0].PSIsContainer) {
-        $baseDir = $inner[0].FullName
+    if (-not [string]::IsNullOrWhiteSpace($BaselineFolder)) {
+        $src = (Resolve-Path -LiteralPath (Resolve-UnderRoot $BaselineFolder)).Path
+        Get-ChildItem -LiteralPath $src -Recurse -File | ForEach-Object {
+            $rel = $_.FullName.Substring($src.Length).TrimStart('\')
+            $dst = Join-Path $baseDir $rel
+            New-Item -ItemType Directory -Path (Split-Path -Parent $dst) -Force | Out-Null
+            cmd /c mklink /H "$dst" "$($_.FullName)" | Out-Null
+        }
+    } else {
+        Expand-Archive -LiteralPath $baseline -DestinationPath $baseDir -Force
+        $inner = @(Get-ChildItem -LiteralPath $baseDir)
+        if ($inner.Count -eq 1 -and $inner[0].PSIsContainer) {
+            $baseDir = $inner[0].FullName
+        }
     }
 
     $skip = @("update.exe", "payload", "delete.txt", "_delete.txt", "version.txt",

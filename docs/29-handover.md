@@ -1451,3 +1451,12 @@ stopped presenting them as if they did something.
 - `brpnext-engine.exe` `B30E695F84DDB521F5FE1C3924200959423A6855461F1862814194B5DF870E74`
 - Patch verified: `version=2.5.0`, 0 markers, RIFE files removed, files identical to dist.
 - Details: docs/36-shell-2.5.md and docs/35-latency-audit.md.
+
+- Hotfix for earlier 2.5.0 builds (live neural tuning + worker NR): 
+  `dist/BetterRemotePlay-2.5.0-hotfix-update.exe` (5.34 MB)
+  SHA256 `C199BA3BADFA9D8E73CE88F1AAA8D57DEDB0165A604062079A1BA371088F52AB`
+  Built with `tools/make_update.ps1 -BaselineFolder` against a hardlinked
+  copy of the current tree with placeholder app files and the old RIFE folder:
+  it replaces brpnext.exe, brpnext-engine.exe, brpnext-classic.exe and
+  README.txt and removes the four RIFE files. Verified on a simulated earlier
+  2.5.0 (version 2.5.0, 0 markers, RIFE removed, files identical to dist).
