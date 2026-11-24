@@ -303,18 +303,30 @@ impl Root {
         let profiles_group = widgets::card_pad()
             .flex()
             .flex_col()
-            .gap(px(10.0))
-            .child(widgets::section("Saved profiles", "Engine configuration"))
-            .child(saved_rows)
-            .child(widgets::button(
-                "Save current",
-                Tone::Ghost,
-                cx.listener(
-                    |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
-                        this.save_profile(cx);
-                    },
-                ),
-            ));
+            .gap(px(12.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(14.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(widgets::section("Saved profiles", "Engine configuration")),
+                    )
+                    .child(widgets::button(
+                        "Save current",
+                        Tone::Ghost,
+                        cx.listener(
+                            |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                                this.save_profile(cx);
+                            },
+                        ),
+                    )),
+            )
+            .child(saved_rows);
 
         let live_group = group(
             "Live",
@@ -412,11 +424,11 @@ impl Root {
                             .flex()
                             .flex_col()
                             .gap(px(16.0))
-                            .child(profile_group)
-                            .child(profiles_group),
+                            .child(profile_group),
                     ),
             )
             .child(stats)
+            .child(profiles_group)
             .child(live_group)
             .child(footer)
             .into_any_element()
