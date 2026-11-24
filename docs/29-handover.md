@@ -1438,11 +1438,16 @@ stopped presenting them as if they did something.
 - DLSS SR "Max" now initialises (NGX PerfQuality 4 was retired and silently
   disabled SR); the engine's settings writer merges instead of replacing, so
   shell-only keys survive.
-- Standalone: `dist/BetterRemotePlay-2.5.0-standalone.zip` (922.1 MB)
-  SHA256 `9CD7E88B69F8A048EA8545201F28172CE1D2221DCB29946F4E7C7C92C732CCF6`
+- Pipeline audit fixes: the Video > Monitor selection now actually places the
+  stream on that display, VSync reaches the presenter, and the dead controls
+  (input resolution, HDR transport, colour space, VRR, refresh, bit depth,
+  colour format) were removed.
+- Standalone (no RIFE): `dist/BetterRemotePlay-2.5.0-standalone-norife.zip`
+  (865.5 MB)
+  SHA256 `703F40983A9378A5F0DC3BE4CA5CE1DF4916B9B95AFDD4FFB8106BC5ECEA1B7B`
 - Update **2.4.7 -> 2.5.0**: `dist/BetterRemotePlay-2.4.7-to-2.5.0-update.exe` (5.3 MB)
-  SHA256 `C7C5A31E1D242321C4A204915F5FB9F7920F8D21ECD27A813B7C710B963F6F0B`
-- `brpnext.exe` `02E8C105447B5D9459E71F4B1C5425019C98CED8B80BE12C6501718BFF35350F`
-- `brpnext-engine.exe` `97FA01B15A7ABC665AB28D63959074935CD7E79AD4C5825D2D992539E6894701`
-- Patch verified: `version=2.5.0`, 0 markers, patched files identical to dist.
+  SHA256 `1CA74BD08673EDDF3CCA4D321F05C0D92C253AC537A97EFB9A87F366D327164F`
+- `brpnext.exe` `A8559EBCA8DCCA04131525300594E7260BD58CE4F1A95110512EF1226ABFEABB`
+- `brpnext-engine.exe` `2025FB8CE5E58FF807BB0BDF83E6C5FD43E8E5A0A36D543BB780403948BCF072`
+- Patch verified: `version=2.5.0`, 0 markers, RIFE files removed, files identical to dist.
 - Details: docs/36-shell-2.5.md and docs/35-latency-audit.md.

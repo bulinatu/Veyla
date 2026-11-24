@@ -89,3 +89,27 @@ saved-profiles card now match them.
 `brp_update.exe` patch path. Version bumped in `CMakeLists.txt`,
 `next_app.cpp` (four strings), `ui/Cargo.toml`, `ui/Cargo.lock` and the
 packaging script.
+
+## Final pipeline audit (2.5.0, live)
+
+Measured on the user's PS5 through the harness: 1920x1080p60 HEVC at
+100 Mbit/s, buffer 0, output 1440p, 240 Hz panel.
+
+| Stage | Measurement | Verdict |
+|---|---|---|
+| Console profile | always 1920x1080p60 HEVC (Remote Play's only profile) | input-resolution setting was dead; row removed |
+| Network | loss 0.00 %, jitter 16.67-16.70 ms, 0 decoder drops steady | clean |
+| Decode (d3d11va) | 8.2-8.5 ms = 1.4 transfer + 0.85 resize + 5.8 swscale | expected; bicubic is the fastest filter here |
+| Frame queue / age | queue 0, age 0-1.4 ms (buffer 0) | lowest-latency path |
+| DLSS SR DLAA | submit 0.55 ms, output view used directly (no readback) | clean |
+| DLSS SR 1440p Max | submit 0.5-0.9 ms, 5.5-8.7 ms per frame incl. worker readback | GPU-bound, correct |
+| DLSS-G 1440p, NR off | worker 6.9-7.7 ms, worker log: `displayed 119.8 FPS (real + generated, 2x)` | exactly 2 refreshes per frame on 240 Hz |
+| DLSS-G 1440p, NR on | worker 16-19 ms, ~50 dropped inputs/s | why NR stays off at 1440p |
+| Presentation | scanout 239.8 Hz, present misses 0 steady, cadence p50 16.6 ms | clean |
+| Startup | one-time NGX SR init 5.2 s + worker start; frames queued meanwhile are trimmed | known cost, no steady-state effect |
+
+Wired while auditing: `display.monitor` now places the stream on the chosen
+display (it used to follow the shell's monitor), and `video.vsync` now reaches
+the presenter (`Present(1)` vs `Present(0, ALLOW_TEARING)`). Removed as dead:
+input resolution, HDR transport, colour space, VRR, refresh rate, bit depth and
+colour format.

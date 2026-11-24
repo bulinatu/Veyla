@@ -462,19 +462,6 @@ impl Root {
             "Streaming",
             "Transport and decode",
             vec![
-                self.seg_row(
-                    "streaming.input",
-                    "Input resolution",
-                    "Requested console capture size",
-                    &[
-                        ("Native", "native"),
-                        ("720p", "720p"),
-                        ("1080p", "1080p"),
-                        ("1440p", "1440p"),
-                        ("4K", "2160p"),
-                    ],
-                    cx,
-                ),
                 self.seg_int_row(
                     "streaming.fps",
                     "Frame rate",
@@ -497,12 +484,6 @@ impl Root {
                     "Frame buffer",
                     "0 is lowest latency; 1-2 is smoother",
                     &[(0, "0"), (1, "1"), (2, "2"), (3, "3")],
-                    cx,
-                ),
-                self.toggle_row(
-                    "streaming.hdr",
-                    "HDR transport",
-                    "Requires an HDR display and console support",
                     cx,
                 ),
             ],
@@ -576,18 +557,6 @@ impl Root {
                     cx,
                 ),
                 self.toggle_row("video.vsync", "VSync", "Lock presentation to the display", cx),
-                self.toggle_row("video.vrr", "VRR", "Let the display follow the stream", cx),
-                self.seg_row(
-                    "video.color_space",
-                    "Colour space",
-                    "Auto follows the decoded signal",
-                    &[
-                        ("Auto", "auto"),
-                        ("BT.709", "bt709"),
-                        ("BT.2020", "bt2020"),
-                    ],
-                    cx,
-                ),
                 self.stepper_row(
                     "video.sharpening",
                     "Sharpening",
@@ -615,38 +584,6 @@ impl Root {
                             this.open_picker(crate::app::PickerKind::Monitor, cx);
                         }),
                     ),
-                ),
-                self.seg_row(
-                    "display.refresh",
-                    "Refresh rate",
-                    "Match follows the current display mode",
-                    &[
-                        ("Match", "match"),
-                        ("60", "60"),
-                        ("120", "120"),
-                        ("144", "144"),
-                        ("240", "240"),
-                    ],
-                    cx,
-                ),
-                self.seg_int_row(
-                    "display.bit_depth",
-                    "Bit depth",
-                    "10-bit for HDR",
-                    &[(8, "8-bit"), (10, "10-bit"), (12, "12-bit")],
-                    cx,
-                ),
-                self.seg_row(
-                    "display.output_format",
-                    "Colour format",
-                    "Auto negotiates chroma",
-                    &[
-                        ("Auto", "auto"),
-                        ("RGB", "rgb"),
-                        ("4:4:4", "444"),
-                        ("4:2:2", "422"),
-                    ],
-                    cx,
                 ),
                 self.toggle_row(
                     "display.fullscreen_on_play",

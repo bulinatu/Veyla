@@ -615,8 +615,10 @@ bool NextApp::EnsureStreamSurface() {
         config.output_height = stream_window_->height();
         config.source_width = 1920;
         config.source_height = 1080;
-        config.vsync = false;
-        config.allow_tearing = true;
+        // VSync is the UI switch; tearing is only requested when VSync is off,
+        // which is the low-latency path for a non frame-generated stream.
+        config.vsync = settings_.video.vsync;
+        config.allow_tearing = !settings_.video.vsync;
         config.hdr = false;
         if (!presenter->Init(stream_window_->hwnd(), config)) {
             Toast(L"Cannot create the stream presenter", true);
@@ -628,17 +630,30 @@ bool NextApp::EnsureStreamSurface() {
         ApplyEnhance();
     }
 
+    // The stream opens on the display chosen in Video > Display (index clamped
+    // to the enumerated list), not on whatever monitor the shell happens to be.
+    RECT target{};
+    bool have_target = false;
+    if (settings_.display.monitor >= 0 &&
+        settings_.display.monitor < static_cast<int>(system_.displays.size())) {
+        target = system_.displays[static_cast<std::size_t>(settings_.display.monitor)].bounds;
+        have_target = target.right > target.left && target.bottom > target.top;
+    }
     MONITORINFO monitor{};
     monitor.cbSize = sizeof(monitor);
-    if (!::GetMonitorInfoW(::MonitorFromWindow(window_->hwnd(), MONITOR_DEFAULTTONEAREST),
+    if (!have_target &&
+        !::GetMonitorInfoW(::MonitorFromWindow(window_->hwnd(), MONITOR_DEFAULTTONEAREST),
                            &monitor)) {
         return false;
     }
+    if (!have_target) {
+        target = monitor.rcMonitor;
+    }
     if (settings_.display.fullscreen_on_play) {
-        const int width = monitor.rcMonitor.right - monitor.rcMonitor.left;
-        const int height = monitor.rcMonitor.bottom - monitor.rcMonitor.top;
-        ::SetWindowPos(stream_window_->hwnd(), nullptr, monitor.rcMonitor.left,
-                       monitor.rcMonitor.top, width, height,
+        const int width = target.right - target.left;
+        const int height = target.bottom - target.top;
+        ::SetWindowPos(stream_window_->hwnd(), nullptr, target.left,
+                       target.top, width, height,
                        SWP_NOZORDER | SWP_NOACTIVATE);
         if (!stream_window_->fullscreen()) {
             stream_window_->EnterFullscreen();
@@ -648,12 +663,15 @@ bool NextApp::EnsureStreamSurface() {
         if (stream_window_->fullscreen()) {
             stream_window_->ExitFullscreen();
         }
-        const int work_w = monitor.rcWork.right - monitor.rcWork.left;
-        const int work_h = monitor.rcWork.bottom - monitor.rcWork.top;
+        MONITORINFO work{};
+        work.cbSize = sizeof(work);
+        ::GetMonitorInfoW(::MonitorFromRect(&target, MONITOR_DEFAULTTONEAREST), &work);
+        const int work_w = work.rcWork.right - work.rcWork.left;
+        const int work_h = work.rcWork.bottom - work.rcWork.top;
         const int width = std::min(1600, work_w);
         const int height = std::min(900, work_h);
-        const int x = monitor.rcWork.left + (work_w - width) / 2;
-        const int y = monitor.rcWork.top + (work_h - height) / 2;
+        const int x = work.rcWork.left + (work_w - width) / 2;
+        const int y = work.rcWork.top + (work_h - height) / 2;
         ::SetWindowPos(stream_window_->hwnd(), HWND_TOP, x, y, width, height,
                        SWP_SHOWWINDOW);
         stream_window_->Show();
@@ -852,7 +870,7 @@ void NextApp::Render() {
             return;
         }
         // Video-only surface: no Direct2D pass, no UI composition.
-        ActivePresenter()->PresentNow(true);
+        ActivePresenter()->PresentNow(settings_.video.vsync);
         if (content_changed_) {
             content_changed_ = false;
             const unsigned refresh = ActivePresenter()->present_refresh_count();

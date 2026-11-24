@@ -2,7 +2,9 @@
 # The user profile is never copied: session.json lives in %APPDATA%, not here.
 
 param(
-    [switch]$NoZip
+    [switch]$NoZip,
+    # Leave the optional RIFE TensorRT engine out of this package.
+    [switch]$WithoutRife
 )
 
 $ErrorActionPreference = "Stop"
@@ -118,7 +120,7 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- optional RIFE engine (TensorRT, built for one GPU architecture) --------
 $rife = Join-Path $release "rife"
-if (Test-Path $rife) {
+if (-not $WithoutRife -and (Test-Path $rife)) {
     # Only the portable pieces: engine, model and the CUDA runtime. The
     # downloaded zip, the extracted SDK and runtime.txt stay on this machine.
     $rifeDest = Join-Path $dest "rife"
@@ -263,10 +265,13 @@ Credits
 GPUI by Zed Industries (Apache-2.0). Inter and JetBrains Mono under the SIL
 Open Font License.
 "@
+if ($WithoutRife) {
+    $readme += "`nRIFE`n----`nThis package does not include the optional RIFE TensorRT engine.`nDLSS Frame Generation and everything else work as described.`n"
+}
 Set-Content -LiteralPath (Join-Path $dest "README.txt") -Value $readme -Encoding UTF8
-
 # --- zip --------------------------------------------------------------------
-$zip = Join-Path $distRoot "BetterRemotePlay-$version-standalone.zip"
+$suffix = if ($WithoutRife) { "-norife" } else { "" }
+$zip = Join-Path $distRoot "BetterRemotePlay-$version-standalone$suffix.zip"
 if (-not $NoZip) {
     if (Test-Path $zip) {
         Remove-Item -LiteralPath $zip -Force

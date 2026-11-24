@@ -455,11 +455,7 @@ impl Root {
         settings.set_str("video.output", output);
         settings.set_int("video.render_target", 0);
         settings.set_bool("video.vsync", true);
-        settings.set_bool("video.vrr", hz >= 100);
-        settings.set_bool("display.vsync", true);
-        settings.set_bool("display.vrr", hz >= 100);
         settings.set_bool("display.fullscreen_on_play", true);
-        settings.set_str("display.refresh", "match");
         settings.set_int("controller.poll_hz", 1000);
         settings.set_int("audio.buffer_ms", 10);
 
