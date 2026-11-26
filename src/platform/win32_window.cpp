@@ -63,6 +63,9 @@ bool Win32Window::Create(const wchar_t* title, int width, int height) {
     wc.hInstance = instance;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.lpszClassName = kClassName;
+    wc.hIcon = static_cast<HICON>(::LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, 0, 0,
+                                               LR_DEFAULTSIZE | LR_SHARED));
+    wc.hIconSm = wc.hIcon;
     if (!RegisterClassExW(&wc) && ::GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
         return false;
     }

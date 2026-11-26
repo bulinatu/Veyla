@@ -352,6 +352,9 @@ if (MSVC)
     target_compile_options(brp_next_streaming PRIVATE /W4 /permissive- /utf-8)
 endif()
 # --- BetterRemotePlay Next shell (Stage 3) -----------------------------------
+set(BRP_APP_ICON "${CMAKE_SOURCE_DIR}/assets/app.ico")
+configure_file(src/next/shell/app.rc.in "${CMAKE_CURRENT_BINARY_DIR}/app.rc" @ONLY)
+
 set(BRP_NEXT_SHELL_SOURCES
     src/next/shell/main_next.cpp
     src/next/shell/next_app.cpp
@@ -362,6 +365,7 @@ set(BRP_NEXT_SHELL_SOURCES
     src/next/ui/theme.cpp
     src/next/platform/system_info.cpp
     src/next/overlay/overlay_window.cpp
+    "${CMAKE_CURRENT_BINARY_DIR}/app.rc"
 )
 add_executable(brpnext ${BRP_NEXT_SHELL_SOURCES})
 target_link_libraries(brpnext PRIVATE brp_next_core brp_next_streaming brp_ui brp_media brp_rife comdlg32 shell32 winmm ws2_32)

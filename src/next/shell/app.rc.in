@@ -1,0 +1,5 @@
+#include <windows.h>
+
+// Embedded application icon. CMake substitutes an absolute path so the
+// resource compiler does not depend on its working directory.
+1 ICON "@BRP_APP_ICON@"

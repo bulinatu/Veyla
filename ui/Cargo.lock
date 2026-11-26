@@ -655,6 +655,7 @@ dependencies = [
 name = "brpnext-ui"
 version = "2.5.0"
 dependencies = [
+ "embed-resource",
  "gpui",
  "serde",
  "serde_json",

@@ -70,6 +70,10 @@ if (-not (Test-Path $fonts)) {
 Copy-Item -Path (Join-Path $fonts "*") -Destination (Join-Path $dest "fonts") `
     -Recurse -Force
 
+# The executables embed this icon (resource id 1); a loose copy lets a user
+# point a manual shortcut at it as well.
+Copy-Required (Join-Path $root "assets\app.ico") (Join-Path $dest "app.ico")
+
 # --- NeuralScreen NR + DLSS FG worker --------------------------------------
 $native = Join-Path $root "third_party\neuralscreen\native"
 $nrNative = Join-Path $dest "nr\native"
