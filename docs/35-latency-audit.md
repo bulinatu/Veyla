@@ -191,3 +191,39 @@ The worker itself is still fed RGBA over shared memory. A fully GPU NR/FG path
 would need a texture-input protocol in `nr/native/nvngx.dll` (or in-process
 NGX); the worker's existing WGC capture mode is not a latency win because it
 adds a window-capture frame before the neural pass.
+
+## Round 4: SR/FG timing audit (after the GPU path)
+
+Two real costs were found and fixed:
+
+1. **NR off still built a three-pass cascade.** `NeuralOptionsFrom()` sent the
+   saved `neural_passes` even when Neural Render was disabled. The worker
+   logged `NR cascade: asked=3, effective=1` and its `Process` took **113-120
+   ms**, dropping inputs. Forcing one pass when NR is off brings the same
+   1080p FG 2x case to **7.2 ms**.
+2. **SR 1440p Quality paid a CPU downscale.** The 1920x1080 console frame was
+   downscaled to 1706x960 before DLSS, costing 3-4 ms. When the requested
+   render size is within 75 % of the source, the decoded frame is now fed
+   directly (1920x1080 -> 2560x1440, 75 %). SR-only `sr cpu` dropped from
+   **3.61 ms to 0.77 ms**; the SR texture is still handed to the presenter as
+   an SRV with no readback.
+
+Measured with 1080p60 in / 1440p out:
+
+| Path | SR submit | SR readback / CPU | Worker | Added frame hold |
+|---|---|---|---|---|
+| SR only, FG off | 0.77 ms | **0** (SRV direct) | - | 0 |
+| FG 2x, 60 fps, NR off | 0.52 ms | 7.2 ms (1440p RGBA) | 7.2 ms | 1 output frame (~8.3 ms) |
+| FG 4x, 30 fps, NR off | 0.58 ms | ~7 ms | ~10 ms | 3 output frames (~25 ms) |
+| FG 4x, 30 fps, NR 3 passes / 100 % | 6.6 ms | ~7 ms | 13.6 ms | 3 output frames + NR |
+| AI off | - | - | - | **0.4 ms decode, 0.2 ms age** |
+
+The SR-only path is effectively free. With FG on, the 1440p RGBA readback is
+the SR cost (the worker protocol needs system memory), and the multiplier is
+the larger term: 2x holds the real frame for one output interval, 4x for three.
+**60 fps + 2x is the low-latency way to reach 120 Hz**; 30 fps + 4x reaches the
+same rate with ~17 ms more hold. NR at 100 % adds a full-frame pass on top; the
+75 % Boost / one pass setting is the one that fits.
+
+Reflex markers do not change any of these numbers (they only wrap the parent
+presenter; with DLSS-G the worker owns its swapchain).

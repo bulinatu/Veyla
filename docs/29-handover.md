@@ -1474,11 +1474,11 @@ stopped presenting them as if they did something.
   that removes RIFE no longer leaves `rife\` or the markers behind.
 - New artifacts:
   - `dist/BetterRemotePlay-2.5.0-standalone-norife.zip` SHA256
-    `F8382A8A1D2B3CBA8F877A404B553B038193557396EE5818EB7EB2ADAED11466`
+    `3D0D75E89892DB0032DDB774E4D6A962DDCC795CD43696ED4AA7CDBBCC9545AE`
   - `dist/BetterRemotePlay-2.5.0-hotfix-update.exe` (48.85 MB) SHA256
-    `9A4F1D74AEC08176E41E96BB3B252E677D8FF9D4DAC2C184AD3119494D6EB6D9`
-- `brpnext.exe` `883B2E30488B3FD3EE67ED3AE1D43219A88FAB14AAC7A8B262EDCC43171FDED7`
-- `brpnext-engine.exe` `9910CC11168987E45B2B7F5B4AEC0A50F868DDA9C6E67E2326D9F8AE8B84F739`
+    `D4E5C546D1210D4A5BB6C5C6246EC1F784AAA71CD6A129E94090B63251FF72C5`
+- `brpnext.exe` `9982A30CDAA2BC07814C735B60A2CBF6D6BE09022A26DBD7221462DC0C4D9B10`
+- `brpnext-engine.exe` `AEF4750868A1ABA26BB3E4FBF9A24C55B5DB5B6513246D72FA6390F7C81E67E7`
 - `nvngx_dlss.dll` `858CCFF96360C3098DB9264CD6F13D04A027E09B6CE7AD5BBC297570E824B4F2`
   (310.9.16, DLSS 4.5)
 - `app.ico` `0D25A89AB2C9E0EF50F38B642B5EB60BB791FE3654E4024E7D712A80A62224D2`
@@ -1556,3 +1556,19 @@ stopped presenting them as if they did something.
 - Window resize: tab row and window controls are non-shrinking; minimum
   1040x700 enforced. Checked at the minimum size with all three buttons
   visible.
+
+## 2.5.0 - SR/FG timing fixes
+
+- **NR off still built a three-pass cascade** in the DLSS-G worker:
+  `NeuralOptionsFrom()` forwarded the saved passes even when NR was disabled.
+  The worker took 113-120 ms and dropped inputs; forcing one pass when NR is
+  off brings the 60 fps/2x case to 7.2 ms.
+- **SR 1440p Quality paid a CPU downscale**: the 1080p frame was resized to
+  1706x960 before DLSS. When the requested render size is within 75 % of the
+  source, the decoded frame is fed directly; SR-only `sr cpu` went from
+  3.61 ms to 0.77 ms.
+- SR-only is now an SRV hand-off with no readback. SR->FG still needs one
+  1440p RGBA readback (~7 ms) for the worker protocol.
+- FG holds the real frame for `multiplier - 1` output intervals: 2x = one,
+  4x = three. 60 fps + 2x is the low-latency 120 Hz path; 30 fps + 4x is
+  ~17 ms later. The multiplier hint now states this.

@@ -802,9 +802,9 @@ impl Root {
                 "ai.fg_multiplier",
                 "Multiplier",
                 if self.status.dlss_fg_multi {
-                    "5x/6x forced via the SM86 proxy; RTX 50 is native, older RTX may stutter"
+                    "2x holds 1 frame, 4x/6x hold 3/5; 60 fps + 2x is lowest. 5x/6x: RTX 50 MFG"
                 } else {
-                    "5x/6x forced; proxy files missing, this install may fail above 2x"
+                    "2x holds 1 frame, 4x/6x hold 3/5; 60 fps + 2x is lowest. 5x/6x forced"
                 },
                 &[
                     (2, "2x"),

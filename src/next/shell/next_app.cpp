@@ -56,8 +56,9 @@ brp::media::NvDlssnr::Options NeuralOptionsFrom(const AiSettings& ai) {
     options.skin_structure = std::clamp(ai.neural_skin, 0, 9999) / 100.0f;
     options.auto_mask = ai.neural_mask;
     options.ui_correction = ai.neural_ui;
-    options.passes = std::clamp(ai.neural_passes, 1, 9999);
-    options.work_scale = std::clamp(ai.neural_scale, 1, 9999) / 100.0f;
+    options.passes = std::clamp(ai.neural_render ? ai.neural_passes : 1, 1, 9999);
+    options.work_scale =
+        std::clamp(ai.neural_render ? ai.neural_scale : 100, 1, 9999) / 100.0f;
     options.inject_fg_proxy = false;
     return options;
 }
@@ -4351,6 +4352,14 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
         in_h = std::max(2, (out_h * pct / 100) / 2 * 2);
         in_w = std::min(in_w, input_width);
         in_h = std::min(in_h, input_height);
+        // The console frame is 1920x1080. When the requested render size is
+        // within 75 % of it, feed the decoded frame directly instead of
+        // spending 3-4 ms on a CPU downscale: DLSS uses the explicit feature
+        // sizes, not the percentage label, to decide the ratio.
+        if (in_w * 4 >= input_width * 3 && in_h * 4 >= input_height * 3) {
+            in_w = input_width;
+            in_h = input_height;
+        }
     }
     if (!dlss_sr_) {
         dlss_sr_ = std::make_unique<brp::media::NvDlssSr>();

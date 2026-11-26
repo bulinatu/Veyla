@@ -246,6 +246,19 @@ there to cover generated frames, and the worker does not do that today. The
 setting is therefore a no-op for the FG-presented path, not a hidden one.
 
 
+## Timing notes (SR / FG)
+
+- SR with FG off is an SRV hand-off; measured `sr submit 0.77 ms`, no readback
+  and 0.2 ms frame age.
+- SR feeds DLSS-G through one 1440p RGBA readback (~7 ms). Feeding the decoded
+  1920x1080 frame directly (no CPU downscale) is used when the requested render
+  size is close; that removed 3-4 ms from SR-only at Quality.
+- FG holds the real frame for `multiplier - 1` output intervals: one at 2x,
+  three at 4x. 60 fps + 2x is the low-latency 120 Hz path; 30 fps + 4x is
+  smoother-looking but ~17 ms later.
+- With NR off, the worker now builds one pass instead of the saved three
+  (`113-120 ms` -> `7.2 ms` in the 60 fps/2x test).
+
 ## Multi Frame Generation 5x/6x
 
 The multiplier selector offers 2x-6x on every RTX card. 3x-6x load the bundled

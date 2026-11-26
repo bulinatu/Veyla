@@ -589,7 +589,7 @@ impl OverlayView {
                 rows.push(self.stepper_row(
                     "ai.fg_multiplier",
                     "Multiplier",
-                    "5x/6x forced via the SM86 proxy; older RTX may stutter",
+                    "2x = 1 held frame, 4x/6x = 3/5; 60 fps + 2x is lowest",
                     2,
                     6,
                     1,
