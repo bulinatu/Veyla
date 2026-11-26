@@ -1474,11 +1474,11 @@ stopped presenting them as if they did something.
   that removes RIFE no longer leaves `rife\` or the markers behind.
 - New artifacts:
   - `dist/BetterRemotePlay-2.5.0-standalone-norife.zip` SHA256
-    `3D0D75E89892DB0032DDB774E4D6A962DDCC795CD43696ED4AA7CDBBCC9545AE`
+    `EAFFD6A2398C019CA6F65645E0B485656B352355ECA2F3F955F7058FDAC07705`
   - `dist/BetterRemotePlay-2.5.0-hotfix-update.exe` (48.85 MB) SHA256
-    `D4E5C546D1210D4A5BB6C5C6246EC1F784AAA71CD6A129E94090B63251FF72C5`
+    `A0D2767B166C1BAD329FCC45E09554F8BD9A8A4256B1CD2B106F4469B90F85DE`
 - `brpnext.exe` `9982A30CDAA2BC07814C735B60A2CBF6D6BE09022A26DBD7221462DC0C4D9B10`
-- `brpnext-engine.exe` `AEF4750868A1ABA26BB3E4FBF9A24C55B5DB5B6513246D72FA6390F7C81E67E7`
+- `brpnext-engine.exe` `BD90D1D070743B5D00740CDE5A0098A4A4B0745EF9E20E2569AAFB55753109F2`
 - `nvngx_dlss.dll` `858CCFF96360C3098DB9264CD6F13D04A027E09B6CE7AD5BBC297570E824B4F2`
   (310.9.16, DLSS 4.5)
 - `app.ico` `0D25A89AB2C9E0EF50F38B642B5EB60BB791FE3654E4024E7D712A80A62224D2`
@@ -1572,3 +1572,5 @@ stopped presenting them as if they did something.
 - FG holds the real frame for `multiplier - 1` output intervals: 2x = one,
   4x = three. 60 fps + 2x is the low-latency 120 Hz path; 30 fps + 4x is
   ~17 ms later. The multiplier hint now states this.
+- In FG mode the standalone NR probe is zeroed; the live neural time is the
+  worker's `fg` field (NR + generation together).

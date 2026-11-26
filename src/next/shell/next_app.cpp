@@ -3872,7 +3872,10 @@ bool NextApp::NeuralInWorkerWanted() const {
 
 void NextApp::EnhanceNeural(media::DecodedFrame& frame) {
     if (dlss_fg_ && dlss_fg_->ready() && dlss_fg_->neural_in_worker()) {
-        // The DLSS-G worker runs NR on the frames it presents.
+        // NR runs inside the DLSS-G worker; the standalone probe is stale and
+        // must not be shown as the live NR time. The worker's `fg` field is
+        // the combined NR + frame-generation process time.
+        nr_ms_ = 0.0;
         return;
     }
     if (!settings_.ai.neural_render || nr_failed_ || frame.rgba.empty() || frame.pq) {
