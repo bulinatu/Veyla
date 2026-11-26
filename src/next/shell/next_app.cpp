@@ -921,7 +921,7 @@ void NextApp::Frame() {
                 std::fprintf(stderr,
                              "[next] loop p50 %.2f p99 %.2f max %.2f  |  cadence p50 %.1f "
                              "p99 %.1f  |  scanout %.1f Hz  |  present misses %llu  |  "
-                             "shown %d  |  holds 7:%u 8:%u 9:%u 10:%u 16:%u  |  sr submit %.2f ms  |  "
+                             "shown %d  |  content %.0f fps  |  holds 7:%u 8:%u 9:%u 10:%u 16:%u  |  sr submit %.2f ms  |  "
                              "sr cpu %.2f ms  |  dec %.2f/%.2f ms  |  "
                              "net jitter %.2f ms loss %.2f%% drops %d  |  queue %d  trim %+.3f%%  |  "
                              "wait max %.1f ms  frame max %.1f ms  |  age avg %.1f max %.1f ms  |  "
@@ -929,6 +929,7 @@ void NextApp::Frame() {
                              loop_intervals_.Percentile(0.50), loop_p99_,
                              loop_intervals_.Max(), cadence_p50_, cadence_p99_,
                              present_refresh_hz_, present_misses_rate_, display_rate_,
+                             content_fps_,
                              h7, h8, h9, h10, h16,
                              dlss_sr_ ? dlss_sr_->last_ms() : 0.0, sr_cpu_ms_,
                              probe.decode_ms, probe.decode_ms_max,
@@ -3428,6 +3429,20 @@ bool NextApp::PullFrame(media::DecodedFrame& out) {
         probe_age_max_ = std::max(probe_age_max_, age);
         ++probe_age_n_;
     }
+    // Unique content rate: a 30 fps game streamed at 60 fps repeats every other
+    // frame. Counting non-duplicates gives the real cadence for the UI and for
+    // the AI stages.
+    if (!out.duplicate) {
+        if (content_window_ < 0.0) {
+            content_window_ = now_;
+        }
+        ++content_unique_;
+    }
+    if (content_window_ >= 0.0 && now_ - content_window_ >= 1.0) {
+        content_fps_ = content_unique_ / std::max(0.001, now_ - content_window_);
+        content_unique_ = 0;
+        content_window_ = now_;
+    }
     return true;
 }
 
@@ -3487,7 +3502,9 @@ void NextApp::PresentVideo() {
     brp::Presenter* video = ActivePresenter();
 
     const double content =
-        std::clamp(static_cast<double>(settings_.streaming.fps), 24.0, 240.0);
+        content_fps_ > 10.0
+            ? std::clamp(content_fps_, 24.0, 60.0)
+            : std::clamp(static_cast<double>(settings_.streaming.fps), 24.0, 240.0);
     const bool fg_mode = settings_.ai.frame_generation &&
                          settings_.ai.fg_backend == AiBackend::DlssFg &&
                          !dlss_fg_failed_;
@@ -3569,7 +3586,8 @@ void NextApp::PresentVideo() {
             }
         };
 
-        if (new_frame && have_frame_ && !video_frame_.rgba.empty()) {
+        if (new_frame && have_frame_ && !video_frame_.rgba.empty() &&
+            !video_frame_.duplicate) {
             int feed_w = video_frame_.width;
             int feed_h = video_frame_.height;
             std::vector<std::uint8_t> rgba;
@@ -3678,7 +3696,7 @@ void NextApp::PresentVideo() {
             new_frame = true;
             EnhanceNeural(video_frame_);
         }
-        if (new_frame) {
+        if (new_frame && !video_frame_.duplicate) {
             ScheduleRifeFrame(video_frame_);
         }
         DisplayFrame shown;
@@ -3729,7 +3747,7 @@ void NextApp::PresentVideo() {
 
     const int width = video_frame_.width;
     const int height = video_frame_.height;
-    if (new_frame) {
+    if (new_frame && !video_frame_.duplicate) {
         bool sr_drawn = false;
         const auto sr_started = std::chrono::steady_clock::now();
         if (video_frame_.gpu_view && video_frame_.rgba.empty()) {
@@ -3882,8 +3900,10 @@ void NextApp::EnhanceNeural(media::DecodedFrame& frame) {
         nr_ms_ = 0.0;
         return;
     }
-    if (!settings_.ai.neural_render || nr_failed_ || frame.rgba.empty() || frame.pq) {
-        // HDR frames go straight through: the worker's video mode is 8-bit.
+    if (!settings_.ai.neural_render || nr_failed_ || frame.rgba.empty() || frame.pq ||
+        frame.duplicate) {
+        // HDR frames go straight through, and a repeated content frame has no
+        // new detail for the network.
         return;
     }
     if (!EnsureNr(frame.width, frame.height)) {
@@ -4495,6 +4515,9 @@ void NextApp::ConnectStream() {
         return;
     }
     disconnect_armed_ = false;
+    content_fps_ = 0.0;
+    content_unique_ = 0;
+    content_window_ = -1.0;
     ConsoleSettings console = settings_.console;
     console.fps = settings_.streaming.fps;
     if (console.address.empty()) {
@@ -4666,6 +4689,7 @@ void NextApp::PublishBridgeStatus() {
     integer("width", stream.source_width, true);
     integer("height", stream.source_height, true);
     number("fps", stream.source_fps, true);
+    number("content_fps", content_fps_, true);
     number("bitrate", stream.bitrate_kbps, true);
     number("loss", stream.loss_percent, true);
     number("jitter", stream.jitter_ms, true);

@@ -1474,11 +1474,11 @@ stopped presenting them as if they did something.
   that removes RIFE no longer leaves `rife\` or the markers behind.
 - New artifacts:
   - `dist/BetterRemotePlay-2.5.0-standalone-norife.zip` SHA256
-    `E8C33109B5B71C4C6D8CC4F069488610A0A5B174D03CCEEA5B218FC693266D97`
+    `8BEC9EE999738D9B92857A842BFC1F703CA6B19F89D49E91B0E2DCF226C87FE2`
   - `dist/BetterRemotePlay-2.5.0-hotfix-update.exe` (48.85 MB) SHA256
-    `926F0F20CB3323000F3B54D46D507B89D2D6631A34E65FA2E3D2EB03FF6AF2A5`
-- `brpnext.exe` `5186242F945B0428DBF33EE4371B3CE4DD14739001E0079EABB1216F2634076A`
-- `brpnext-engine.exe` `34A2567BA1D465F884101C33777C62BFE4126EEAA887C142E3AFAD6F4A0C0817`
+    `6280BF88BE2761572177407509D310B03B567C74076041C3F05581E93FB8C448`
+- `brpnext.exe` `45519E08EEFCA35BFB99506728E56CE72E8A904A7D8DB31A0358D757F8FD8359`
+- `brpnext-engine.exe` `E5A5F7640F24772948E2F0ED06FE01E3F31790D5552BF6F2F7697BC569E6F727`
 - `nvngx_dlss.dll` `858CCFF96360C3098DB9264CD6F13D04A027E09B6CE7AD5BBC297570E824B4F2`
   (310.9.16, DLSS 4.5)
 - `app.ico` `0D25A89AB2C9E0EF50F38B642B5EB60BB791FE3654E4024E7D712A80A62224D2`
@@ -1588,3 +1588,14 @@ stopped presenting them as if they did something.
 - Research and reference: `docs/38-streaming-apps.md` (PXPlay, chiaki-ng,
   Moonlight/Sunshine, Parsec) and `docs/39-organization.md` (what is used,
   `attic/`, `dist/archive/`).
+
+## 2.5.0 - 100 ms report and 30 fps content
+
+- The report was the frame buffer: `frame_buffer = 1` at 30 fps measured
+  **92.6 ms age**; `0` measured **0.0 ms**. The queue cap now keeps the target
+  depth instead of allowing two extra frames (92 -> 61 ms), and the profile was
+  migrated to 60 fps / buffer 0 / FG 2x / vsync off (0.0 ms age, 5.1 ms worker).
+- A 30 fps game streamed at 60 is detected by a 64x64 RGB signature. Repeated
+  frames are marked `duplicate`: NR and SR are skipped, DLSS-G is not fed the
+  repeat, and `content fps` is published to the UI/probe. Home shows
+  `60 fps (30 content)` and Frame Gen shows the expected 2x/4x output.

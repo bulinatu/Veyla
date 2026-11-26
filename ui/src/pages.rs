@@ -74,7 +74,16 @@ impl Root {
             self.settings.s("streaming.input", "1080p")
         };
         let fps = if self.status.fps > 0.0 {
-            format!("{:.0} fps", self.status.fps)
+            if self.status.content_fps > 1.0 &&
+                (self.status.fps - self.status.content_fps).abs() > 1.0
+            {
+                format!(
+                    "{:.0} fps ({:.0} content)",
+                    self.status.fps, self.status.content_fps
+                )
+            } else {
+                format!("{:.0} fps", self.status.fps)
+            }
         } else {
             format!("{} fps", self.settings.i("streaming.fps", 60))
         };
@@ -374,7 +383,7 @@ impl Root {
                         theme::ACCENT_BRIGHT,
                     ))
                     .child(widgets::chip(
-                        format!("Buffer {}", self.settings.i("streaming.frame_buffer", 1)),
+                        format!("Buffer {}", self.settings.i("streaming.frame_buffer", 0)),
                         theme::CYAN,
                     ))
                     .child(widgets::chip(
@@ -482,7 +491,7 @@ impl Root {
                 self.seg_int_row(
                     "streaming.frame_buffer",
                     "Frame buffer",
-                    "0 is lowest latency; 1-2 is smoother",
+                    "0 is lowest; 1 adds ~2 source intervals (~60 ms at 30 fps)",
                     &[(0, "0"), (1, "1"), (2, "2"), (3, "3")],
                     cx,
                 ),
@@ -815,6 +824,13 @@ impl Root {
                 ],
                 cx,
             ));
+            if self.status.content_fps > 1.0 && self.status.content_fps < 45.0 {
+                let c = self.status.content_fps;
+                fg_rows.push(widgets::kv(
+                    "Detected content",
+                    format!("{c:.0} fps — 2x {:.0}, 4x {:.0}", c * 2.0, c * 4.0),
+                ));
+            }
         } else {
             fg_rows.push(self.disabled_row(
                 "Multiplier",
@@ -1300,7 +1316,7 @@ impl Root {
                 ),
                 widgets::kv(
                     "Frame buffer",
-                    format!("{}", self.settings.i("streaming.frame_buffer", 1)),
+                    format!("{}", self.settings.i("streaming.frame_buffer", 0)),
                 ),
             ],
         );

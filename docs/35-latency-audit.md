@@ -227,3 +227,49 @@ same rate with ~17 ms more hold. NR at 100 % adds a full-frame pass on top; the
 
 Reflex markers do not change any of these numbers (they only wrap the parent
 presenter; with DLSS-G the worker owns its swapchain).
+
+## Round 5: the 100 ms report was the frame buffer
+
+A live A/B on the user's settings (30 fps, FG 4x, 1920x1080 DLAA) showed:
+
+| Setting | Queue | Age at pull |
+|---|---|---|
+| `frame_buffer = 1` | 2 | **92.6 ms** |
+| `frame_buffer = 0` | 0 | **0.0 ms** |
+
+The phase-locked path was letting the queue drift to four frames, and at 30 fps
+that is three source intervals before the AI or presenter sees the picture. The
+queue cap now drops when the depth exceeds the target instead of allowing two
+extra frames; the same buffer-1 test fell to 61 ms. That is still two source
+intervals, so the real fix is **buffer 0**.
+
+The user profile was migrated to the low-latency combination:
+
+- 60 fps (halves the input interval)
+- `frame_buffer = 0` (0.0 ms age)
+- FG 2x (one held output frame instead of three)
+- vsync off (tearing path)
+- NR 75 % / one pass
+
+Measured after the migration: `age 0.0 ms`, SR readback 3.8 ms, worker 5.1 ms,
+cadence 16.6 ms. The 100 ms was almost entirely the queue, not the decoder and
+not the controller path.
+
+## Round 6: 30 fps games and duplicate input frames
+
+A 30 fps game can be streamed at 60 fps with every other picture repeated. The
+decoder now samples a 64x64 RGB signature of every RGBA frame and marks a frame
+`duplicate` when it matches the previous one. The probe prints the unique
+content rate (`content 60 fps`). Effects:
+
+- NR is skipped on repeated frames (no new detail for the network).
+- SR is skipped and the previous SRV is reused.
+- DLSS-G is not fed a repeated frame; the worker keeps presenting its generated
+  sequence. On a 30 fps game streamed at 60, 2x now means 60 real output frames
+  and 4x means 120, instead of processing twice the frames for the same picture.
+- The UI shows `fps (content fps)` on Home and a "Detected content" row on the
+  Frame Gen page, so a 30 fps game is visible even when the stream is set to
+  60.
+
+The signature is a sample (64 rows x 64 columns), not a full-frame hash; it
+costs a few microseconds and does not touch the 8 MB RGBA buffer again.

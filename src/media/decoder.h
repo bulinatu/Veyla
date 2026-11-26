@@ -13,6 +13,8 @@ struct DecodedFrame {
     bool pq = false;             // source transfer is PQ (HDR10)
     double arrived_ms = 0.0;     // steady_clock, when the video packet arrived
     std::vector<uint8_t> rgba;  // tightly packed RGBA
+    std::uint64_t content_hash = 0;  // sampled hash of rgba, 0 when GPU-only
+    bool duplicate = false;          // same sampled content as the previous frame
     // When set, the picture already exists as an RGBA texture on the shared
     // device and rgba is empty. The view is owned by the decoder's ring and
     // stays valid across frames.
@@ -119,6 +121,8 @@ private:
     void* external_device_ = nullptr;   // borrowed ID3D11Device*
     void* external_context_ = nullptr;  // borrowed ID3D11DeviceContext*
     std::atomic<bool> cpu_pixels_{true};
+    std::uint64_t last_content_hash_ = 0;
+    bool have_content_hash_ = false;
     int vp_in_w_ = 0;
     int vp_in_h_ = 0;
     int vp_out_w_ = 0;

@@ -838,10 +838,11 @@ bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, bool paced) {
         }
         primed_ = true;
     }
-    // Bound latency: drop at most one frame per presentation tick, and only
-    // when the queue is a full frame past target. One extra frame of queue is
-    // normal decode jitter; dropping on it is what read as a skip.
-    if (static_cast<int>(frames_.size()) > wanted + 2) {
+    // Bound latency: keep at most the target depth. The old `wanted + 2`
+    // allowance let a 30 fps stream sit three frames deep, which is ~100 ms of
+    // frame age before the AI or the presenter even sees it. Drop one per tick
+    // when the queue is over target; the producer refills on the next decode.
+    if (static_cast<int>(frames_.size()) > wanted) {
         frames_.pop_front();
         buffer_drops_.fetch_add(1);
     }

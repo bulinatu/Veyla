@@ -65,6 +65,32 @@ struct DecodeProbe {
 
 DecodeProbe g_decode_probe;
 
+// Cheap content signature: 64 rows x 64 columns of RGB. This is enough to
+// recognise a repeated console frame (a 30 fps game streamed at 60 fps), and
+// it costs a few microseconds instead of reading 8 MB.
+std::uint64_t SampleFrameHash(const std::uint8_t* rgba, int width, int height) {
+    if (!rgba || width <= 0 || height <= 0) {
+        return 0;
+    }
+    std::uint64_t hash = 1469598103934665603ull;
+    const int rows = height < 64 ? height : 64;
+    const int step_x = (width / 64) > 1 ? (width / 64) : 1;
+    for (int row = 0; row < rows; ++row) {
+        const int y = row * height / rows;
+        const std::uint8_t* p = rgba + static_cast<std::size_t>(y) * width * 4;
+        for (int x = 0; x < width; x += step_x) {
+            const std::uint8_t* q = p + static_cast<std::size_t>(x) * 4;
+            hash ^= q[0];
+            hash *= 1099511628211ull;
+            hash ^= q[1];
+            hash *= 1099511628211ull;
+            hash ^= q[2];
+            hash *= 1099511628211ull;
+        }
+    }
+    return hash;
+}
+
 }  // namespace
 }  // namespace
 
@@ -678,6 +704,8 @@ bool Decoder::ConvertWithVideoProcessor(const void* frame_ptr, DecodedFrame& out
         // The presenter samples this texture on the same device. The two-slot
         // ring keeps the previous frame alive while the next one is decoded.
         out.rgba.clear();
+        out.content_hash = 0;
+        out.duplicate = false;
         out.gpu_view = vp_gpu_srv_[gpu_slot];
         vp_gpu_slot_ = (gpu_slot + 1) & 1;
         out.width = out_w;
@@ -705,6 +733,10 @@ bool Decoder::ConvertWithVideoProcessor(const void* frame_ptr, DecodedFrame& out
                     src + static_cast<size_t>(mapped.RowPitch) * static_cast<size_t>(y), row);
     }
     immediate->Unmap(stage, 0);
+    out.content_hash = SampleFrameHash(out.rgba.data(), out_w, out_h);
+    out.duplicate = have_content_hash_ && out.content_hash == last_content_hash_;
+    last_content_hash_ = out.content_hash;
+    have_content_hash_ = true;
     out.width = out_w;
     out.height = out_h;
     out.pq = false;
@@ -816,6 +848,10 @@ bool Decoder::Convert(const void* frame_ptr, DecodedFrame& out) {
     int dst_linesize[4] = {source->width * 4, 0, 0, 0};
     sws_scale(Sws(scaler_), source->data, source->linesize, 0, source->height, dst, dst_linesize);
     out.gpu_view = nullptr;
+    out.content_hash = SampleFrameHash(out.rgba.data(), out.width, out.height);
+    out.duplicate = have_content_hash_ && out.content_hash == last_content_hash_;
+    last_content_hash_ = out.content_hash;
+    have_content_hash_ = true;
     width_ = out.width;
     height_ = out.height;
     ++frame_count_;

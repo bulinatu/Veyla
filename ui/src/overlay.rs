@@ -699,7 +699,7 @@ impl OverlayView {
                 rows.push(self.seg_row(
                     "streaming.frame_buffer",
                     "Frame buffer",
-                    "0 is the lowest latency",
+                    "0 lowest; 1 adds ~2 frames at 30 fps",
                     &[(0, "0"), (1, "1"), (2, "2")],
                     cx,
                 ));
