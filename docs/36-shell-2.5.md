@@ -205,6 +205,24 @@ Auto replaces the old hard-coded preset 12: L was being used for DLAA and
 Quality, where K is the correct default. The 310.9.16 runtime is required for L
 and M (DLSS 4.5); with the older runtime those presets fall back to defaults.
 
+## Shell navigation
+
+- The header has six entries only: Home, Stream, Video, Audio, Controller,
+  Overlay.
+- Home has Overview / Advanced; Video has Output / Upscaling / Frame Gen /
+  Neural. The sub-navigation sits under the header so the top bar stays
+  compact.
+- Advanced is always on: the Basic/Advanced switch and the Apply button are
+  gone. Every widget writes its key through `persist()` when it changes, and
+  the engine auto-applies about a poll tick later. Sliders save at the poll
+  cadence so a drag does not write one file per pixel.
+- The top bar has full-width drag strips in its 12 px top and bottom padding,
+  plus the logo, the empty middle and the status pill. The tab hitboxes stay
+  untouched.
+- The window has a 1040x700 minimum, the tab row does not shrink, and the
+  minimize/maximize/close cluster is fixed at the right. Verified at the
+  minimum size: all three controls remain visible.
+
 ## NVIDIA Reflex (markers + boost, no sleep)
 
 `video.reflex` adds Off / On / Boost on the Video page and the in-game Video

@@ -27,17 +27,15 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 10] = [
+    /// Top-level header entries. The video pages and Advanced are reachable
+    /// through the sub-navigation under their parent.
+    pub const ALL: [Tab; 6] = [
         Tab::Home,
         Tab::Stream,
         Tab::Video,
         Tab::Audio,
         Tab::Pad,
-        Tab::Upscaling,
-        Tab::FrameGen,
-        Tab::Neural,
         Tab::Overlay,
-        Tab::Advanced,
     ];
 
     pub fn label(self) -> &'static str {
@@ -55,6 +53,26 @@ impl Tab {
         }
     }
 
+    pub fn top_level(self) -> Tab {
+        match self {
+            Tab::Upscaling | Tab::FrameGen | Tab::Neural => Tab::Video,
+            Tab::Advanced => Tab::Home,
+            other => other,
+        }
+    }
+
+    pub fn sub_pages(self) -> &'static [(Tab, &'static str)] {
+        match self {
+            Tab::Video => &[
+                (Tab::Video, "Output"),
+                (Tab::Upscaling, "Upscaling"),
+                (Tab::FrameGen, "Frame Gen"),
+                (Tab::Neural, "Neural"),
+            ],
+            Tab::Home => &[(Tab::Home, "Overview"), (Tab::Advanced, "Advanced")],
+            _ => &[],
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -112,7 +130,9 @@ impl Root {
         let booting = settings.b("ui.boot_animation", true)
             && !settings.b("ui.reduce_motion", false);
         crate::model::log_line(&format!("root booting={booting}"));
-        let advanced = settings.b("ui.advanced", false);
+        // Advanced settings are always visible: the Basic/Advanced switch was
+        // removed, and every page shows its expert rows by default.
+        let advanced = true;
         let focus = cx.focus_handle();
 
 
@@ -395,13 +415,6 @@ impl Root {
         self.toast("Disconnecting", false, cx);
     }
 
-    pub(crate) fn action_apply(&mut self, cx: &mut Context<Self>) {
-        if self.ensure_engine(cx) {
-            self.send("apply");
-            self.toast("Settings applied", false, cx);
-        }
-    }
-
     /// Spawns the engine if needed and asks for a fresh device list. The poll
     /// loop runs `optimize_for_pc` as soon as the devices arrive.
     pub(crate) fn start_optimize(&mut self, cx: &mut Context<Self>) {
@@ -665,13 +678,10 @@ impl Root {
 
     fn top_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let width = window.viewport_size().width;
-        let tight = width < px(1230.0);
-        let mut tabs = div().flex().items_center().gap(px(2.0));
+        let tight = width < px(1100.0);
+        let mut tabs = div().flex().items_center().gap(px(2.0)).flex_shrink_0();
         for tab in Tab::ALL {
-            if tab == Tab::Advanced && !self.advanced {
-                continue;
-            }
-            let selected = self.tab == tab;
+            let selected = self.tab.top_level() == tab;
             let label = tab.label();
             tabs = tabs.child(
                 div()
@@ -722,6 +732,7 @@ impl Root {
         div()
             .h(px(60.0))
             .flex_none()
+            .relative()
             .flex()
             .items_center()
             .gap(px(18.0))
@@ -729,6 +740,28 @@ impl Root {
             .border_b_1()
             .border_color(rgba(0xFFFFFF0A))
             .bg(rgba(0x07070DD9))
+            // Full-width grab strips in the top and bottom padding: the whole
+            // bar can move the window without covering the tab hitboxes.
+            .child(
+                div()
+                    .absolute()
+                    .top(px(0.0))
+                    .left(px(0.0))
+                    .right(px(0.0))
+                    .h(px(12.0))
+                    .cursor_move()
+                    .window_control_area(WindowControlArea::Drag),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .bottom(px(0.0))
+                    .left(px(0.0))
+                    .right(px(0.0))
+                    .h(px(12.0))
+                    .cursor_move()
+                    .window_control_area(WindowControlArea::Drag),
+            )
             .child(
                 div()
                     .flex()
@@ -783,6 +816,7 @@ impl Root {
                     .bg(rgba(0xFFFFFF0A))
                     .border_1()
                     .border_color(rgba(0xFFFFFF12))
+                    .window_control_area(WindowControlArea::Drag)
                     .child(widgets::dot(status_color))
                     .when(!tight, |el| {
                         el.child(
@@ -793,52 +827,70 @@ impl Root {
                         )
                     }),
             )
+            .child(div().w(px(6.0)))
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(6.0))
-                    .when(!tight, |el| {
-                        el.child(
-                            div()
-                                .text_size(theme::tiny())
-                                .text_color(theme::muted())
-                                .child("Basic"),
-                        )
-                    })
-                    .child(widgets::switch(
-                        "advanced-toggle",
-                        self.advanced,
-                        cx.listener(move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
-                            this.advanced = !this.advanced;
-                            this.settings.set_bool("ui.advanced", this.advanced);
-                            if !this.advanced && this.tab == Tab::Advanced {
-                                this.tab = Tab::Home;
-                            }
-                            this.persist();
-                            cx.notify();
-                        }),
-                    ))
-                    .when(!tight, |el| {
-                        el.child(
-                            div()
-                                .text_size(theme::tiny())
-                                .text_color(if self.advanced { theme::accent() } else { theme::muted() })
-                                .child("Advanced"),
-                        )
-                    }),
+                    .gap(px(2.0))
+                    .flex_shrink_0()
+                    .child(window_button("min", "\u{2013}", false, |window| window.minimize_window()))
+                    .child(window_button("max", "\u{25A2}", false, |window| window.zoom_window()))
+                    .child(window_button("close", "\u{2715}", true, |window| window.remove_window())),
             )
-            .child(div().w(px(8.0)))
-            .child(widgets::button(
-                if tight { "OK" } else { "Apply" },
-                widgets::Tone::Subtle,
-                cx.listener(|this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
-                    this.action_apply(cx);
-                }),
-            ))
-            .child(window_button("min", "\u{2013}", false, |window| window.minimize_window()))
-            .child(window_button("max", "\u{25A2}", false, |window| window.zoom_window()))
-            .child(window_button("close", "\u{2715}", true, |window| window.remove_window()))
+            .into_any_element()
+    }
+
+    /// Secondary navigation for the pages that have sub-categories. Kept out
+    /// of the main header so the top bar stays at six entries.
+    fn sub_nav(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let items = self.tab.top_level().sub_pages();
+        if items.is_empty() {
+            return div().into_any_element();
+        }
+        let mut row = div().flex().items_center().gap(px(4.0));
+        for &(tab, label) in items {
+            let active = self.tab == tab;
+            row = row.child(
+                div()
+                    .id(("subtab", tab as usize))
+                    .flex()
+                    .items_center()
+                    .h(px(28.0))
+                    .px(px(11.0))
+                    .rounded(px(7.0))
+                    .bg(if active {
+                        rgba(0x8B5CF626)
+                    } else {
+                        rgba(0x00000000)
+                    })
+                    .text_size(theme::tiny())
+                    .font_weight(if active {
+                        FontWeight::SEMIBOLD
+                    } else {
+                        FontWeight::MEDIUM
+                    })
+                    .text_color(if active { theme::text() } else { theme::muted() })
+                    .cursor_pointer()
+                    .hover(|s| s.bg(rgba(0xFFFFFF0D)).text_color(theme::text()))
+                    .on_click(cx.listener(
+                        move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                            this.select(tab);
+                            cx.notify();
+                        },
+                    ))
+                    .child(label),
+            );
+        }
+        div()
+            .flex_none()
+            .h(px(42.0))
+            .flex()
+            .items_center()
+            .px(px(18.0))
+            .border_b_1()
+            .border_color(rgba(0xFFFFFF08))
+            .child(div().w_full().max_w(px(1220.0)).mx_auto().child(row))
             .into_any_element()
     }
 
@@ -1376,6 +1428,7 @@ fn window_button(
         .justify_center()
         .w(px(34.0))
         .h(px(28.0))
+        .flex_shrink_0()
         .rounded(px(7.0))
         .text_size(px(12.0))
         .text_color(theme::muted())
@@ -1442,6 +1495,7 @@ impl Render for Root {
         let animated = self.settings.b("ui.animated_background", true);
         let reduce = self.settings.b("ui.reduce_motion", false);
         let top = self.top_bar(window, cx);
+        let subnav = self.sub_nav(cx);
         let page = self.page(cx);
         let toast = self.toast_overlay();
         let connecting = self.connect_overlay(cx);
@@ -1463,6 +1517,7 @@ impl Render for Root {
                     .flex()
                     .flex_col()
                     .child(top)
+                    .child(subnav)
                     .child(
                         div()
                             .id("page-scroll")

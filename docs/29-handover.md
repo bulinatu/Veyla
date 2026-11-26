@@ -1474,10 +1474,10 @@ stopped presenting them as if they did something.
   that removes RIFE no longer leaves `rife\` or the markers behind.
 - New artifacts:
   - `dist/BetterRemotePlay-2.5.0-standalone-norife.zip` SHA256
-    `26D305F95C108B87DABE4B178586BB2A969DCBE58CE84BCD3A37EF31C290019B`
+    `F8382A8A1D2B3CBA8F877A404B553B038193557396EE5818EB7EB2ADAED11466`
   - `dist/BetterRemotePlay-2.5.0-hotfix-update.exe` (48.85 MB) SHA256
-    `67F6A110F9011AA93A7A836AA2E5212904A40F41A47D4A84FF2D16812E917057`
-- `brpnext.exe` `ADCFDDFEFA4820404FE1034903DD4C85672A4D4F1031EDF7CCE83268630819B9`
+    `9A4F1D74AEC08176E41E96BB3B252E677D8FF9D4DAC2C184AD3119494D6EB6D9`
+- `brpnext.exe` `883B2E30488B3FD3EE67ED3AE1D43219A88FAB14AAC7A8B262EDCC43171FDED7`
 - `brpnext-engine.exe` `9910CC11168987E45B2B7F5B4AEC0A50F868DDA9C6E67E2326D9F8AE8B84F739`
 - `nvngx_dlss.dll` `858CCFF96360C3098DB9264CD6F13D04A027E09B6CE7AD5BBC297570E824B4F2`
   (310.9.16, DLSS 4.5)
@@ -1542,3 +1542,17 @@ stopped presenting them as if they did something.
   the taskbar and Task Manager use the embedded icon.
 - Sizes in the ICO: 16, 24, 32, 48, 64, 128, 256. The 32 px screenshot from
   the packaged shell was used to check it survives Windows' downscale.
+
+## 2.5.0 - compact shell navigation
+
+- Header is six entries: Home, Stream, Video, Audio, Controller, Overlay.
+  Home carries Overview/Advanced; Video carries Output/Upscaling/Frame
+  Gen/Neural in a sub-bar under the header.
+- Advanced is always on: Basic/Advanced switch and Apply button removed. Every
+  widget persists immediately; the engine auto-applies on the next poll.
+- The top bar is draggable from full-width 12 px strips in its top/bottom
+  padding, the logo, the empty middle and the status pill. Tabs keep their
+  own hitboxes.
+- Window resize: tab row and window controls are non-shrinking; minimum
+  1040x700 enforced. Checked at the minimum size with all three buttons
+  visible.
