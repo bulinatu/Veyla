@@ -54,6 +54,13 @@ public:
 
     // Media and input surface used by the Watch view.
     void SetAudio(brp::audio::Engine* engine);
+    // Optional shared D3D11 device for zero-copy presentation, and whether the
+    // AI path needs CPU RGBA this frame.
+    void SetExternalDevice(void* device, void* context) {
+        streaming_.SetExternalDevice(device, context);
+    }
+    void SetCpuPixels(bool cpu) { streaming_.SetCpuPixels(cpu); }
+    bool SharedDecodeDevice() const { return streaming_.shared_device(); }
     void SetMotionEnabled(bool enabled);
     bool TakeFrame(media::DecodedFrame& out, int buffer, bool paced);
     bool TakeNewestFrame(media::DecodedFrame& out);

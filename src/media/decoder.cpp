@@ -15,6 +15,9 @@ extern "C" {
 #include <cstring>
 #include <thread>
 
+#include <d3d11.h>
+#include <libavutil/hwcontext_d3d11va.h>
+
 namespace brp::media {
 namespace {
 
@@ -37,6 +40,7 @@ struct DecodeProbe {
     double transfer = 0.0;
     double resize = 0.0;
     double scale = 0.0;
+    double vp = 0.0;
 
     static double Ms(std::chrono::steady_clock::time_point from,
                      std::chrono::steady_clock::time_point to) {
@@ -52,10 +56,10 @@ struct DecodeProbe {
         }
         const double n = static_cast<double>(frames);
         std::fprintf(stderr,
-                     "[decode-probe] recv %.2f transfer %.2f resize %.2f scale %.2f ms\n",
-                     receive / n, transfer / n, resize / n, scale / n);
+                     "[decode-probe] recv %.2f transfer %.2f resize %.2f scale %.2f vp %.2f ms\n",
+                     receive / n, transfer / n, resize / n, scale / n, vp / n);
         frames = 0;
-        receive = transfer = resize = scale = 0.0;
+        receive = transfer = resize = scale = vp = 0.0;
     }
 };
 
@@ -69,6 +73,7 @@ Decoder::~Decoder() {
 }
 
 void Decoder::Close() {
+    ReleaseVideoProcessor();
     if (parser_) {
         av_parser_close(Parser(parser_));
         parser_ = nullptr;
@@ -184,12 +189,36 @@ bool Decoder::InitCodec(const void* codec_ptr, const void* params_ptr, std::stri
     backend_note_.clear();
     AVBufferRef* hw = nullptr;
     AVHWDeviceType chosen = AV_HWDEVICE_TYPE_NONE;
+    auto create_device = [&](AVHWDeviceType type, AVBufferRef** out) -> int {
+        if (type == AV_HWDEVICE_TYPE_D3D11VA && external_device_) {
+            AVBufferRef* ref = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA);
+            if (!ref) {
+                return AVERROR(ENOMEM);
+            }
+            auto* device_ctx = reinterpret_cast<AVHWDeviceContext*>(ref->data);
+            auto* d3d = static_cast<AVD3D11VADeviceContext*>(device_ctx->hwctx);
+            d3d->device = static_cast<ID3D11Device*>(external_device_);
+            d3d->device->AddRef();
+            if (external_context_) {
+                d3d->device_context = static_cast<ID3D11DeviceContext*>(external_context_);
+                d3d->device_context->AddRef();
+            }
+            const int err = av_hwdevice_ctx_init(ref);
+            if (err < 0) {
+                av_buffer_unref(&ref);
+                return err;
+            }
+            *out = ref;
+            return 0;
+        }
+        return av_hwdevice_ctx_create(out, type, nullptr, nullptr, 0);
+    };
     for (AVHWDeviceType type : order) {
         if (!codec_supports(type)) {
             backend_note_ += std::string(backend_name(type)) + " not offered by codec; ";
             continue;
         }
-        if (av_hwdevice_ctx_create(&hw, type, nullptr, nullptr, 0) < 0) {
+        if (create_device(type, &hw) < 0) {
             backend_note_ += std::string(backend_name(type)) + " device creation failed; ";
             hw = nullptr;
             continue;
@@ -394,9 +423,317 @@ bool Decoder::Drain(DecodedFrame& out) {
     }
 }
 
+void Decoder::ReleaseVideoProcessor() {
+    for (auto& srv : vp_gpu_srv_) {
+        if (srv) {
+            static_cast<ID3D11ShaderResourceView*>(srv)->Release();
+            srv = nullptr;
+        }
+    }
+    for (auto& texture : vp_gpu_tex_) {
+        if (texture) {
+            static_cast<ID3D11Texture2D*>(texture)->Release();
+            texture = nullptr;
+        }
+    }
+    vp_gpu_slot_ = 0;
+    if (vp_stage_) {
+        static_cast<ID3D11Texture2D*>(vp_stage_)->Release();
+        vp_stage_ = nullptr;
+    }
+    if (vp_out_) {
+        static_cast<ID3D11Texture2D*>(vp_out_)->Release();
+        vp_out_ = nullptr;
+    }
+    if (vp_processor_) {
+        static_cast<ID3D11VideoProcessor*>(vp_processor_)->Release();
+        vp_processor_ = nullptr;
+    }
+    if (vp_enum_) {
+        static_cast<ID3D11VideoProcessorEnumerator*>(vp_enum_)->Release();
+        vp_enum_ = nullptr;
+    }
+    vp_device_ = nullptr;
+    vp_context_ = nullptr;
+    vp_immediate_ = nullptr;
+    vp_in_w_ = 0;
+    vp_in_h_ = 0;
+    vp_out_w_ = 0;
+    vp_out_h_ = 0;
+    vp_in_format_ = 0;
+}
+
+// Converts the decoder's own D3D11 NV12/P010 surface to tightly packed RGBA on
+// the GPU. swscale costs ~5.8 ms per 1080p frame and the GPU->CPU NV12 transfer
+// another 1.4 ms; this path does both in one video-processor blit and reads
+// back only the RGBA result that the AI worker needs. Returns false on any
+// unsupported configuration so Convert() can fall back to swscale.
+bool Decoder::ConvertWithVideoProcessor(const void* frame_ptr, DecodedFrame& out) {
+    auto* frame = static_cast<AVFrame*>(const_cast<void*>(frame_ptr));
+    if (frame->format != AV_PIX_FMT_D3D11 || !frame->hw_frames_ctx || !frame->data[0]) {
+        return false;
+    }
+    auto* frames = reinterpret_cast<AVHWFramesContext*>(frame->hw_frames_ctx->data);
+    if (!frames || !frames->device_ctx) {
+        return false;
+    }
+    auto* hw = frames->device_ctx;
+    auto* dev = hw ? static_cast<AVD3D11VADeviceContext*>(hw->hwctx) : nullptr;
+    if (!dev || !dev->device || !dev->device_context || !dev->video_device ||
+        !dev->video_context) {
+        return false;
+    }
+    auto* texture = reinterpret_cast<ID3D11Texture2D*>(frame->data[0]);
+    D3D11_TEXTURE2D_DESC td{};
+    texture->GetDesc(&td);
+    if (td.Format != DXGI_FORMAT_NV12 && td.Format != DXGI_FORMAT_P010) {
+        return false;
+    }
+    const int out_w = frame->width;
+    const int out_h = frame->height;
+    if (out_w <= 0 || out_h <= 0) {
+        return false;
+    }
+
+    if (vp_enum_ && vp_in_w_ == static_cast<int>(td.Width) &&
+        vp_in_h_ == static_cast<int>(td.Height) && vp_out_w_ == out_w &&
+        vp_out_h_ == out_h && vp_in_format_ == static_cast<int>(td.Format)) {
+        // Reuse the processor and its output textures.
+    } else {
+        ReleaseVideoProcessor();
+        vp_device_ = dev->video_device;
+        vp_context_ = dev->video_context;
+        vp_immediate_ = dev->device_context;
+
+        D3D11_VIDEO_PROCESSOR_CONTENT_DESC content{};
+        content.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
+        content.InputWidth = td.Width;
+        content.InputHeight = td.Height;
+        content.OutputWidth = static_cast<UINT>(out_w);
+        content.OutputHeight = static_cast<UINT>(out_h);
+        content.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
+        auto* video_device = static_cast<ID3D11VideoDevice*>(vp_device_);
+        HRESULT hr = video_device->CreateVideoProcessorEnumerator(
+            &content, reinterpret_cast<ID3D11VideoProcessorEnumerator**>(&vp_enum_));
+        if (FAILED(hr) || !vp_enum_) {
+            ReleaseVideoProcessor();
+            return false;
+        }
+        auto* vp_enum = static_cast<ID3D11VideoProcessorEnumerator*>(vp_enum_);
+        UINT in_support = 0;
+        UINT out_support = 0;
+        if (FAILED(vp_enum->CheckVideoProcessorFormat(td.Format, &in_support)) ||
+            !(in_support & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT) ||
+            FAILED(vp_enum->CheckVideoProcessorFormat(DXGI_FORMAT_R8G8B8A8_UNORM, &out_support)) ||
+            !(out_support & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT)) {
+            ReleaseVideoProcessor();
+            return false;
+        }
+        hr = video_device->CreateVideoProcessor(
+            vp_enum, 0, reinterpret_cast<ID3D11VideoProcessor**>(&vp_processor_));
+        if (FAILED(hr) || !vp_processor_) {
+            ReleaseVideoProcessor();
+            return false;
+        }
+
+        D3D11_TEXTURE2D_DESC od{};
+        od.Width = static_cast<UINT>(out_w);
+        od.Height = static_cast<UINT>(out_h);
+        od.MipLevels = 1;
+        od.ArraySize = 1;
+        od.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        od.SampleDesc.Count = 1;
+        od.Usage = D3D11_USAGE_DEFAULT;
+        od.BindFlags = D3D11_BIND_RENDER_TARGET;
+        hr = dev->device->CreateTexture2D(
+            &od, nullptr, reinterpret_cast<ID3D11Texture2D**>(&vp_out_));
+        if (FAILED(hr) || !vp_out_) {
+            ReleaseVideoProcessor();
+            return false;
+        }
+        D3D11_TEXTURE2D_DESC sd = od;
+        sd.Usage = D3D11_USAGE_STAGING;
+        sd.BindFlags = 0;
+        sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        hr = dev->device->CreateTexture2D(
+            &sd, nullptr, reinterpret_cast<ID3D11Texture2D**>(&vp_stage_));
+        if (FAILED(hr) || !vp_stage_) {
+            ReleaseVideoProcessor();
+            return false;
+        }
+        // Two GPU-resident targets for the AI-off path. The presenter samples
+        // these directly, so the picture never returns to system memory.
+        D3D11_TEXTURE2D_DESC gd = od;
+        gd.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        for (int i = 0; i < 2; ++i) {
+            hr = dev->device->CreateTexture2D(
+                &gd, nullptr, reinterpret_cast<ID3D11Texture2D**>(&vp_gpu_tex_[i]));
+            if (FAILED(hr) || !vp_gpu_tex_[i]) {
+                ReleaseVideoProcessor();
+                return false;
+            }
+            hr = dev->device->CreateShaderResourceView(
+                reinterpret_cast<ID3D11Texture2D*>(vp_gpu_tex_[i]), nullptr,
+                reinterpret_cast<ID3D11ShaderResourceView**>(&vp_gpu_srv_[i]));
+            if (FAILED(hr) || !vp_gpu_srv_[i]) {
+                ReleaseVideoProcessor();
+                return false;
+            }
+        }
+        vp_gpu_slot_ = 0;
+        vp_in_w_ = static_cast<int>(td.Width);
+        vp_in_h_ = static_cast<int>(td.Height);
+        vp_out_w_ = out_w;
+        vp_out_h_ = out_h;
+        vp_in_format_ = static_cast<int>(td.Format);
+        if (!vp_logged_) {
+            std::fprintf(stderr,
+                         "[decode] video-processor %s %ux%u -> RGBA %dx%d\n",
+                         td.Format == DXGI_FORMAT_P010 ? "P010" : "NV12", td.Width,
+                         td.Height, out_w, out_h);
+            vp_logged_ = true;
+        }
+    }
+
+    auto* video_device = static_cast<ID3D11VideoDevice*>(vp_device_);
+    auto* video_context = static_cast<ID3D11VideoContext*>(vp_context_);
+    auto* vp_enum = static_cast<ID3D11VideoProcessorEnumerator*>(vp_enum_);
+    auto* vp = static_cast<ID3D11VideoProcessor*>(vp_processor_);
+    const bool gpu_only = !cpu_pixels_ && vp_gpu_tex_[0] != nullptr;
+    const int gpu_slot = vp_gpu_slot_ & 1;
+    auto* out_tex = gpu_only ? static_cast<ID3D11Texture2D*>(vp_gpu_tex_[gpu_slot])
+                             : static_cast<ID3D11Texture2D*>(vp_out_);
+    auto* stage = static_cast<ID3D11Texture2D*>(vp_stage_);
+
+    D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC ivd{};
+    ivd.FourCC = 0;
+    ivd.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
+    ivd.Texture2D.MipSlice = 0;
+    ivd.Texture2D.ArraySlice = static_cast<UINT>(reinterpret_cast<uintptr_t>(frame->data[1]));
+    ID3D11VideoProcessorInputView* in_view = nullptr;
+    HRESULT hr = video_device->CreateVideoProcessorInputView(texture, vp_enum, &ivd, &in_view);
+    if (FAILED(hr) || !in_view) {
+        return false;
+    }
+    D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC ovd{};
+    ovd.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+    ovd.Texture2D.MipSlice = 0;
+    ID3D11VideoProcessorOutputView* out_view = nullptr;
+    hr = video_device->CreateVideoProcessorOutputView(out_tex, vp_enum, &ovd, &out_view);
+    if (FAILED(hr) || !out_view) {
+        in_view->Release();
+        return false;
+    }
+
+    RECT source_rect{0, 0, out_w, out_h};
+    RECT dest_rect{0, 0, out_w, out_h};
+    video_context->VideoProcessorSetStreamFrameFormat(
+        vp, 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
+    video_context->VideoProcessorSetStreamSourceRect(vp, 0, TRUE, &source_rect);
+    video_context->VideoProcessorSetOutputTargetRect(vp, TRUE, &dest_rect);
+    video_context->VideoProcessorSetStreamOutputRate(
+        vp, 0, D3D11_VIDEO_PROCESSOR_OUTPUT_RATE_NORMAL, FALSE, nullptr);
+    video_context->VideoProcessorSetStreamAutoProcessingMode(vp, 0, FALSE);
+
+    D3D11_VIDEO_PROCESSOR_COLOR_SPACE in_cs{};
+    in_cs.Usage = 0;   // playback
+    in_cs.RGB_Range = 0;
+    in_cs.YCbCr_Matrix =
+        (frame->colorspace == AVCOL_SPC_BT709 || frame->colorspace == AVCOL_SPC_BT2020_NCL ||
+         frame->colorspace == AVCOL_SPC_BT2020_CL)
+            ? 1
+            : 0;
+    in_cs.YCbCr_xvYCC = 0;
+    in_cs.Nominal_Range = frame->color_range == AVCOL_RANGE_JPEG
+                              ? D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_0_255
+                              : D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_16_235;
+    video_context->VideoProcessorSetStreamColorSpace(vp, 0, &in_cs);
+
+    D3D11_VIDEO_PROCESSOR_COLOR_SPACE out_cs{};
+    out_cs.Usage = 0;
+    out_cs.RGB_Range = 0;  // full-range RGB
+    out_cs.YCbCr_Matrix = 0;
+    out_cs.YCbCr_xvYCC = 0;
+    out_cs.Nominal_Range = D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_0_255;
+    video_context->VideoProcessorSetOutputColorSpace(vp, &out_cs);
+
+    D3D11_VIDEO_PROCESSOR_STREAM stream{};
+    stream.Enable = TRUE;
+    stream.OutputIndex = 0;
+    stream.InputFrameOrField = 0;
+    stream.PastFrames = 0;
+    stream.FutureFrames = 0;
+    stream.pInputSurface = in_view;
+    hr = video_context->VideoProcessorBlt(vp, out_view, 0, 1, &stream);
+    out_view->Release();
+    in_view->Release();
+    if (FAILED(hr)) {
+        return false;
+    }
+
+    if (gpu_only) {
+        // The presenter samples this texture on the same device. The two-slot
+        // ring keeps the previous frame alive while the next one is decoded.
+        out.rgba.clear();
+        out.gpu_view = vp_gpu_srv_[gpu_slot];
+        vp_gpu_slot_ = (gpu_slot + 1) & 1;
+        out.width = out_w;
+        out.height = out_h;
+        out.pq = false;
+        width_ = out_w;
+        height_ = out_h;
+        ++frame_count_;
+        return true;
+    }
+
+    out.gpu_view = nullptr;
+    auto* immediate = static_cast<ID3D11DeviceContext*>(vp_immediate_);
+    immediate->CopyResource(stage, out_tex);
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    hr = immediate->Map(stage, 0, D3D11_MAP_READ, 0, &mapped);
+    if (FAILED(hr)) {
+        return false;
+    }
+    const size_t row = static_cast<size_t>(out_w) * 4;
+    out.rgba.resize(row * static_cast<size_t>(out_h));
+    const auto* src = static_cast<const uint8_t*>(mapped.pData);
+    for (int y = 0; y < out_h; ++y) {
+        std::memcpy(out.rgba.data() + row * static_cast<size_t>(y),
+                    src + static_cast<size_t>(mapped.RowPitch) * static_cast<size_t>(y), row);
+    }
+    immediate->Unmap(stage, 0);
+    out.width = out_w;
+    out.height = out_h;
+    out.pq = false;
+    width_ = out_w;
+    height_ = out_h;
+    ++frame_count_;
+    return true;
+}
+
 bool Decoder::Convert(const void* frame_ptr, DecodedFrame& out) {
     auto* frame = static_cast<AVFrame*>(const_cast<void*>(frame_ptr));
     AVFrame* source = frame;
+
+    if (const char* vp_env = std::getenv("BRP_DECODE_VP")) {
+        vp_enabled_ = std::strcmp(vp_env, "0") != 0;
+    }
+    if (vp_enabled_ && !vp_failed_ && frame->hw_frames_ctx &&
+        frame->format == AV_PIX_FMT_D3D11 && frame->color_trc != AVCOL_TRC_SMPTE2084 &&
+        frame->colorspace != AVCOL_SPC_BT2020_NCL && frame->colorspace != AVCOL_SPC_BT2020_CL) {
+        const auto vp_started = std::chrono::steady_clock::now();
+        if (ConvertWithVideoProcessor(frame, out)) {
+            if (g_decode_probe.enabled) {
+                g_decode_probe.vp += DecodeProbe::Ms(vp_started,
+                                                      std::chrono::steady_clock::now());
+            }
+            return true;
+        }
+        // One failure is enough: swscale stays the safe path for this session.
+        vp_failed_ = true;
+        ReleaseVideoProcessor();
+        std::fprintf(stderr, "[decode] video-processor unavailable, using swscale\n");
+    }
 
     const auto transfer_started = std::chrono::steady_clock::now();
     if (frame->hw_frames_ctx) {
@@ -475,6 +812,7 @@ bool Decoder::Convert(const void* frame_ptr, DecodedFrame& out) {
     uint8_t* dst[4] = {out.rgba.data(), nullptr, nullptr, nullptr};
     int dst_linesize[4] = {source->width * 4, 0, 0, 0};
     sws_scale(Sws(scaler_), source->data, source->linesize, 0, source->height, dst, dst_linesize);
+    out.gpu_view = nullptr;
     width_ = out.width;
     height_ = out.height;
     ++frame_count_;

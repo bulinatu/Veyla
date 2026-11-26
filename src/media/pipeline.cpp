@@ -79,23 +79,34 @@ Presenter::~Presenter() {
 }
 
 bool Presenter::Init(HWND hwnd, const PresenterConfig& cfg) {
+    return InitWithDevice(hwnd, cfg, nullptr, nullptr);
+}
+
+bool Presenter::InitWithDevice(HWND hwnd, const PresenterConfig& cfg, ID3D11Device* device,
+                               ID3D11DeviceContext* context) {
     hwnd_ = hwnd;
     cfg_ = cfg;
 
-    UINT device_flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+    if (device && context) {
+        device_ = device;
+        context_ = context;
+    } else {
+        UINT device_flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 #if defined(_DEBUG)
-    device_flags |= D3D11_CREATE_DEVICE_DEBUG;
+        device_flags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
 
-    const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
-                                        D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0};
-    D3D_FEATURE_LEVEL got{};
-    HRESULT hr = ::D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, device_flags,
-                                     levels, static_cast<UINT>(std::size(levels)),
-                                     D3D11_SDK_VERSION, &device_, &got, &context_);
-    if (FAILED(hr)) {
-        std::fprintf(stderr, "D3D11CreateDevice failed: 0x%08lX\n", static_cast<unsigned long>(hr));
-        return false;
+        const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
+                                            D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0};
+        D3D_FEATURE_LEVEL got{};
+        HRESULT hr = ::D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, device_flags,
+                                         levels, static_cast<UINT>(std::size(levels)),
+                                         D3D11_SDK_VERSION, &device_, &got, &context_);
+        if (FAILED(hr)) {
+            std::fprintf(stderr, "D3D11CreateDevice failed: 0x%08lX\n",
+                         static_cast<unsigned long>(hr));
+            return false;
+        }
     }
 
     ComPtr<IDXGIDevice> dxgi_device;

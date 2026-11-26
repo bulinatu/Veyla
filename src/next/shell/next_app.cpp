@@ -15,6 +15,8 @@
 
 #include <windows.h>
 #include <commdlg.h>
+#include <d3d11.h>
+#include <d3d11_4.h>
 #include <mmsystem.h>
 #include <shellapi.h>
 #include <avrt.h>
@@ -254,6 +256,50 @@ NextApp::~NextApp() {
     StopNr();
     StopRifeThread();
     StopDlssFg();
+    if (decode_context_) {
+        decode_context_->Release();
+        decode_context_ = nullptr;
+    }
+    if (decode_device_) {
+        decode_device_->Release();
+        decode_device_ = nullptr;
+    }
+}
+
+bool NextApp::CreateDecodeDevice() {
+    // One device for d3d11va, the video processor and the stream presenter.
+    // VIDEO_SUPPORT lets FFmpeg create its decoder and video-processor
+    // interfaces on this device; multithread protection lets the decode thread
+    // and the presentation thread share the immediate context.
+    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
+#if defined(_DEBUG)
+    flags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
+    const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
+    D3D_FEATURE_LEVEL got{};
+    HRESULT hr = ::D3D11CreateDevice(
+        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, levels,
+        static_cast<UINT>(std::size(levels)), D3D11_SDK_VERSION, &decode_device_, &got,
+        &decode_context_);
+    if (FAILED(hr)) {
+        std::fprintf(stderr, "[decode] shared device unavailable: 0x%08lX\n",
+                     static_cast<unsigned long>(hr));
+        decode_device_ = nullptr;
+        decode_context_ = nullptr;
+        return false;
+    }
+    Microsoft::WRL::ComPtr<ID3D11Multithread> multithread;
+    if (SUCCEEDED(decode_device_->QueryInterface(IID_PPV_ARGS(&multithread)))) {
+        multithread->SetMultithreadProtected(TRUE);
+    }
+    return true;
+}
+
+bool NextApp::NeedsCpuPixels() const {
+    // Every AI stage consumes tightly packed RGBA in system memory: DLSS SR
+    // and RIFE in-process, NR and DLSS-G in the worker.
+    return settings_.ai.super_resolution || settings_.ai.neural_render ||
+           settings_.ai.frame_generation;
 }
 
 int NextApp::Run() {
@@ -436,6 +482,7 @@ bool NextApp::Init() {
         return false;
     }
     presenter_ = std::make_unique<brp::Presenter>();
+    CreateDecodeDevice();
     brp::PresenterConfig config;
     config.output_width = window_->width();
     config.output_height = window_->height();
@@ -474,6 +521,10 @@ bool NextApp::Init() {
     streaming_ = std::make_shared<StreamingService>(paths_.session_file,
                                                     paths_.legacy_settings);
     streaming_->Load();
+    if (decode_device_ && decode_context_) {
+        streaming_->SetExternalDevice(decode_device_, decode_context_);
+        streaming_->SetCpuPixels(NeedsCpuPixels());
+    }
     host_->Services().Set<IStreamingService>(
         std::static_pointer_cast<IStreamingService>(streaming_));
     {
@@ -620,7 +671,12 @@ bool NextApp::EnsureStreamSurface() {
         config.vsync = settings_.video.vsync;
         config.allow_tearing = !settings_.video.vsync;
         config.hdr = false;
-        if (!presenter->Init(stream_window_->hwnd(), config)) {
+        const bool shared = decode_device_ && decode_context_;
+        const bool ok =
+            shared ? presenter->InitWithDevice(stream_window_->hwnd(), config, decode_device_,
+                                              decode_context_)
+                   : presenter->Init(stream_window_->hwnd(), config);
+        if (!ok) {
             Toast(L"Cannot create the stream presenter", true);
             return false;
         }
@@ -2367,6 +2423,9 @@ bool NextApp::Apply() {
     }
     settings_ = host_->Settings();
     last_apply_scope_ = scope;
+    if (streaming_) {
+        streaming_->SetCpuPixels(NeedsCpuPixels());
+    }
     haptic_strength_.store(settings_.controller.rumble_strength);
     pad_rate_hz_.store(std::clamp(settings_.controller.poll_hz, 60, 1000));
     ApplyPresenterTarget();
@@ -3423,6 +3482,13 @@ void NextApp::PresentVideo() {
                                            video_frame_.height, video_frame_.pq);
                 video->SetSourceFinal(false);
                 video->Render(now_);
+            } else if (have_frame_ && video_frame_.gpu_view) {
+                // GPU-only frame: the picture is already an RGBA texture on the
+                // presenter's device.
+                video->SetSourceView(static_cast<ID3D11ShaderResourceView*>(video_frame_.gpu_view),
+                                          video_frame_.width, video_frame_.height, false);
+                video->SetSourceFinal(false);
+                video->Render(now_);
             } else {
                 video->Clear(background);
             }
@@ -3580,7 +3646,7 @@ void NextApp::PresentVideo() {
         new_frame = true;
         EnhanceNeural(video_frame_);
     }
-    if (!have_frame_ || video_frame_.rgba.empty()) {
+    if (!have_frame_ || (video_frame_.rgba.empty() && !video_frame_.gpu_view)) {
         const float background[4] = {0.015f, 0.017f, 0.022f, 1.0f};
         video->Clear(background);
         return;
@@ -3591,7 +3657,14 @@ void NextApp::PresentVideo() {
     if (new_frame) {
         bool sr_drawn = false;
         const auto sr_started = std::chrono::steady_clock::now();
-        if (EnsureDlssSr(width, height)) {
+        if (video_frame_.gpu_view && video_frame_.rgba.empty()) {
+            // No AI stage needs system memory: present the video-processor
+            // output in place, with no readback and no swscale.
+            video->SetSourceView(static_cast<ID3D11ShaderResourceView*>(video_frame_.gpu_view),
+                                      width, height, false);
+            video->SetSourceFinal(false);
+            sr_drawn = true;
+        } else if (EnsureDlssSr(width, height)) {
             brp::media::NvDlssSr::Frame sr_frame;
             std::string detail;
             const int iw = dlss_sr_->in_width();
@@ -4323,6 +4396,7 @@ void NextApp::ConnectStream() {
     OpenAudio();
     streaming_->SetAudio(audio_.is_open() ? &audio_ : nullptr);
     streaming_->SetStreamSettings(settings_.streaming);
+    streaming_->SetCpuPixels(NeedsCpuPixels());
     const Status status = streaming_->Connect(console);
     if (status.ok()) {
         stream_restart_pending_ = false;

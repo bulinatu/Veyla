@@ -107,6 +107,7 @@ private:
     std::condition_variable cv_;
     std::optional<Job> pending_;
     bool run_ = false;
+    std::atomic<bool> stopping_{false};
     std::atomic<bool> log_run_{false};
     std::mutex log_mutex_;
     std::condition_variable log_cv_;

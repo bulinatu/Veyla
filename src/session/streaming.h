@@ -94,6 +94,14 @@ public:
     double fps() const;
     std::string decoder_name() const { return decoder_.backend_name(); }
 
+    // Optional shared D3D11 device (from the presenter) and whether the CPU
+    // needs RGBA pixels. Both are set by the shell before/while streaming.
+    void SetExternalDevice(void* device, void* context) {
+        decoder_.SetExternalDevice(device, context);
+    }
+    void SetCpuPixels(bool cpu) { decoder_.SetCpuPixels(cpu); }
+    bool shared_device() const { return decoder_.shared_device(); }
+
     void SendController(const PadState& pad);
     void SetMotionEnabled(bool enabled) { motion_enabled_ = enabled; }
 

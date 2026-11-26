@@ -63,7 +63,12 @@ public:
     Presenter(const Presenter&) = delete;
     Presenter& operator=(const Presenter&) = delete;
 
+    // Creates its own D3D11 device.
     bool Init(HWND hwnd, const PresenterConfig& cfg);
+    // Reuses an existing device/context (the decoder's, so decoded textures
+    // can be sampled directly without a cross-device copy).
+    bool InitWithDevice(HWND hwnd, const PresenterConfig& cfg, ID3D11Device* device,
+                        ID3D11DeviceContext* context);
 
     // Recreates swapchain buffers. Safe to call on every WM_SIZE.
     bool Resize(int width, int height);

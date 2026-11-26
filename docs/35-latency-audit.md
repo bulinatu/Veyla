@@ -150,3 +150,44 @@ D3D11VA decode into a texture shared with the presenter, a YUV->RGB shader
 pass, and a GPU path into DLSS SR. That removes the 1.4 ms transfer and the
 5.8 ms swscale from every frame.
 
+## Round 3: the GPU end-to-end path (2.5.0)
+
+Done. The shell now creates one D3D11 device with `VIDEO_SUPPORT` and
+multithread protection. FFmpeg decodes d3d11va on that device, the video
+processor converts its NV12/P010 surface to RGBA on the same device, and the
+stream presenter is created on it too. What happens next depends on whether an
+AI stage needs CPU pixels:
+
+- **No AI (NR/SR/FG all off):** the video-processor output stays a texture on
+  the shared device and the presenter samples it through an SRV. No GPU->CPU
+  transfer, no swscale, no RGBA upload and no readback. `DecodedFrame::gpu_view`
+  carries the SRV; `rgba` stays empty.
+- **Any AI on:** the same video-processor blit writes to a staging texture and
+  the CPU reads the RGBA result, because DLSS SR/RIFE and the NR/FG worker all
+  take system-memory RGBA. This is the minimum the current worker protocol
+  allows.
+
+Measured with the frame probe on the same console and PC:
+
+| Mode | Before | After |
+|---|---|---|
+| AI off, 1080p60 in, 1440p out | dec 8.2-8.5 ms, loop p50 ~6.9 ms | **dec 0.37-0.48 ms, loop p50 0.67-0.70 ms** |
+| AI off, presentation | 239.8 Hz, 0 misses | 240.0 Hz, 0 misses, age 0.2-0.3 ms |
+| AI on (SR + NR 3 passes + FG 4x) | dec 8.2-8.5 ms | **dec 2.8-3.5 ms** |
+| AI on, steady state | n/a | loop p50 4.5 ms, worker 9.9-12.5 ms, 0 drops |
+
+Visual verification: screen captures in both modes show correct BT.709 colours
+(red car, green grass, skin tones) and no crop/offset; the coded surface is
+1920x1152, the stream is 1920x1080, and the video-processor source rect crops
+the padding.
+
+Turning AI off live drops the next frames back to 0.1 ms decode and 240 Hz
+scanout; turning it on pays the known one-time NGX/worker start (~5 s) and then
+settles at 3 ms decode. The DLSS-G worker stop no longer logs a spurious
+`pipe closed` failure: an intentional `Stop()` is distinguished from a runtime
+failure.
+
+The worker itself is still fed RGBA over shared memory. A fully GPU NR/FG path
+would need a texture-input protocol in `nr/native/nvngx.dll` (or in-process
+NGX); the worker's existing WGC capture mode is not a latency win because it
+adds a window-capture frame before the neural pass.

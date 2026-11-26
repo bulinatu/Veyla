@@ -109,7 +109,7 @@ Measured on the user's PS5 through the harness: 1920x1080p60 HEVC at
 |---|---|---|
 | Console profile | always 1920x1080p60 HEVC (Remote Play's only profile) | input-resolution setting was dead; row removed |
 | Network | loss 0.00 %, jitter 16.67-16.70 ms, 0 decoder drops steady | clean |
-| Decode (d3d11va) | 8.2-8.5 ms = 1.4 transfer + 0.85 resize + 5.8 swscale | expected; bicubic is the fastest filter here |
+| Decode (d3d11va) | 3.0-3.5 ms with AI on (GPU video processor + one readback); 0.4 ms and no readback with AI off | GPU end-to-end; swscale gone |
 | Frame queue / age | queue 0, age 0-1.4 ms (buffer 0) | lowest-latency path |
 | DLSS SR DLAA | submit 0.55 ms, output view used directly (no readback) | clean |
 | DLSS SR 1440p Max | submit 0.5-0.9 ms, 5.5-8.7 ms per frame incl. worker readback | GPU-bound, correct |
@@ -170,3 +170,18 @@ window the user had before the session.
 `docs/37-pxplay-latency.md` compares the PXPlay / PS Remote Play client paths
 with ours and lists the remaining decode and worker headroom.
 
+## GPU decode and presentation
+
+The shell now creates one D3D11 device with `VIDEO_SUPPORT` and multithread
+protection. d3d11va decodes on it, the video processor converts NV12/P010 to
+RGBA on it, and the stream presenter is created on it:
+
+- **AI off:** the RGBA texture is presented in place. No GPU->CPU transfer, no
+  swscale, no upload, no readback. Probe: `dec 0.37-0.48 ms`, loop p50
+  `0.67 ms`, 240 Hz scanout, zero present misses.
+- **AI on:** one staging readback feeds the existing RGBA consumers. Probe:
+  `dec 2.8-3.5 ms` (was 8.2-8.5), worker unchanged, zero drops.
+- PQ/BT.2020 and any unsupported driver/format fall back to the old swscale
+  path automatically; `BRP_DECODE_VP=0` forces the fallback.
+- Turning AI off live returns to the 0.1 ms path on the next frame; turning it
+  on pays the known one-time NGX/worker start (~5 s).

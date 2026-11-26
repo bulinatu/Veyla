@@ -124,6 +124,7 @@ bool DlssFg::Start(const std::wstring& runtime_dir, int width, int height, int m
     }
 
     run_ = true;
+    stopping_.store(false);
     thread_ = std::thread([this]() { WorkerMain(); });
     log_run_.store(true);
     log_thread_ = std::thread([this]() { LogMain(); });
@@ -134,6 +135,7 @@ bool DlssFg::Start(const std::wstring& runtime_dir, int width, int height, int m
 }
 
 void DlssFg::Stop() {
+    stopping_.store(true);
     {
         std::lock_guard<std::mutex> lock(mutex_);
         run_ = false;
@@ -242,6 +244,9 @@ void DlssFg::WorkerMain() {
                               std::chrono::steady_clock::now() - process_started)
                               .count());
         if (!processed) {
+            if (stopping_.load()) {
+                return;  // intentional shutdown: not a runtime failure
+            }
             failed_.store(true);
             {
                 std::lock_guard<std::mutex> lock(note_mutex_);

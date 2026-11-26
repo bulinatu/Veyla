@@ -23,6 +23,9 @@
 #include <thread>
 #include <vector>
 
+struct ID3D11Device;
+struct ID3D11DeviceContext;
+
 namespace brp {
 class Win32Window;
 class Presenter;
@@ -124,6 +127,12 @@ private:
 
     std::unique_ptr<brp::Win32Window> window_;
     std::unique_ptr<brp::Presenter> presenter_;
+    // Shared decode/present device. When it exists, d3d11va decodes on it and
+    // the stream presenter samples the video-processor output in place.
+    ID3D11Device* decode_device_ = nullptr;
+    ID3D11DeviceContext* decode_context_ = nullptr;
+    bool CreateDecodeDevice();
+    bool NeedsCpuPixels() const;
     std::unique_ptr<brp::Win32Window> stream_window_;
     std::unique_ptr<brp::Presenter> stream_presenter_;
     std::unique_ptr<brp::ui::Renderer> renderer_;

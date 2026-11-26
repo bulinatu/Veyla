@@ -49,9 +49,9 @@ Sony's client is simpler and more fixed:
 | Technique | PXPlay | PS Remote Play | BetterRemotePlay 2.5.0 |
 |---|---|---|---|
 | Hardware video decode | yes | yes | yes (d3d11va) |
-| Decode output stays on the GPU | yes | yes | **no** - transferred to CPU |
-| CPU YUV -> RGBA conversion | no | no | **yes**, ~5.8 ms/frame |
-| CPU RGBA -> GPU upload | no | no | yes, `UpdateSubresource` |
+| Decode output stays on the GPU | yes | yes | **yes when AI is off; readback for AI** |
+| CPU YUV -> RGBA conversion | no | no | **no - GPU video processor** |
+| CPU RGBA -> GPU upload | no | no | no (AI-off path presents the GPU texture) |
 | Frame queue | 0-1, configurable | minimal | 0 (buffer 0) |
 | Present pacing | immediate/waitable | compositor | waitable, max latency 1 |
 | Vsync / tearing control | yes | platform | yes (`video.vsync`) |
@@ -82,37 +82,31 @@ behind the 16.7 ms frame interval, but it is still frame age, not throughput.
 
 ## Actionable items, in order of value
 
-### 1. A GPU-only path when AI is off (saves ~7-9 ms of frame age)
+### 1. GPU end-to-end when AI is off (done in 2.5.0, saves 7.5 ms)
 
-This is the one change that closes the gap to PXPlay for plain streaming:
+Implemented. The shell creates one D3D11 device with `VIDEO_SUPPORT` and
+multithread protection; FFmpeg decodes d3d11va on it, `ID3D11VideoProcessorBlt`
+converts NV12/P010 to RGBA on it, and the stream presenter is created on it.
+With NR/SR/FG all off the RGBA result stays in a texture and the presenter
+samples it directly: no transfer, no swscale, no upload, no readback. Decode
+drops from 8.2-8.5 ms to **0.37-0.48 ms**, the loop from ~6.9 ms to
+**0.67 ms**, and scanout stays at 240 Hz with zero present misses.
 
-- Create FFmpeg's D3D11VA device on the presenter's `ID3D11Device` (or share
-  the decoded texture through a keyed mutex).
-- Keep the decoder output as NV12/P010 and expose it to the presenter as a
-  shader resource.
-- Add a YUV -> RGB shader pass (or `ID3D11VideoProcessorBlt`) with the same
-  BT.709/BT.2020, limited-range handling that `sws_scale` does today.
-- Keep the existing CPU conversion as the path for DLSS SR/NR/FG, because those
-  take RGBA buffers.
+### 2. GPU colour conversion when AI is on (done in 2.5.0, saves ~5 ms)
 
-Expected: removes the 1.4 ms transfer and the 5.8 ms swscale, and replaces the
-CPU upload with a GPU copy. Frame age drops by roughly 7-9 ms in the mode that
-does not use AI at all.
+The AI stages still need tightly packed RGBA in system memory, so this path
+keeps one readback but removes the CPU YUV conversion. Decode drops from
+8.2-8.5 ms to **2.8-3.5 ms** with SR + NR + FG active. A fully GPU NR/FG path
+would need a texture-input protocol in the worker (see the end of this
+document); the worker's WGC capture mode adds a capture frame and is not a
+latency win.
 
-### 2. Stop reallocating and zero-filling the RGBA buffer (saves ~0.9 ms)
+### 3. Recycle the RGBA readback/staging buffers (saves ~0.5-1 ms)
 
-`Decoder::Convert` calls `out.rgba.resize(8 MB)` every frame, and the AI path
-moves the buffer into the worker, so the next frame grows a fresh vector and
-zero-fills it before `sws_scale` overwrites every byte. A small buffer pool
-(three or four buffers, returned by the worker) removes the allocation, the
-zero fill and the allocator jitter. This is independent of item 1 and cheap.
-
-### 3. Upload the RGBA frame without a full `UpdateSubresource` (saves ~1 ms)
-
-When the CPU path stays, a `D3D11_USAGE_DYNAMIC` source texture written with
-`Map(WRITE_DISCARD)` is usually faster than `UpdateSubresource` on a default
-texture for an 8 MB frame, and it avoids a driver-side staging copy. Measure
-both on the target GPU before switching; the win is driver-dependent.
+The AI path still allocates and zero-fills the RGBA output vector when the
+previous one was moved into the worker/SR. A small buffer pool removes the
+allocation and the 8 MB zero fill. This is the remaining cheap win on the
+AI-on path.
 
 ### 4. Keep the presenter settings as they are
 

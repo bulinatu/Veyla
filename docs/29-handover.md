@@ -1452,7 +1452,7 @@ stopped presenting them as if they did something.
 - Patch verified: `version=2.5.0`, 0 markers, RIFE files removed, files identical to dist.
 - Details: docs/36-shell-2.5.md and docs/35-latency-audit.md.
 
-- Hotfix for earlier 2.5.0 builds (live neural tuning + worker NR): 
+- Hotfix for earlier 2.5.0 builds (live neural tuning + worker NR):
   `dist/BetterRemotePlay-2.5.0-hotfix-update.exe` (5.34 MB)
   SHA256 `C199BA3BADFA9D8E73CE88F1AAA8D57DEDB0165A604062079A1BA371088F52AB`
   Built with `tools/make_update.ps1 -BaselineFolder` against a hardlinked
@@ -1474,11 +1474,11 @@ stopped presenting them as if they did something.
   that removes RIFE no longer leaves `rife\` or the markers behind.
 - New artifacts:
   - `dist/BetterRemotePlay-2.5.0-standalone-norife.zip` SHA256
-    `8A415DFE5542204FFF081FC01D9153DB5B9E92EAD4B372CAE1A4A2F3B6F81F26`
+    `02E5A579D918BF43EB3DC88B213488FB8D9B49B7A7094EB1C2D665168A8C5D66`
   - `dist/BetterRemotePlay-2.5.0-hotfix-update.exe` (4.67 MB) SHA256
-    `632D803B9742D9C82E051F4C9733BDDEF1F21D9EAA377AA9970EB5C1E78907A6`
+    `535A5B6C7F40ABD8A9BDF7F0FB93EAEC926151A1B7C625CE2B40B8EDE4491577`
 - `brpnext.exe` `3C89E3E6DFE48807EC869BF937FA6E01A24EE1510C9D14E0A174D19D4C0429F5`
-- `brpnext-engine.exe` `D03DF17944C7AF4C1E0053C9E1AB65D0CAA0335EAB73243C598B98212FF8E10D`
+- `brpnext-engine.exe` `E42D0696A40FE875DD7831F29004EA2EF9F9051E194FB25E24A77C42CD02826D`
 - `update.exe` `53A7F84F102CF2B4D45ADD06C58298604BF03804F3A7940DFECCA3287C8FA083`
 - Patch verified on a copy of the earlier 2.5.0: version 2.5.0, no markers,
   `rife\` and its logs removed, every file identical to dist except the
@@ -1486,3 +1486,17 @@ stopped presenting them as if they did something.
   own copy).
 - Research: `docs/37-pxplay-latency.md` (PXPlay / PS Remote Play paths and the
   remaining decode and worker headroom).
+
+## 2.5.0 - GPU decode and presentation
+
+- One D3D11 device (VIDEO_SUPPORT + multithread protection) is now shared by
+  the d3d11va decoder, the video processor and the stream presenter. The CPU
+  YUV->RGBA swscale path is gone for d3d11va.
+- **AI off:** the RGBA result stays a texture and the presenter samples it;
+  no transfer, no upload, no readback. Probe: `dec 0.37-0.48 ms`, loop p50
+  `0.67 ms`, 240 Hz scanout, zero present misses.
+- **AI on:** one staging readback feeds the RGBA consumers. Probe:
+  `dec 2.8-3.5 ms` (was 8.2-8.5) with SR + NR + FG active, zero drops.
+- PQ/BT.2020 and unsupported drivers fall back to swscale; `BRP_DECODE_VP=0`
+  forces the old path.
+- Details and measurements: `docs/35-latency-audit.md` (Round 3).

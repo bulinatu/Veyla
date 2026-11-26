@@ -282,7 +282,8 @@ if(EXISTS "${FFMPEG_ROOT}/lib/avcodec.lib")
         "${FFMPEG_ROOT}/lib/avformat.lib"
         "${FFMPEG_ROOT}/lib/avutil.lib"
         "${FFMPEG_ROOT}/lib/swscale.lib"
-        "${FFMPEG_ROOT}/lib/swresample.lib")
+        "${FFMPEG_ROOT}/lib/swresample.lib"
+        d3d11)
     add_executable(decode_probe tools/decode_probe/main.cpp)
     target_link_libraries(decode_probe PRIVATE brp_decode)
     add_executable(scale_probe tools/scale_probe/main.cpp)
