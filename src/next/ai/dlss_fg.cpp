@@ -197,6 +197,7 @@ void DlssFg::Submit(std::vector<std::uint8_t> rgba, int width, int height) {
 }
 
 void DlssFg::WorkerMain() {
+    ::SetThreadPriority(::GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
     for (;;) {
         Job job;
         {

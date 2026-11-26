@@ -35,9 +35,14 @@ void DownscaleRgba(const uint8_t* src, int sw, int sh, uint8_t* dst, int dw, int
     (void)temp;
 
     // Column layout: exact area spans, computed once with an accumulator so
-    // there is no integer division in the pixel loops.
-    std::vector<int> col_start(static_cast<size_t>(dw));
-    std::vector<uint8_t> col_span(static_cast<size_t>(dw));
+    // there is no integer division in the pixel loops. The scratch vectors are
+    // thread-local: this runs once per reconstructed frame, and re-allocating
+    // them on every call was pure allocator churn.
+    static thread_local std::vector<int> col_start;
+    static thread_local std::vector<uint8_t> col_span;
+    static thread_local std::vector<uint32_t> sums;
+    col_start.resize(static_cast<size_t>(dw));
+    col_span.resize(static_cast<size_t>(dw));
     {
         const int base = sw / dw;
         const int extra = sw % dw;
@@ -65,7 +70,7 @@ void DownscaleRgba(const uint8_t* src, int sw, int sh, uint8_t* dst, int dw, int
         }
     }
 
-    std::vector<uint32_t> sums(static_cast<size_t>(dw) * 4);
+    sums.resize(static_cast<size_t>(dw) * 4);
     for (int y = 0; y < dh; ++y) {
         // Row span for this output row.
         int row_start = y * sh / dh;

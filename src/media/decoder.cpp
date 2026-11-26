@@ -263,6 +263,9 @@ bool Decoder::InitCodec(const void* codec_ptr, const void* params_ptr, std::stri
     std::fprintf(stderr, "[decode] backend=%s requested=%d%s%s\n", backend_name_.c_str(),
                  static_cast<int>(requested_backend_),
                  backend_note_.empty() ? "" : " note=", backend_note_.c_str());
+    // Reorder delay: if this is zero the decoder already emits in display
+    // order and AV_CODEC_FLAG_LOW_DELAY has nothing to save.
+    std::fprintf(stderr, "[decode] reorder has_b_frames=%d\n", Ctx(codec_)->has_b_frames);
 
     codec_name_ = decoder->name;
     width_ = Ctx(codec_)->width;

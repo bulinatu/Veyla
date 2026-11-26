@@ -1474,11 +1474,11 @@ stopped presenting them as if they did something.
   that removes RIFE no longer leaves `rife\` or the markers behind.
 - New artifacts:
   - `dist/BetterRemotePlay-2.5.0-standalone-norife.zip` SHA256
-    `EAFFD6A2398C019CA6F65645E0B485656B352355ECA2F3F955F7058FDAC07705`
+    `E8C33109B5B71C4C6D8CC4F069488610A0A5B174D03CCEEA5B218FC693266D97`
   - `dist/BetterRemotePlay-2.5.0-hotfix-update.exe` (48.85 MB) SHA256
-    `A0D2767B166C1BAD329FCC45E09554F8BD9A8A4256B1CD2B106F4469B90F85DE`
-- `brpnext.exe` `9982A30CDAA2BC07814C735B60A2CBF6D6BE09022A26DBD7221462DC0C4D9B10`
-- `brpnext-engine.exe` `BD90D1D070743B5D00740CDE5A0098A4A4B0745EF9E20E2569AAFB55753109F2`
+    `926F0F20CB3323000F3B54D46D507B89D2D6631A34E65FA2E3D2EB03FF6AF2A5`
+- `brpnext.exe` `5186242F945B0428DBF33EE4371B3CE4DD14739001E0079EABB1216F2634076A`
+- `brpnext-engine.exe` `34A2567BA1D465F884101C33777C62BFE4126EEAA887C142E3AFAD6F4A0C0817`
 - `nvngx_dlss.dll` `858CCFF96360C3098DB9264CD6F13D04A027E09B6CE7AD5BBC297570E824B4F2`
   (310.9.16, DLSS 4.5)
 - `app.ico` `0D25A89AB2C9E0EF50F38B642B5EB60BB791FE3654E4024E7D712A80A62224D2`
@@ -1574,3 +1574,17 @@ stopped presenting them as if they did something.
   ~17 ms later. The multiplier hint now states this.
 - In FG mode the standalone NR probe is zeroed; the live neural time is the
   worker's `fg` field (NR + generation together).
+
+## 2.5.0 - optimization pass
+
+- NR passes are forced to 1 when Boost is off (work scale 100 %); the worker
+  cannot use a cascade at full size. The UI shows "Passes in use: 1" until the
+  scale drops below 100 %.
+- DLSS-G feed thread is `THREAD_PRIORITY_ABOVE_NORMAL`.
+- Decoder logs `has_b_frames` at open: the PS5 stream reports 0 reorder frames,
+  so `AV_CODEC_FLAG_LOW_DELAY` has nothing to save and stays off.
+- `DownscaleRgba` reuses thread-local span/sum buffers instead of allocating
+  three vectors per reconstructed frame.
+- Research and reference: `docs/38-streaming-apps.md` (PXPlay, chiaki-ng,
+  Moonlight/Sunshine, Parsec) and `docs/39-organization.md` (what is used,
+  `attic/`, `dist/archive/`).

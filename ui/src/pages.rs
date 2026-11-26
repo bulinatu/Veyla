@@ -975,6 +975,12 @@ impl Root {
                 "",
                 cx,
             ))
+            .when(self.settings.i("ai.neural_scale", 100) >= 100, |el| {
+                el.child(widgets::kv(
+                    "Passes in use",
+                    "1 — lower Work scale below 100% to enable Boost",
+                ))
+            })
             .child(self.slider_row(
                 "ai.neural_scale",
                 "Work scale",

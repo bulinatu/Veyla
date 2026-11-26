@@ -56,7 +56,11 @@ brp::media::NvDlssnr::Options NeuralOptionsFrom(const AiSettings& ai) {
     options.skin_structure = std::clamp(ai.neural_skin, 0, 9999) / 100.0f;
     options.auto_mask = ai.neural_mask;
     options.ui_correction = ai.neural_ui;
-    options.passes = std::clamp(ai.neural_render ? ai.neural_passes : 1, 1, 9999);
+    // Passes only exist with Boost (a work scale below 100 %); at full size the
+    // worker runs one effective pass anyway, so do not ask it to allocate a
+    // cascade that cannot be used.
+    const bool boost = ai.neural_render && ai.neural_scale < 100;
+    options.passes = std::clamp(boost ? ai.neural_passes : 1, 1, 9999);
     options.work_scale =
         std::clamp(ai.neural_render ? ai.neural_scale : 100, 1, 9999) / 100.0f;
     options.inject_fg_proxy = false;

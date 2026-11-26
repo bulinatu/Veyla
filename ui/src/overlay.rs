@@ -619,7 +619,8 @@ impl OverlayView {
                 rows.push(self.slider_row("ai.neural_tone", "Local tone", "%", cx));
                 rows.push(self.slider_row("ai.neural_structure", "Local structure", "%", cx));
                 rows.push(self.slider_row("ai.neural_skin", "Skin structure", "%", cx));
-                rows.push(self.slider_row("ai.neural_passes", "Passes", "", cx));
+                rows.push(self.slider_row("ai.neural_passes", "Passes",
+                                  "Above 1 needs Boost (scale < 100%)", cx));
                 rows.push(self.slider_row("ai.neural_scale", "Work scale", "%", cx));
                 rows.push(self.toggle_row(
                     "ai.neural_ui",

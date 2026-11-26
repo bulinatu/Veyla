@@ -214,8 +214,8 @@ Measured with 1080p60 in / 1440p out:
 |---|---|---|---|---|
 | SR only, FG off | 0.77 ms | **0** (SRV direct) | - | 0 |
 | FG 2x, 60 fps, NR off | 0.52 ms | 7.2 ms (1440p RGBA) | 7.2 ms | 1 output frame (~8.3 ms) |
-| FG 4x, 30 fps, NR off | 0.58 ms | ~7 ms | ~10 ms | 3 output frames (~25 ms) |
-| FG 4x, 30 fps, NR 3 passes / 100 % | 6.6 ms | ~7 ms | 13.6 ms | 3 output frames + NR |
+| FG 4x, 30 fps, NR off | 0.58 ms | ~7 ms (1440p) | ~10 ms | 3 output frames (~25 ms) |
+| FG 4x, 30 fps, DLAA 1080p, NR 3 passes / 100 % | 0.46 ms | 3.5 ms | 8.3 ms | 3 output frames + NR |
 | AI off | - | - | - | **0.4 ms decode, 0.2 ms age** |
 
 The SR-only path is effectively free. With FG on, the 1440p RGBA readback is

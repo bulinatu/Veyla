@@ -15,6 +15,7 @@ cmake_install.cmake
 vcpkg_installed/
 third-party/build/
 .deps/
+attic/
 
 # Python / tooling
 __pycache__/
