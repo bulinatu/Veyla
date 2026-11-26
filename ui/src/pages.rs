@@ -557,6 +557,13 @@ impl Root {
                     cx,
                 ),
                 self.toggle_row("video.vsync", "VSync", "Lock presentation to the display", cx),
+                self.seg_int_row(
+                    "video.reflex",
+                    "NVIDIA Reflex",
+                    "Parent presenter only; DLSS-G owns its own swapchain",
+                    &[(0, "Off"), (1, "On"), (2, "Boost")],
+                    cx,
+                ),
                 self.stepper_row(
                     "video.sharpening",
                     "Sharpening",

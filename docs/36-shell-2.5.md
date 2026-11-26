@@ -205,6 +205,29 @@ Auto replaces the old hard-coded preset 12: L was being used for DLAA and
 Quality, where K is the correct default. The 310.9.16 runtime is required for L
 and M (DLSS 4.5); with the older runtime those presets fall back to defaults.
 
+## NVIDIA Reflex (markers + boost, no sleep)
+
+`video.reflex` adds Off / On / Boost on the Video page and the in-game Video
+tab. The implementation sends the NVIDIA latency markers around the parent
+presenter (`SIMULATION_START/END`, `RENDERSUBMIT_START/END`,
+`PRESENT_START/END`) and asks the driver for marker use and, in Boost mode, the
+low-latency clock boost.
+
+The driver's sleep stage (`NvAPI_D3D_Sleep`) is deliberately **not** called:
+measured on the reference machine it changes the waitable present cadence to
+~225 Hz with 56+ missed refreshes per second, which costs more than it can ever
+save on a remote stream. With markers only, the presenter stays at 240.0 Hz
+with zero missed refreshes. Reflex cannot touch the console's input path; on a
+video stream the useful part is the boost and the driver-side frame bookkeeping,
+not a lower button-to-photon number.
+
+**Scope.** The markers are set on the engine's parent presenter, which covers
+DLSS SR and standalone NR (they still end in that swapchain). With DLSS-G the
+worker owns a separate swapchain in its own process; Reflex must be initialised
+there to cover generated frames, and the worker does not do that today. The
+setting is therefore a no-op for the FG-presented path, not a hidden one.
+
+
 ## Multi Frame Generation 5x/6x
 
 The multiplier selector offers 2x-6x on every RTX card. 3x-6x load the bundled

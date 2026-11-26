@@ -35,6 +35,7 @@ class Renderer;
 namespace media {
 class NvDlssSr;
 class NvDlssnr;
+class NvReflex;
 class Rife;
 }
 }  // namespace brp
@@ -133,6 +134,7 @@ private:
     ID3D11DeviceContext* decode_context_ = nullptr;
     bool CreateDecodeDevice();
     bool NeedsCpuPixels() const;
+    void ApplyReflex();
     std::unique_ptr<brp::Win32Window> stream_window_;
     std::unique_ptr<brp::Presenter> stream_presenter_;
     std::unique_ptr<brp::ui::Renderer> renderer_;
@@ -190,6 +192,10 @@ private:
     HHOOK keyboard_hook_ = nullptr;
     std::wstring audio_note_;
     std::unique_ptr<brp::media::NvDlssSr> dlss_sr_;
+    std::unique_ptr<brp::media::NvReflex> reflex_;
+    int reflex_applied_ = -1;
+    bool reflex_failed_ = false;
+    void* reflex_device_ = nullptr;
     bool dlss_ready_ = false;
     bool dlss_failed_ = false;
     int dlss_in_w_ = 0;

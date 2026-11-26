@@ -669,6 +669,13 @@ impl OverlayView {
                     "Lock presentation to the display",
                     cx,
                 ));
+                rows.push(self.seg_row(
+                    "video.reflex",
+                    "NVIDIA Reflex",
+                    "Parent presenter; DLSS-G worker not covered",
+                    &[(0, "Off"), (1, "On"), (2, "Boost")],
+                    cx,
+                ));
             }
             5 => {
                 rows.push(self.seg_row(

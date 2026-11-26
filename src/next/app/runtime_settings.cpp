@@ -62,6 +62,7 @@ ApplyScope ClassifySettingsChange(const AppSettings& before, const AppSettings& 
         a.video.render_target != b.video.render_target ||
         a.video.vsync != b.video.vsync || a.video.vrr != b.video.vrr ||
         a.video.hdr != b.video.hdr ||
+        a.video.reflex != b.video.reflex ||
         a.video.sharpening != b.video.sharpening ||
         a.video.color_space != b.video.color_space) {
         bump(ApplyScope::PipelineReconfiguration);

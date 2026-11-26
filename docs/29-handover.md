@@ -1474,11 +1474,11 @@ stopped presenting them as if they did something.
   that removes RIFE no longer leaves `rife\` or the markers behind.
 - New artifacts:
   - `dist/BetterRemotePlay-2.5.0-standalone-norife.zip` SHA256
-    `9A93B12955E58BA2B1907084A7A36B6E43CD0C9B297C69AA565631AD72FA5EDC`
+    `FB06640AE8CEE13B8B549A4A3402380461BF260B075B32CC21BCF420229C0A81`
   - `dist/BetterRemotePlay-2.5.0-hotfix-update.exe` (47.93 MB) SHA256
-    `21DF5200F20801D889C531A81E37BA96CBF20ED8E5CF5D85918E1EF47B5AF1D6`
-- `brpnext.exe` `F17A817EEAFB1087D2BC4E54BD5621AA5605BF01E6F6BFE1F31D86BC14ED36CB`
-- `brpnext-engine.exe` `AC1A318A2C11749933278F1C93E855239DBB83D1214426277948572156F04A24`
+    `BACD294DEB5FD27961C8CF37959A474DDCD07ACD849D00F483D65EB6D2FA2C66`
+- `brpnext.exe` `F2AA1D313FE399A110E032524DC46B144982F52241C8B2EBBF320AA0CC49F8E5`
+- `brpnext-engine.exe` `C0F3629FD9EC9A3F2FE966DA2F6879DD68C63C82CB25567B625C20A34A0FAB10`
 - `nvngx_dlss.dll` `858CCFF96360C3098DB9264CD6F13D04A027E09B6CE7AD5BBC297570E824B4F2`
   (310.9.16, DLSS 4.5)
 - Patch verified on a copy of the earlier 2.5.0: version 2.5.0, no markers,
@@ -1516,3 +1516,15 @@ stopped presenting them as if they did something.
   near 109 FPS; 4x holds ~120. 4x stays the recommendation at that load.
 - UI: Upscaling page and in-game overlay expose the model; the Frame Gen page
   and overlay expose 5x/6x.
+
+## 2.5.0 - NVIDIA Reflex (markers + boost)
+
+- `video.reflex` Off/On/Boost on the Video page and overlay. NVAPI is loaded
+  at runtime; markers wrap the parent presenter and Boost sets the low-latency
+  clock bit.
+- `NvAPI_D3D_Sleep` is not called: the measured driver sleep changed the
+  waitable cadence to ~225 Hz with 56+ missed refreshes/s. Markers-only keeps
+  240.0 Hz with zero misses.
+- Scope: DLSS SR and standalone NR end in the parent presenter and are covered.
+  With DLSS-G the worker owns a separate swapchain; Reflex there needs worker
+  side integration, which NeuralScreen does not expose today. The UI says so.

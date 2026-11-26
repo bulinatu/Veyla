@@ -5,6 +5,7 @@
 #include "diagnostics/metrics.h"
 #include "media/nv_dlss_sr.h"
 #include "media/nv_dlssnr.h"
+#include "media/nv_reflex.h"
 #include "media/pipeline.h"
 #include "media/rife.h"
 #include "media/rgba_scale.h"
@@ -300,6 +301,48 @@ bool NextApp::NeedsCpuPixels() const {
     // and RIFE in-process, NR and DLSS-G in the worker.
     return settings_.ai.super_resolution || settings_.ai.neural_render ||
            settings_.ai.frame_generation;
+}
+
+void NextApp::ApplyReflex() {
+    const int mode = std::clamp(settings_.video.reflex, 0, 2);
+    if (mode <= 0) {
+        if (reflex_ && reflex_applied_ > 0 && reflex_device_) {
+            std::string detail;
+            reflex_->SetMode(static_cast<ID3D11Device*>(reflex_device_), 0, detail);
+        }
+        reflex_applied_ = -1;
+        reflex_device_ = nullptr;
+        return;
+    }
+    if (reflex_failed_ || !stream_presenter_) {
+        return;
+    }
+    ID3D11Device* device = stream_presenter_->device();
+    if (!device) {
+        return;
+    }
+    if (!reflex_) {
+        reflex_ = std::make_unique<brp::media::NvReflex>();
+    }
+    if (!reflex_->available()) {
+        std::string detail;
+        if (!reflex_->Load(detail)) {
+            reflex_failed_ = true;
+            Toast(L"Reflex: " + Widen(detail), true);
+            return;
+        }
+    }
+    if (reflex_applied_ == mode && reflex_device_ == device) {
+        return;
+    }
+    std::string detail;
+    if (!reflex_->EnableMarkers(device, mode == 2, detail)) {
+        reflex_failed_ = true;
+        Toast(L"Reflex: " + Widen(detail), true);
+        return;
+    }
+    reflex_applied_ = mode;
+    reflex_device_ = device;
 }
 
 int NextApp::Run() {
@@ -684,6 +727,7 @@ bool NextApp::EnsureStreamSurface() {
         stream_presenter_ = std::move(presenter);
         ApplyTargetTo(stream_presenter_.get());
         ApplyEnhance();
+        ApplyReflex();
     }
 
     // The stream opens on the display chosen in Video > Display (index clamped
@@ -917,7 +961,22 @@ void NextApp::Frame() {
 void NextApp::Render() {
     const ThemeTokens& theme = ThemeFor(settings_.general.theme);
     if (watching_) {
+        brp::Presenter* video = ActivePresenter();
+        const bool reflex_active =
+            video && !fg_covering_ && reflex_ && reflex_->markers_enabled();
+        ID3D11Device* reflex_device = reflex_active ? video->device() : nullptr;
+        if (reflex_active) {
+            // Markers only: NvAPI_D3D_Sleep is deliberately not called. The
+            // legacy measurement showed the driver's sleep stage fights the
+            // waitable swapchain (225 Hz, 56+ missed refreshes/s).
+            reflex_->BeginFrame(reflex_device);
+            reflex_->EndSimulation(reflex_device);
+            reflex_->RenderSubmitStart(reflex_device);
+        }
         PresentVideo();
+        if (reflex_active) {
+            reflex_->RenderSubmitEnd(reflex_device);
+        }
         if (fg_covering_) {
             // The worker's window is the only visible surface. Presenting the
             // stream window here would cost a full-size DWM composition per
@@ -926,7 +985,13 @@ void NextApp::Render() {
             return;
         }
         // Video-only surface: no Direct2D pass, no UI composition.
-        ActivePresenter()->PresentNow(settings_.video.vsync);
+        if (reflex_active) {
+            reflex_->PresentStart(reflex_device);
+        }
+        video->PresentNow(settings_.video.vsync);
+        if (reflex_active) {
+            reflex_->PresentEnd(reflex_device);
+        }
         if (content_changed_) {
             content_changed_ = false;
             const unsigned refresh = ActivePresenter()->present_refresh_count();
@@ -2426,6 +2491,10 @@ bool NextApp::Apply() {
     if (streaming_) {
         streaming_->SetCpuPixels(NeedsCpuPixels());
     }
+    if (before.video.reflex != settings_.video.reflex) {
+        reflex_failed_ = false;
+    }
+    ApplyReflex();
     haptic_strength_.store(settings_.controller.rumble_strength);
     pad_rate_hz_.store(std::clamp(settings_.controller.poll_hz, 60, 1000));
     ApplyPresenterTarget();

@@ -27,6 +27,10 @@ public:
 
     // 0 off, 1 on, 2 on + boost.
     bool SetMode(ID3D11Device* device, int mode, std::string& detail);
+    // Markers/boost only: low_latency_mode stays 0, so the driver's sleep
+    // stage is never engaged. This is the mode that does not fight the
+    // waitable swapchain clock.
+    bool EnableMarkers(ID3D11Device* device, bool boost, std::string& detail);
 
     // NVIDIA's marker contract: SIMULATION_START -> SIMULATION_END -> Sleep ->
     // RENDERSUBMIT_START -> RENDERSUBMIT_END -> PRESENT_START -> PRESENT_END.
@@ -39,6 +43,7 @@ public:
     void PresentStart(ID3D11Device* device);
     void PresentEnd(ID3D11Device* device);
     bool markers_available() const { return set_latency_marker_ != nullptr; }
+    bool markers_enabled() const { return mode_ > 0 && set_latency_marker_ != nullptr; }
 
     // Call between SIMULATION_END and RENDERSUBMIT_START.
     void Sleep(ID3D11Device* device);

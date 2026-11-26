@@ -48,6 +48,7 @@ struct VideoSettings {
     bool hdr = false;
     std::string color_space = "auto";
     int sharpening = 10;
+    int reflex = 0;  // 0 off, 1 markers, 2 markers + boost
     int render_target = 0;  // 0 window, 1080/1440/2160
 };
 

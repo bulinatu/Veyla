@@ -104,6 +104,9 @@ void AppSettings::Validate(std::vector<std::string>& warnings,
     if (video.sharpening < 0 || video.sharpening > 100) {
         errors.push_back("video.sharpening must be 0..100");
     }
+    if (video.reflex < 0 || video.reflex > 2) {
+        errors.push_back("video.reflex must be 0..2");
+    }
     if (video.render_target != 0 && video.render_target != 1080 &&
         video.render_target != 1440 && video.render_target != 2160) {
         errors.push_back("video.render_target must be 0, 1080, 1440 or 2160");
@@ -206,6 +209,7 @@ FlatMap SettingsToFlat(const AppSettings& s) {
 
     FlatJson::PutString(f, "video.output", std::string(ToString(s.video.output)));
     FlatJson::PutBool(f, "video.vsync", s.video.vsync);
+    FlatJson::PutInt(f, "video.reflex", s.video.reflex);
     FlatJson::PutBool(f, "video.vrr", s.video.vrr);
     FlatJson::PutBool(f, "video.hdr", s.video.hdr);
     FlatJson::PutString(f, "video.color_space", s.video.color_space);
@@ -327,6 +331,7 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
 
     s.video.output = ReadResolution(f, "video.output", s.video.output);
     s.video.vsync = FlatJson::GetBool(f, "video.vsync", s.video.vsync);
+    s.video.reflex = ClampInt(FlatJson::GetInt(f, "video.reflex", s.video.reflex), 0, 2);
     s.video.vrr = FlatJson::GetBool(f, "video.vrr", s.video.vrr);
     s.video.hdr = FlatJson::GetBool(f, "video.hdr", s.video.hdr);
     s.video.color_space = FlatJson::GetString(f, "video.color_space", s.video.color_space);

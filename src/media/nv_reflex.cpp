@@ -36,6 +36,7 @@ bool NvReflex::Load(std::string& detail) {
     module_ = ::LoadLibraryW(L"nvapi64.dll");
     if (!module_) {
         detail = "nvapi64.dll not found";
+        std::fprintf(stderr, "[reflex] %s\n", detail.c_str());
         return false;
     }
     const auto query =
@@ -51,11 +52,13 @@ bool NvReflex::Load(std::string& detail) {
         reinterpret_cast<SetLatencyMarkerFn>(query(kNvApiD3DSetLatencyMarker));
     if (!initialize_ || !set_sleep_mode_ || !sleep_) {
         detail = "NVAPI Reflex entry points are not exposed by this driver";
+        std::fprintf(stderr, "[reflex] %s\n", detail.c_str());
         return false;
     }
     const int status = initialize_();
     if (status != 0) {
         detail = "NvAPI_Initialize failed (" + std::to_string(status) + ")";
+        std::fprintf(stderr, "[reflex] %s\n", detail.c_str());
         return false;
     }
     status_ = "Reflex available";
@@ -91,6 +94,37 @@ bool NvReflex::SetMode(ID3D11Device* device, int mode, std::string& detail) {
     mode_ = 0;
     status_ = "Reflex disabled (would break pacing)";
     return false;
+}
+
+bool NvReflex::EnableMarkers(ID3D11Device* device, bool boost, std::string& detail) {
+    if (!device) {
+        detail = "no D3D device";
+        return false;
+    }
+    if (!set_sleep_mode_ || !set_latency_marker_) {
+        detail = "Reflex markers are not exposed by this driver";
+        return false;
+    }
+    SetSleepModeParams params{};
+    static_assert(sizeof(SetSleepModeParams) == 44, "NV_SET_SLEEP_MODE_PARAMS_V1 layout");
+    params.version = (1u << 16) | sizeof(SetSleepModeParams);
+    params.low_latency_mode = 0;  // no sleep stage; markers and boost only
+    params.low_latency_boost = boost ? 1 : 0;
+    params.minimum_interval_us = 0;
+    params.use_markers = 1;
+    params.use_min_queue_time = 0;
+    const int status = set_sleep_mode_(device, &params);
+    if (status != 0) {
+        detail = "SetSleepMode(markers) failed (" + std::to_string(status) + ")";
+        mode_ = 0;
+        status_ = detail;
+        std::fprintf(stderr, "[reflex] %s\n", detail.c_str());
+        return false;
+    }
+    mode_ = 1;
+    status_ = boost ? "Reflex markers + boost" : "Reflex markers";
+    std::fprintf(stderr, "[reflex] markers enabled%s\n", boost ? " + boost" : "");
+    return true;
 }
 
 void NvReflex::Mark(ID3D11Device* device, unsigned marker_type) {
