@@ -571,6 +571,13 @@ impl OverlayView {
                     &[("Native", "native"), ("1440p", "1440p"), ("4K", "2160p")],
                     cx,
                 ));
+                rows.push(self.seg_row(
+                    "ai.dlss_preset",
+                    "DLSS model",
+                    "Auto / K / L / M / J",
+                    &[(0, "Auto"), (1, "K"), (2, "L"), (3, "M"), (4, "J")],
+                    cx,
+                ));
             }
             2 => {
                 rows.push(self.toggle_row(
@@ -582,9 +589,9 @@ impl OverlayView {
                 rows.push(self.stepper_row(
                     "ai.fg_multiplier",
                     "Multiplier",
-                    "2x is the stable multiplier at 30 fps",
+                    "5x/6x forced via the SM86 proxy; older RTX may stutter",
                     2,
-                    4,
+                    6,
                     1,
                     |v| format!("{v}x"),
                     cx,

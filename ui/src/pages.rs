@@ -745,6 +745,19 @@ impl Root {
                     ],
                     cx,
                 ),
+                self.seg_int_row(
+                    "ai.dlss_preset",
+                    "DLSS model",
+                    "Auto: K for DLAA/Quality, M for Perf, L for Ultra Perf",
+                    &[
+                        (0, "Auto"),
+                        (1, "K"),
+                        (2, "L"),
+                        (3, "M"),
+                        (4, "J"),
+                    ],
+                    cx,
+                ),
             ],
         );
 
@@ -781,8 +794,18 @@ impl Root {
             fg_rows.push(self.seg_int_row(
                 "ai.fg_multiplier",
                 "Multiplier",
-                "2x is the stable multiplier at 30 fps",
-                &[(2, "2x"), (3, "3x"), (4, "4x")],
+                if self.status.dlss_fg_multi {
+                    "5x/6x forced via the SM86 proxy; RTX 50 is native, older RTX may stutter"
+                } else {
+                    "5x/6x forced; proxy files missing, this install may fail above 2x"
+                },
+                &[
+                    (2, "2x"),
+                    (3, "3x"),
+                    (4, "4x"),
+                    (5, "5x"),
+                    (6, "6x"),
+                ],
                 cx,
             ));
         } else {

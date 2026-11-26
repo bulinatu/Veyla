@@ -48,6 +48,7 @@ ApplyScope ClassifySettingsChange(const AppSettings& before, const AppSettings& 
     if (a.ai.super_resolution != b.ai.super_resolution ||
         a.ai.sr_output != b.ai.sr_output || a.ai.sr_model != b.ai.sr_model ||
         a.ai.sr_quality != b.ai.sr_quality ||
+        a.ai.sr_preset != b.ai.sr_preset ||
         a.ai.frame_generation != b.ai.frame_generation ||
         a.ai.fg_backend != b.ai.fg_backend ||
         a.ai.fg_multiplier != b.ai.fg_multiplier ||

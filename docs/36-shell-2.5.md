@@ -185,3 +185,33 @@ RGBA on it, and the stream presenter is created on it:
   path automatically; `BRP_DECODE_VP=0` forces the fallback.
 - Turning AI off live returns to the 0.1 ms path on the next frame; turning it
   on pays the known one-time NGX/worker start (~5 s).
+
+## DLSS 4.5 models
+
+The package ships the 310.9.16 DLSS Super Resolution runtime (was 310.7) and
+exposes the model preset on the Upscaling page / overlay:
+
+| Setting | Preset | Intended mode |
+|---|---|---|
+| Auto | K | DLAA, Quality, Balanced |
+| Auto | M | Performance |
+| Auto | L | Ultra Performance |
+| K | 11 | transformer, best quality |
+| L | 12 | second-gen transformer, ultra performance |
+| M | 13 | second-gen transformer, performance |
+| J | 10 | transformer, slightly less ghosting |
+
+Auto replaces the old hard-coded preset 12: L was being used for DLAA and
+Quality, where K is the correct default. The 310.9.16 runtime is required for L
+and M (DLSS 4.5); with the older runtime those presets fall back to defaults.
+
+## Multi Frame Generation 5x/6x
+
+The multiplier selector offers 2x-6x on every RTX card. 3x-6x load the bundled
+SM86 proxy; 5x/6x are the DLSS 4.5 MFG modes that are native on RTX 50 and
+forced through the proxy on older cards. Nothing is stepped back silently: the
+UI note says that non-50 GPUs may stutter or fail above 4x, and the engine uses
+exactly what is selected. Measured on the 5070 Ti at 1440p with NR on, 6x
+enabled (`[fg] 6x enabled`, `displayed ... (6x)`) but the worker settled around
+109 FPS, while 4x holds ~120; 4x remains the recommended multiplier at that
+load, 5x/6x are there for lighter NR scales and 1080p.

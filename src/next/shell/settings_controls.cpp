@@ -256,6 +256,16 @@ float SettingsControls::SuperResolution(float x, float y, float width) {
     }
     y += kRow + kGap;
 
+    int preset = settings_.ai.sr_preset;
+    if (widgets_.Choice(Next(), Row(x, y, width), L"DLSS model",
+                        {L"Auto", L"K (quality)", L"L (ultra perf)", L"M (performance)",
+                         L"J (less ghosting)"},
+                        preset, settings_.ai.super_resolution)) {
+        settings_.ai.sr_preset = preset;
+        Touch();
+    }
+    y += kRow + kGap;
+
     widgets_.Label(Row(x, y, width),
                    sr_available ? L"Backend: DLSS Super Resolution (NGX)"
                                 : L"Backend: not installed (no nvngx_dlss.dll)",
@@ -326,7 +336,7 @@ float SettingsControls::FrameGeneration(float x, float y, float width) {
             int multiplier = std::clamp(settings_.ai.fg_multiplier, 2, 6) - 2;
             const std::vector<std::wstring> mult_labels = {L"2x", L"3x", L"4x",
                                                            L"5x", L"6x"};
-            std::vector<bool> mult_enabled(5, system_.dlss_fg_multi);
+            std::vector<bool> mult_enabled(5, true);
             mult_enabled[0] = true;
             if (widgets_.Choice(Next(), Row(x, y, width), L"DLSS-G multiplier",
                                 mult_labels, multiplier,
@@ -412,8 +422,8 @@ float SettingsControls::FrameGeneration(float x, float y, float width) {
         y += 42.0f;
         if (!system_.dlss_fg_multi && settings_.ai.fg_multiplier > 2) {
             widgets_.Label(Rect(x, y, x + width, y + 36),
-                           L"The SM86 FG proxy is not installed; the runtime steps "
-                           L"back to 2x.",
+                           L"SM86 proxy files are missing; 3x+ is forced and will "
+                           L"likely fail until the worker runtime is restored.",
                            widgets_.Tokens().warning, 11.5f,
                            DWRITE_FONT_WEIGHT_MEDIUM);
             y += 38.0f;

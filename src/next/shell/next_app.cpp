@@ -2436,6 +2436,7 @@ bool NextApp::Apply() {
     if (previous_ai.super_resolution != settings_.ai.super_resolution ||
         previous_ai.sr_output != settings_.ai.sr_output ||
         previous_ai.sr_quality != settings_.ai.sr_quality ||
+        previous_ai.sr_preset != settings_.ai.sr_preset ||
         previous_ai.sr_model != settings_.ai.sr_model) {
         dlss_ready_ = false;
         dlss_failed_ = false;
@@ -4303,11 +4304,30 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
         }
     }
     std::string detail;
+    // DLSS model preset. K is the transformer default for DLAA/Quality, M is
+    // the DLSS 4.5 performance model, L the ultra-performance model; J is the
+    // older transformer for less ghosting. Auto follows NVIDIA's mapping.
+    int preset = 11;
+    switch (settings_.ai.sr_preset) {
+        case 1: preset = 11; break;  // K
+        case 2: preset = 12; break;  // L
+        case 3: preset = 13; break;  // M
+        case 4: preset = 10; break;  // J
+        default:
+            if (quality == 3) {
+                preset = 12;  // Ultra Performance
+            } else if (quality == 0) {
+                preset = 13;  // Performance
+            } else {
+                preset = 11;  // DLAA / Balanced / Quality
+            }
+            break;
+    }
     if (!dlss_sr_->Initialize(ActivePresenter()->device(), ActivePresenter()->context(), in_w,
-                              in_h, out_w, out_h, 12, quality, detail)) {
+                              in_h, out_w, out_h, preset, quality, detail)) {
         dlss_failed_ = true;
-        std::fprintf(stderr, "[next] DLSS SR init %dx%d -> %dx%d quality %d: %s\n", in_w, in_h,
-                     out_w, out_h, quality, detail.c_str());
+        std::fprintf(stderr, "[next] DLSS SR init %dx%d -> %dx%d preset %d quality %d: %s\n",
+                     in_w, in_h, out_w, out_h, preset, quality, detail.c_str());
         Toast(L"DLSS SR: " + Widen(detail), true);
         return false;
     }
@@ -4326,8 +4346,10 @@ bool NextApp::EnsureDlssFg(int width, int height) {
         return false;
     }
     const int requested = std::clamp(settings_.ai.fg_multiplier, 2, 6);
-    const int multiplier =
-        (requested > 2 && !system_.dlss_fg_multi) ? 2 : requested;
+    // Forced multipliers: 3x-6x load the SM86 proxy below and use whatever the
+    // user asked for. On an older card the worker may fail; that is the
+    // documented trade-off, not silently stepped back to 2x.
+    const int multiplier = requested;
     if (dlss_fg_ && dlss_fg_->ready() && dlss_fg_->width() == width &&
         dlss_fg_->height() == height) {
         if ((multiplier > 2) != dlss_fg_->proxy_runtime()) {
@@ -4578,6 +4600,7 @@ void NextApp::PublishBridgeStatus() {
     flag("cuda", system_.cuda, true);
     flag("tensorrt", system_.tensorrt_runtime, true);
     flag("dlss_fg_ready", system_.dlss_fg, true);
+    flag("dlss_fg_multi", system_.dlss_fg_multi, true);
     flag("dlss_sr_ready", system_.dlss_sr, true);
     flag("nr_runtime", system_.nr_worker, true);
     flag("nr_ready", nr_ready_, true);

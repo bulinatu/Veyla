@@ -1474,12 +1474,13 @@ stopped presenting them as if they did something.
   that removes RIFE no longer leaves `rife\` or the markers behind.
 - New artifacts:
   - `dist/BetterRemotePlay-2.5.0-standalone-norife.zip` SHA256
-    `02E5A579D918BF43EB3DC88B213488FB8D9B49B7A7094EB1C2D665168A8C5D66`
-  - `dist/BetterRemotePlay-2.5.0-hotfix-update.exe` (4.67 MB) SHA256
-    `535A5B6C7F40ABD8A9BDF7F0FB93EAEC926151A1B7C625CE2B40B8EDE4491577`
-- `brpnext.exe` `3C89E3E6DFE48807EC869BF937FA6E01A24EE1510C9D14E0A174D19D4C0429F5`
-- `brpnext-engine.exe` `E42D0696A40FE875DD7831F29004EA2EF9F9051E194FB25E24A77C42CD02826D`
-- `update.exe` `53A7F84F102CF2B4D45ADD06C58298604BF03804F3A7940DFECCA3287C8FA083`
+    `9A93B12955E58BA2B1907084A7A36B6E43CD0C9B297C69AA565631AD72FA5EDC`
+  - `dist/BetterRemotePlay-2.5.0-hotfix-update.exe` (47.93 MB) SHA256
+    `21DF5200F20801D889C531A81E37BA96CBF20ED8E5CF5D85918E1EF47B5AF1D6`
+- `brpnext.exe` `F17A817EEAFB1087D2BC4E54BD5621AA5605BF01E6F6BFE1F31D86BC14ED36CB`
+- `brpnext-engine.exe` `AC1A318A2C11749933278F1C93E855239DBB83D1214426277948572156F04A24`
+- `nvngx_dlss.dll` `858CCFF96360C3098DB9264CD6F13D04A027E09B6CE7AD5BBC297570E824B4F2`
+  (310.9.16, DLSS 4.5)
 - Patch verified on a copy of the earlier 2.5.0: version 2.5.0, no markers,
   `rife\` and its logs removed, every file identical to dist except the
   updater itself (endpoint skips `update.exe`; single-file patches embed their
@@ -1500,3 +1501,18 @@ stopped presenting them as if they did something.
 - PQ/BT.2020 and unsupported drivers fall back to swscale; `BRP_DECODE_VP=0`
   forces the old path.
 - Details and measurements: `docs/35-latency-audit.md` (Round 3).
+
+## 2.5.0 - DLSS 4.5 models and forced MFG
+
+- Package ships DLSS Super Resolution 310.9.16 (was 310.7): the second-gen
+  transformer models (K/L/M) are available on RTX 40/50.
+- `ai.dlss_preset` (Auto/K/L/M/J). Auto maps K to DLAA/Quality/Balanced, M to
+  Performance, L to Ultra Performance; the old build sent preset 12 (L) for
+  everything.
+- Frame-generation multiplier offers 2x-6x on every RTX card. 5x/6x are DLSS
+  4.5 MFG: native on RTX 50, forced through the bundled SM86 proxy on older
+  cards; no silent 2x clamp. The UI warns that non-50 GPUs may stutter or fail.
+- Measured on the 5070 Ti at 1440p + NR: 6x enables and displays 6x, but settles
+  near 109 FPS; 4x holds ~120. 4x stays the recommendation at that load.
+- UI: Upscaling page and in-game overlay expose the model; the Frame Gen page
+  and overlay expose 5x/6x.

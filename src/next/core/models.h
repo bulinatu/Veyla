@@ -56,6 +56,7 @@ struct AiSettings {
     Resolution sr_output = Resolution::Native;
     std::string sr_model = "dlss";
     int sr_quality = 4;  // 0 performance .. 5 dlaa
+    int sr_preset = 0;   // 0 auto, 1 K, 2 L, 3 M, 4 J (DLSS model)
     bool temporal = false;
     bool frame_generation = false;
     AiBackend fg_backend = AiBackend::None;
