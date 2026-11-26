@@ -1460,3 +1460,29 @@ stopped presenting them as if they did something.
   it replaces brpnext.exe, brpnext-engine.exe, brpnext-classic.exe and
   README.txt and removes the four RIFE files. Verified on a simulated earlier
   2.5.0 (version 2.5.0, 0 markers, RIFE removed, files identical to dist).
+
+## 2.5.0 hotfix 2 - disconnect cleanup and update tooling
+
+- Leaving a session no longer leaves windows behind: in engine mode the
+  engine's own window stays minimized instead of being restored blank, and the
+  GPUI control center closes when the stream ends instead of staying topmost
+  over the desktop. Verified with a window-enumeration probe around a real
+  disconnect; the DLSS-G presenter and stream window are hidden and the
+  foreground returns to the previous app.
+- `brp_update.exe` now closes `_delete.txt` before removing it (Windows cannot
+  delete an open file) and prunes empty folders after deletions, so a patch
+  that removes RIFE no longer leaves `rife\` or the markers behind.
+- New artifacts:
+  - `dist/BetterRemotePlay-2.5.0-standalone-norife.zip` SHA256
+    `8A415DFE5542204FFF081FC01D9153DB5B9E92EAD4B372CAE1A4A2F3B6F81F26`
+  - `dist/BetterRemotePlay-2.5.0-hotfix-update.exe` (4.67 MB) SHA256
+    `632D803B9742D9C82E051F4C9733BDDEF1F21D9EAA377AA9970EB5C1E78907A6`
+- `brpnext.exe` `3C89E3E6DFE48807EC869BF937FA6E01A24EE1510C9D14E0A174D19D4C0429F5`
+- `brpnext-engine.exe` `D03DF17944C7AF4C1E0053C9E1AB65D0CAA0335EAB73243C598B98212FF8E10D`
+- `update.exe` `53A7F84F102CF2B4D45ADD06C58298604BF03804F3A7940DFECCA3287C8FA083`
+- Patch verified on a copy of the earlier 2.5.0: version 2.5.0, no markers,
+  `rife\` and its logs removed, every file identical to dist except the
+  updater itself (endpoint skips `update.exe`; single-file patches embed their
+  own copy).
+- Research: `docs/37-pxplay-latency.md` (PXPlay / PS Remote Play paths and the
+  remaining decode and worker headroom).

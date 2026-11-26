@@ -144,3 +144,29 @@ one `[nr] RNSZ 1920x1080 (full 2560x1440, 1 pass, 0 ms)` per change, and screen
 captures of the worker output change accordingly (A-B-A). Fine tuning (tone,
 structure, skin, passes) travels in the same command; style changes rebuild the
 network style inside the worker.
+
+## Leaving a session leaves no windows behind
+
+Two leftovers were found with a window-enumeration probe around a real
+disconnect (engine mode, overlay open, then `disconnect_now`):
+
+- `NextApp::ToggleWatch(false)` restored and showed the engine's own 1600x900
+  window even in engine mode, where the shell is the UI. Since the engine skips
+  `Render()` when it is not watching, the restored window was blank but still
+  sat over the desktop and took the foreground. It now stays minimized in
+  engine mode; the classic (non-engine) build still restores it.
+- The GPUI control center is a separate topmost window, and the shell did not
+  close it when the stream ended. It now closes in the same poll where the
+  shell is restored, so a disconnect never leaves a topmost panel over the
+  desktop.
+
+Verified after the fix: right after disconnect the DLSS-G presenter
+(`NeuralScreenPresent`) is hidden, the stream window is hidden, the engine
+window stays at -32000,-32000 minimized, and the foreground returns to the
+window the user had before the session.
+
+## Latency research
+
+`docs/37-pxplay-latency.md` compares the PXPlay / PS Remote Play client paths
+with ours and lists the remaining decode and worker headroom.
+

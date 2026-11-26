@@ -25,6 +25,19 @@ namespace fs = std::filesystem;
 
 namespace {
 
+void PruneEmptyParents(const fs::path& root, const fs::path& file) {
+    // A delete list often leaves the folder behind (the optional rife\ tree is
+    // the common case). Remove every parent that is now empty, stopping at the
+    // app root and at the first non-empty folder.
+    for (fs::path parent = file.parent_path(); parent != root && !parent.empty();
+         parent = parent.parent_path()) {
+        std::error_code ec;
+        if (!fs::remove(parent, ec)) {
+            break;
+        }
+    }
+}
+
 constexpr char kFooterMagic[8] = {'B', 'R', 'P', 'U', 'P', '0', '1', '\0'};
 
 std::string Utf8(const std::wstring& text) {
@@ -202,10 +215,15 @@ int wmain(int argc, wchar_t** argv) {
                     continue;
                 }
                 std::error_code ec;
-                if (fs::remove(dir / fs::path(line), ec)) {
+                const fs::path victim = dir / fs::path(line);
+                if (fs::remove(victim, ec)) {
                     ++removed;
+                    PruneEmptyParents(dir, victim);
                 }
             }
+            // Removing an open file fails on Windows (the stream has no
+            // FILE_SHARE_DELETE), so close the list before deleting it.
+            list.close();
             std::error_code ec;
             fs::remove(deletes, ec);
             std::printf("Removed %d obsolete file(s).\n", removed);
@@ -265,6 +283,7 @@ int wmain(int argc, wchar_t** argv) {
             const fs::path victim = dir / fs::path(line);
             if (fs::remove(victim, ec)) {
                 ++removed;
+                PruneEmptyParents(dir, victim);
             }
         }
         std::printf("Removed %d obsolete file(s).\n", removed);

@@ -223,6 +223,12 @@ impl Root {
                         if this.shell_minimized && !this.status.streaming {
                             this.shell_minimized = false;
                             crate::model::log_line("shell restore");
+                            // The control center belongs to the session that
+                            // opened it. Leaving it open put a topmost, opaque
+                            // panel over the desktop after a disconnect, where
+                            // it looked like an invisible click blocker until
+                            // the next connection.
+                            this.close_overlay(cx);
                             // A new game session starts the control center on
                             // its first tab again.
                             crate::overlay::reset_overlay_tab();
@@ -556,6 +562,16 @@ impl Root {
             let _ = this.update(cx, |this, cx| this.open_overlay_window(cx));
         })
         .detach();
+    }
+
+    /// Closes the control center if it is open. Used when a session ends, so a
+    /// leftover topmost panel cannot sit over the desktop until the next one.
+    pub(crate) fn close_overlay(&mut self, cx: &mut Context<Self>) {
+        let Some(handle) = self.overlay_handle.take() else {
+            return;
+        };
+        let _ = handle.update(cx, |_, window, _| window.remove_window());
+        self.send("overlay_close");
     }
 
     fn open_overlay_window(&mut self, cx: &mut Context<Self>) {

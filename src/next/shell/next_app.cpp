@@ -4044,8 +4044,11 @@ void NextApp::ToggleWatch(bool watching) {
             stream_window_->Hide();
         }
         watch_fullscreen_ = false;
-        window_->Restore();
+        // In engine mode the shell owns the UI and this window stays minimized:
+        // restoring it here left a blank 1600x900 window over the desktop that
+        // swallowed clicks after a disconnect.
         if (!engine_mode_) {
+            window_->Restore();
             window_->Show();
         }
         Resize();
