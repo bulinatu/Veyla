@@ -1,15 +1,24 @@
-// BetterRemotePlay updater.
+// Veyla updater.
 //
-// Applies a patch produced by tools/make_update.ps1. The patch is a folder
-// layout:
+// Applies a patch produced by tools/make_update.ps1. The patch is either a
+// folder layout (payload\, delete.txt, version.txt) or a single exe with a zip
+// appended to it:
 //
-//   update.exe        this program
-//   payload\          files to copy over the app, relative paths preserved
-//   delete.txt        files to remove (one relative path per line)
-//   version.txt       new version label
+//   update.exe       this program
+//   <zip>            changed files at their relative paths, _delete.txt,
+//                    _version.txt
+//   <footer>         magic + offset + length, 24 bytes
 //
-// Extract the patch into the app folder and run update.exe. By default it
-// starts brp.exe afterwards; pass --no-launch to skip that.
+// Run it inside the app folder, or start it with --auto --dir=<folder>
+// --wait-pid=<pid> from the app itself. Everything the updater does is written
+// to %TEMP%\veyla-update.log; a failure also drops update-failed.txt next to
+// the app so the shell can tell the user what happened.
+//
+//   --silent      no console prompts
+//   --auto        kill the running images first, then update and relaunch
+//   --no-launch   do not start the app at the end
+//   --dir=<path>  app folder (default: this exe's folder)
+//   --wait-pid=N  wait for process N to exit before touching files
 
 #include <windows.h>
 #include <shellapi.h>
@@ -17,6 +26,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -26,39 +37,21 @@ namespace fs = std::filesystem;
 
 namespace {
 
-void KillProcessImage(const wchar_t* image) {
-    wchar_t system_dir[MAX_PATH] = {};
-    ::GetSystemDirectoryW(system_dir, MAX_PATH);
-    const fs::path taskkill = fs::path(system_dir) / "taskkill.exe";
-    std::wstring command = L"\"" + taskkill.wstring() + L"\" /IM " + image + L" /F /T";
-    std::vector<wchar_t> mutable_command(command.begin(), command.end());
-    mutable_command.push_back(L'\0');
-    STARTUPINFOW startup{};
-    startup.cb = sizeof(startup);
-    PROCESS_INFORMATION process{};
-    if (::CreateProcessW(taskkill.wstring().c_str(), mutable_command.data(), nullptr,
-                         nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup,
-                         &process)) {
-        ::WaitForSingleObject(process.hProcess, 5000);
-        ::CloseHandle(process.hThread);
-        ::CloseHandle(process.hProcess);
-    }
-}
+std::ofstream g_log;
 
-void PruneEmptyParents(const fs::path& root, const fs::path& file) {
-    // A delete list often leaves the folder behind (the optional rife\ tree is
-    // the common case). Remove every parent that is now empty, stopping at the
-    // app root and at the first non-empty folder.
-    for (fs::path parent = file.parent_path(); parent != root && !parent.empty();
-         parent = parent.parent_path()) {
-        std::error_code ec;
-        if (!fs::remove(parent, ec)) {
-            break;
-        }
+void Log(const std::string& text) {
+    if (!g_log.is_open()) {
+        return;
     }
+    char stamp[32] = {};
+    const std::time_t now = std::time(nullptr);
+    std::tm local{};
+    localtime_s(&local, &now);
+    std::strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", &local);
+    g_log << "[" << stamp << "] " << text << "\n";
+    g_log.flush();
+    std::printf("%s\n", text.c_str());
 }
-
-constexpr char kFooterMagic[8] = {'B', 'R', 'P', 'U', 'P', '0', '1', '\0'};
 
 std::string Utf8(const std::wstring& text) {
     if (text.empty()) {
@@ -107,27 +100,125 @@ bool AppRunning(const fs::path& dir) {
     return false;
 }
 
-bool CopyTree(const fs::path& from, const fs::path& to, int& copied) {
-    std::error_code ec;
-    for (const auto& entry : fs::recursive_directory_iterator(from, ec)) {
-        if (ec) {
-            std::printf("cannot list %s: %s\n", Utf8(from.wstring()).c_str(), ec.message().c_str());
-            return false;
-        }
-        if (!entry.is_regular_file()) {
-            continue;
-        }
-        const fs::path relative = fs::relative(entry.path(), from, ec);
-        const fs::path target = to / relative;
-        fs::create_directories(target.parent_path(), ec);
-        if (!::CopyFileW(entry.path().wstring().c_str(), target.wstring().c_str(), FALSE)) {
-            std::printf("copy failed: %s (%lu)\n", Utf8(relative.wstring()).c_str(),
-                        ::GetLastError());
-            return false;
-        }
-        ++copied;
+void KillProcessImage(const wchar_t* image) {
+    wchar_t system_dir[MAX_PATH] = {};
+    ::GetSystemDirectoryW(system_dir, MAX_PATH);
+    const fs::path taskkill = fs::path(system_dir) / "taskkill.exe";
+    std::wstring command = L"\"" + taskkill.wstring() + L"\" /IM " + image + L" /F /T";
+    std::vector<wchar_t> mutable_command(command.begin(), command.end());
+    mutable_command.push_back(L'\0');
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (::CreateProcessW(taskkill.wstring().c_str(), mutable_command.data(), nullptr,
+                         nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup,
+                         &process)) {
+        ::WaitForSingleObject(process.hProcess, 8000);
+        ::CloseHandle(process.hThread);
+        ::CloseHandle(process.hProcess);
     }
-    return true;
+}
+
+void PruneEmptyParents(const fs::path& root, const fs::path& file) {
+    for (fs::path parent = file.parent_path(); parent != root && !parent.empty();
+         parent = parent.parent_path()) {
+        std::error_code ec;
+        if (!fs::remove(parent, ec)) {
+            break;
+        }
+    }
+}
+
+constexpr char kFooterMagic[8] = {'B', 'R', 'P', 'U', 'P', '0', '1', '\0'};
+
+// Runs a program and returns its exit code; kStillRunning means the wait timed
+// out and the process was terminated.
+constexpr DWORD kStillRunning = 0xFFFFFFFFu;
+DWORD RunAndWait(const fs::path& exe, const std::wstring& arguments, const fs::path& cwd,
+                 DWORD timeout_ms) {
+    // CreateProcess passes the command line verbatim; without argv[0] the child
+    // sees its first flag as the program name and fails.
+    const std::wstring command = L"\"" + exe.wstring() + L"\" " + arguments;
+    std::vector<wchar_t> mutable_command(command.begin(), command.end());
+    mutable_command.push_back(L'\0');
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!::CreateProcessW(exe.wstring().c_str(), mutable_command.data(), nullptr, nullptr,
+                          FALSE, CREATE_NO_WINDOW, nullptr,
+                          cwd.empty() ? nullptr : cwd.wstring().c_str(), &startup,
+                          &process)) {
+        Log("cannot start " + Utf8(exe.wstring()) + " (error " +
+            std::to_string(::GetLastError()) + ")");
+        return kStillRunning;
+    }
+    const DWORD waited = ::WaitForSingleObject(process.hProcess, timeout_ms);
+    if (waited == WAIT_TIMEOUT) {
+        ::TerminateProcess(process.hProcess, 1);
+        ::CloseHandle(process.hThread);
+        ::CloseHandle(process.hProcess);
+        return kStillRunning;
+    }
+    DWORD exit_code = 1;
+    ::GetExitCodeProcess(process.hProcess, &exit_code);
+    ::CloseHandle(process.hThread);
+    ::CloseHandle(process.hProcess);
+    return exit_code;
+}
+
+// tar.exe ships with Windows 10 1803+ and handles a plain zip. A 590 MB patch on
+// a slow disk used to hit a five minute cap and look like a failed update, so
+// the limit is now generous and a failure falls back to PowerShell.
+bool ExtractZip(const fs::path& zip, const fs::path& dir) {
+    wchar_t system_dir[MAX_PATH] = {};
+    ::GetSystemDirectoryW(system_dir, MAX_PATH);
+    const fs::path tar = fs::path(system_dir) / "tar.exe";
+    const std::wstring tar_args = L"-xf \"" + zip.wstring() + L"\" -C \"" +
+                                  dir.wstring() + L"\"";
+    Log("extracting with tar.exe");
+    DWORD code = RunAndWait(tar, tar_args, dir, 30 * 60 * 1000);
+    if (code == 0) {
+        Log("tar.exe finished");
+        return true;
+    }
+    Log("tar.exe failed (exit " + std::to_string(code) + "), trying Expand-Archive");
+
+    const fs::path powershell =
+        std::filesystem::path(system_dir).parent_path() / "System32" / "WindowsPowerShell" /
+        "v1.0" / "powershell.exe";
+    const std::wstring ps_args =
+        L"-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"Expand-Archive "
+        L"-LiteralPath '" + zip.wstring() + L"' -DestinationPath '" + dir.wstring() +
+        L"' -Force\"";
+    code = RunAndWait(powershell, ps_args, dir, 30 * 60 * 1000);
+    Log("Expand-Archive exit " + std::to_string(code));
+    return code == 0;
+}
+
+void Relaunch(const fs::path& dir) {
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        const fs::path exe = AppExe(dir);
+        const HINSTANCE result =
+            ::ShellExecuteW(nullptr, L"open", exe.wstring().c_str(), nullptr,
+                            dir.wstring().c_str(), SW_SHOWNORMAL);
+        if (reinterpret_cast<INT_PTR>(result) > 32) {
+            Log("relaunched " + Utf8(exe.wstring()));
+            return;
+        }
+        Log("relaunch attempt " + std::to_string(attempt + 1) + " failed");
+        ::Sleep(700);
+    }
+}
+
+void ReportFailure(const fs::path& dir, const std::string& message) {
+    Log("FAILED: " + message);
+    std::error_code ec;
+    std::ofstream marker(dir / "update-failed.txt", std::ios::trunc);
+    if (marker) {
+        marker << message << "\n";
+    }
+    ::Sleep(300);
+    Relaunch(dir);
 }
 
 }  // namespace
@@ -138,8 +229,18 @@ int wmain(int argc, wchar_t** argv) {
     bool auto_update = false;
     DWORD wait_pid = 0;
     fs::path dir = ExeDir();
+
+    {
+        wchar_t temp[MAX_PATH] = {};
+        ::GetTempPathW(MAX_PATH, temp);
+        g_log.open(fs::path(temp) / "veyla-update.log",
+                   std::ios::out | std::ios::app);
+    }
+    Log("---- veyla updater started ----");
+
     for (int i = 1; i < argc; ++i) {
         const std::wstring arg = argv[i];
+        Log("arg: " + Utf8(arg));
         if (arg == L"--no-launch") {
             launch = false;
         } else if (arg == L"--silent") {
@@ -153,52 +254,46 @@ int wmain(int argc, wchar_t** argv) {
             wait_pid = static_cast<DWORD>(std::wcstoul(arg.c_str() + 11, nullptr, 10));
         }
     }
+    Log("target: " + Utf8(dir.wstring()));
 
-    // Auto-update path: the app starts this with its own PID and exits. Wait
-    // for it so no file is replaced while the process still has it mapped.
     if (wait_pid != 0) {
         HANDLE process = ::OpenProcess(SYNCHRONIZE, FALSE, wait_pid);
         if (process) {
-            ::WaitForSingleObject(process, 30000);
+            Log("waiting for pid " + std::to_string(wait_pid));
+            ::WaitForSingleObject(process, 60000);
             ::CloseHandle(process);
+        } else {
+            Log("pid already gone");
         }
         ::Sleep(600);
     }
 
-    bool embedded_payload = false;
     if (auto_update) {
-        // The in-app updater starts this file while the shell still runs. Stop
-        // both images before touching files; taskkill also waits for them.
-        KillProcessImage(L"veyla.exe");
-        KillProcessImage(L"veyla-engine.exe");
-        KillProcessImage(L"brpnext.exe");
-        KillProcessImage(L"brpnext-engine.exe");
-        ::Sleep(800);
+        // The app starts this file and, in the worst case, quits before the
+        // command arrives. Stop both images so no file is mapped, then retry
+        // the operations until the locks are gone.
+        for (int round = 0; round < 3; ++round) {
+            KillProcessImage(L"veyla.exe");
+            KillProcessImage(L"veyla-engine.exe");
+            KillProcessImage(L"brpnext.exe");
+            KillProcessImage(L"brpnext-engine.exe");
+            ::Sleep(700);
+        }
     }
 
-    if (!silent) {
-        std::printf("Veyla update\nTarget: %s\n\n", Utf8(dir.wstring()).c_str());
-    }
     if (!fs::exists(AppExe(dir))) {
-        std::printf("veyla.exe/brpnext.exe is not in this folder.\n");
-        if (!silent) {
-            std::printf("Press Enter to close.");
-            std::getchar();
-        }
+        ReportFailure(dir, "veyla.exe is not in " + Utf8(dir.wstring()));
         return 1;
     }
     if (AppRunning(dir)) {
-        std::printf("Close BetterRemotePlay first, then run update.exe again.\n");
-        if (!silent) {
-            std::printf("Press Enter to close.");
-            std::getchar();
-        }
+        // Last resort: the image is still mapped. Tell the user instead of
+        // failing without a word.
+        ReportFailure(dir, "Veyla is still running; close it and try again.");
         return 1;
     }
 
-    // Single-file form: the patch zip is appended to this exe, followed by a
-    // 24-byte footer. Extract it, then fall through to the same delete/version
-    // handling the folder form uses.
+    // Single-file form: the patch zip is appended to this exe.
+    bool embedded_payload = false;
     {
         wchar_t self_path[MAX_PATH] = {};
         ::GetModuleFileNameW(nullptr, self_path, MAX_PATH);
@@ -215,8 +310,9 @@ int wmain(int argc, wchar_t** argv) {
                 self.read(reinterpret_cast<char*>(&length), sizeof(length));
                 if (std::memcmp(magic, kFooterMagic, sizeof(magic)) == 0 && length > 0 &&
                     static_cast<uint64_t>(size) >= offset + length) {
+                    Log("embedded payload: " + std::to_string(length) + " bytes");
                     const fs::path temp_zip = dir / "_update_payload.zip";
-                    std::vector<char> buffer(256 * 1024);
+                    std::vector<char> buffer(1024 * 1024);
                     std::ofstream out(temp_zip, std::ios::binary | std::ios::trunc);
                     self.seekg(static_cast<std::streamoff>(offset));
                     uint64_t left = length;
@@ -228,42 +324,31 @@ int wmain(int argc, wchar_t** argv) {
                         left -= chunk;
                     }
                     out.close();
+                    self.close();
                     if (left != 0) {
-                        std::printf("Embedded payload is truncated.\n");
+                        std::error_code ec;
+                        fs::remove(temp_zip, ec);
+                        ReportFailure(dir, "Embedded payload is truncated.");
                         return 1;
                     }
-                    wchar_t system_dir[MAX_PATH] = {};
-                    ::GetSystemDirectoryW(system_dir, MAX_PATH);
-                    const fs::path tar = fs::path(system_dir) / "tar.exe";
-                    std::wstring command = L"\"" + tar.wstring() + L"\" -xf \"" +
-                                           temp_zip.wstring() + L"\" -C \"" +
-                                           dir.wstring() + L"\"";
-                    std::vector<wchar_t> mutable_command(command.begin(), command.end());
-                    mutable_command.push_back(L'\0');
-                    STARTUPINFOW startup{};
-                    startup.cb = sizeof(startup);
-                    PROCESS_INFORMATION process{};
-                    const BOOL started =
-                        ::CreateProcessW(tar.wstring().c_str(), mutable_command.data(), nullptr,
-                                         nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
-                                         dir.wstring().c_str(), &startup, &process);
-                    if (!started) {
-                        std::printf("Could not start tar.exe.\n");
-                        return 1;
+                    // Extraction writes over the app; retry once if a file is
+                    // still locked by a lingering process.
+                    bool extracted = false;
+                    for (int attempt = 0; attempt < 3 && !extracted; ++attempt) {
+                        extracted = ExtractZip(temp_zip, dir);
+                        if (!extracted) {
+                            Log("extract attempt " + std::to_string(attempt + 1) + " failed");
+                            ::Sleep(1500);
+                            KillProcessImage(L"veyla.exe");
+                            KillProcessImage(L"veyla-engine.exe");
+                        }
                     }
-                    ::WaitForSingleObject(process.hProcess, 5 * 60 * 1000);
-                    DWORD exit_code = 1;
-                    ::GetExitCodeProcess(process.hProcess, &exit_code);
-                    ::CloseHandle(process.hThread);
-                    ::CloseHandle(process.hProcess);
                     std::error_code ec;
                     fs::remove(temp_zip, ec);
-                    if (exit_code != 0) {
-                        std::printf("Extracting the payload failed (tar exit %lu).\n",
-                                    exit_code);
+                    if (!extracted) {
+                        ReportFailure(dir, "Could not unpack the update payload.");
                         return 1;
                     }
-                    std::printf("Applied embedded payload.\n");
                     embedded_payload = true;
                 }
             }
@@ -272,15 +357,9 @@ int wmain(int argc, wchar_t** argv) {
 
     if (!fs::exists(dir / "payload")) {
         if (!embedded_payload) {
-            std::printf("No update payload found in this file.\n");
-            if (!silent) {
-                std::printf("Press Enter to close.");
-                std::getchar();
-            }
+            ReportFailure(dir, "No update payload found in this file.");
             return 1;
         }
-        // Single-file updates unpack straight into the folder, so there is no
-        // payload\ to copy. Only the delete list and version remain.
         const fs::path deletes = dir / "_delete.txt";
         if (fs::exists(deletes)) {
             std::ifstream list(deletes);
@@ -300,12 +379,10 @@ int wmain(int argc, wchar_t** argv) {
                     PruneEmptyParents(dir, victim);
                 }
             }
-            // Removing an open file fails on Windows (the stream has no
-            // FILE_SHARE_DELETE), so close the list before deleting it.
             list.close();
             std::error_code ec;
             fs::remove(deletes, ec);
-            std::printf("Removed %d obsolete file(s).\n", removed);
+            Log("removed " + std::to_string(removed) + " obsolete file(s)");
         }
         std::string version;
         const fs::path version_marker = dir / "_version.txt";
@@ -319,36 +396,45 @@ int wmain(int argc, wchar_t** argv) {
             std::ofstream out(dir / "version.txt", std::ios::trunc);
             out << version << "\n";
         }
-        std::printf("\nUpdate complete%s%s.\n", version.empty() ? "" : ": version ",
-                    version.c_str());
+        Log("update complete" + (version.empty() ? std::string() : ": version " + version));
         if (launch) {
-            const fs::path exe = AppExe(dir);
-            ::ShellExecuteW(nullptr, L"open", exe.wstring().c_str(), nullptr,
-                            dir.wstring().c_str(), SW_SHOWNORMAL);
+            Relaunch(dir);
         }
         return 0;
     }
 
+    // Folder form, kept for the release tooling.
     const fs::path payload = dir / "payload";
-    if (!fs::exists(payload)) {
-        std::printf("payload\\ is missing. Extract the whole update zip here.\n");
-        if (!silent) {
-            std::printf("Press Enter to close.");
-            std::getchar();
-        }
-        return 1;
-    }
-
     int copied = 0;
-    if (!CopyTree(payload, dir, copied)) {
-        std::printf("\nUpdate failed. The app may be partially updated; run it again.\n");
-        if (!silent) {
-            std::printf("Press Enter to close.");
-            std::getchar();
+    int failed = 0;
+    std::error_code ec;
+    for (const auto& entry : fs::recursive_directory_iterator(payload, ec)) {
+        if (ec || !entry.is_regular_file()) {
+            continue;
         }
+        const fs::path relative = fs::relative(entry.path(), payload, ec);
+        const fs::path target = dir / relative;
+        fs::create_directories(target.parent_path(), ec);
+        bool done = false;
+        for (int retry = 0; retry < 40 && !done; ++retry) {
+            done = ::CopyFileW(entry.path().wstring().c_str(),
+                               target.wstring().c_str(), FALSE) != FALSE;
+            if (!done) {
+                ::Sleep(250);
+            }
+        }
+        if (done) {
+            ++copied;
+        } else {
+            ++failed;
+            Log("copy failed: " + Utf8(relative.wstring()));
+        }
+    }
+    if (failed > 0) {
+        ReportFailure(dir, "Could not copy " + std::to_string(failed) + " file(s).");
         return 1;
     }
-    std::printf("Copied %d file(s).\n", copied);
+    Log("copied " + std::to_string(copied) + " file(s)");
 
     const fs::path deletes = dir / "delete.txt";
     if (fs::exists(deletes)) {
@@ -362,33 +448,27 @@ int wmain(int argc, wchar_t** argv) {
             if (line.empty()) {
                 continue;
             }
-            std::error_code ec;
+            std::error_code remove_ec;
             const fs::path victim = dir / fs::path(line);
-            if (fs::remove(victim, ec)) {
+            if (fs::remove(victim, remove_ec)) {
                 ++removed;
                 PruneEmptyParents(dir, victim);
             }
         }
-        std::printf("Removed %d obsolete file(s).\n", removed);
+        Log("removed " + std::to_string(removed) + " obsolete file(s)");
     }
 
-    std::error_code ec;
-    const fs::path version_src = dir / "version.txt";
+    std::error_code cleanup_ec;
     std::string version;
-    if (fs::exists(version_src)) {
-        std::ifstream in(version_src);
+    if (fs::exists(dir / "version.txt")) {
+        std::ifstream in(dir / "version.txt");
         std::getline(in, version);
     }
-
-    fs::remove_all(payload, ec);
-    fs::remove(deletes, ec);
-    std::printf("\nUpdate complete%s%s.\n", version.empty() ? "" : ": version ",
-                version.c_str());
-
+    fs::remove_all(payload, cleanup_ec);
+    fs::remove(deletes, cleanup_ec);
+    Log("update complete" + (version.empty() ? std::string() : ": version " + version));
     if (launch) {
-        const fs::path exe = AppExe(dir);
-        ::ShellExecuteW(nullptr, L"open", exe.wstring().c_str(), nullptr,
-                        dir.wstring().c_str(), SW_SHOWNORMAL);
+        Relaunch(dir);
     }
     return 0;
 }

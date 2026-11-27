@@ -807,6 +807,27 @@ bool UpdateService::Install(const std::filesystem::path& app_dir, unsigned long 
         }
         asset = status_.asset_path;
     }
+    // The updater keeps a log in %TEMP%; write the hand-off there too so a
+    // failed self-update can be explained without guessing.
+    std::string asset_narrow;
+    {
+        const int size = ::WideCharToMultiByte(CP_UTF8, 0, Widen(asset).c_str(), -1, nullptr,
+                                               0, nullptr, nullptr);
+        if (size > 1) {
+            asset_narrow.resize(static_cast<std::size_t>(size - 1));
+            ::WideCharToMultiByte(CP_UTF8, 0, Widen(asset).c_str(), -1, asset_narrow.data(),
+                                  size, nullptr, nullptr);
+        }
+    }
+    {
+        wchar_t temp[MAX_PATH] = {};
+        ::GetTempPathW(MAX_PATH, temp);
+        std::ofstream log(std::filesystem::path(temp) / "veyla-update.log",
+                          std::ios::out | std::ios::app);
+        if (log) {
+            log << "engine: install requested, asset=" << asset_narrow << "\n";
+        }
+    }
     std::wstring command = L"\"" + Widen(asset) + L"\" --auto --dir=\"" +
                            app_dir.wstring() + L"\" --wait-pid=" +
                            std::to_wstring(pid);

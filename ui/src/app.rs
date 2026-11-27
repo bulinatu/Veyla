@@ -94,6 +94,23 @@ fn dock_icon(tab: Tab) -> &'static str {
     }
 }
 
+/// The updater drops `update-failed.txt` next to the app when it cannot apply a
+/// patch. Read it once so the user sees why the update bounced.
+fn take_update_failure() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let path = exe.parent()?.join("update-failed.txt");
+    let text = std::fs::read_to_string(&path).ok()?;
+    let _ = std::fs::remove_file(&path);
+    let line = text.lines().next().unwrap_or("").trim().to_string();
+    if line.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "Update failed: {line}  (details in %TEMP%\\veyla-update.log)"
+        ))
+    }
+}
+
 pub struct Root {
     pub(crate) settings: Settings,
     pub(crate) tab: Tab,
@@ -125,6 +142,8 @@ pub struct Root {
     /// Previous top-level tab index, so the dock pill can slide from where it
     /// was to where it is going.
     pub(crate) dock_from: usize,
+    /// Message from a failed self-update, read once at startup.
+    pub(crate) update_failure: Option<String>,
     /// Pending "Delete" confirmation for a saved profile: (profile id, when
     /// it was armed). A second click within a few seconds deletes.
     pub(crate) confirm_profile: Option<(String, std::time::Instant)>,
@@ -421,6 +440,7 @@ impl Root {
             settings_rev: 0,
             confirm_profile: None,
             dock_from: 0,
+            update_failure: take_update_failure(),
             profile_delete_cooldown: None,
             applied_rev: 0,
             apply_ticks: 0,
@@ -1682,6 +1702,10 @@ impl Render for Root {
             return self.boot_screen();
         }
         theme::set_text_scale(self.settings.i("ui.scale", 100));
+    if let Some(message) = self.update_failure.take() {
+        // The updater could not apply a patch and relaunched the old build.
+        self.toast(message, true, cx);
+    }
         if !self.start_min_done {
             self.start_min_done = true;
             if self.settings.b("general.start_minimized", false) {

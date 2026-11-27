@@ -130,10 +130,23 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 2.6.1 - standalone build
+Veyla 2.6.2 - standalone build
 =======================================
 
 Run veyla.exe. No installer, no console window, no background service.
+
+What changed in 2.6.2
+---------------------
+- Navigation moved to a dock at the bottom of the window, with icons and
+  labels; the top bar is gone and the window buttons float in place.
+- Updates are delivered as a delta: update.exe carries only the files that
+  changed, instead of the whole application.
+- The updater writes %TEMP%\veyla-update.log, retries when a file is still
+  locked, and relaunches the existing build if it cannot apply a patch instead
+  of leaving no window at all. A failure also shows up in the app on next start.
+- The control center no longer squeezes row text: the Passes hint is a hint, and
+  sliders sit under their label.
+- F10 opens the control center even before connecting.
 
 What changed in 2.6.1
 ---------------------

@@ -454,7 +454,7 @@ impl Root {
                 div()
                     .text_size(theme::tiny())
                     .text_color(theme::muted())
-                    .child("Veyla 2.6.1  -  original project: BetterRemotePlay"),
+                    .child("Veyla 2.6.2  -  original project: BetterRemotePlay"),
             )
             .child(
                 div()
@@ -536,7 +536,16 @@ impl Root {
                                 if let Some(engine) = &this.engine {
                                     engine.send("install-update");
                                 }
-                                cx.quit();
+                                // Do not quit on the spot: the command travels
+                                // over the bridge, and quitting first could drop
+                                // it, leaving the user with no app and no update.
+                                cx.spawn(async move |this, cx| {
+                                    cx.background_executor()
+                                        .timer(Duration::from_millis(1500))
+                                        .await;
+                                    let _ = this.update(cx, |_, cx| cx.quit());
+                                })
+                                .detach();
                             },
                         ),
                     ));
@@ -1435,7 +1444,14 @@ impl Root {
                         engine.send("install-update");
                     }
                     // The updater waits for this process, then restarts the app.
-                    cx.quit();
+                    // Quit a moment later so the command is on the wire first.
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(1500))
+                            .await;
+                        let _ = this.update(cx, |_, cx| cx.quit());
+                    })
+                    .detach();
                 }),
             ));
         }
@@ -1736,7 +1752,7 @@ impl Root {
 
         let brand = group(
             "About",
-            "Veyla 2.6.1",
+            "Veyla 2.6.2",
             vec![
                 widgets::kv("Product", "Veyla"),
                 widgets::kv(
