@@ -1374,3 +1374,47 @@ footer a:hover {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ---------- support the project ---------- */
+
+.support {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 18px 20px;
+  margin-bottom: 26px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--accent) 10%, transparent),
+    rgba(255, 255, 255, 0.02)
+  );
+}
+
+.support div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.support strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.support span {
+  font-size: 12.5px;
+  color: var(--dim);
+}
+
+.support .btn {
+  color: var(--text);
+}
+
+.support .btn:hover {
+  color: var(--text);
+}

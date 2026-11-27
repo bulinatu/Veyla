@@ -13,7 +13,8 @@
 <p align="center">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-4F46E5">
   <img alt="Console" src="https://img.shields.io/badge/console-PS5-8B5CF6">
-  <img alt="Version" src="https://img.shields.io/badge/version-2.6.0-6D28D9">
+  <img alt="Version" src="https://img.shields.io/github/v/release/bulinatu/Veyla?label=version&color=6D28D9">
+  <a href="https://ko-fi.com/bulinatu"><img alt="Support on Ko-fi" src="https://img.shields.io/badge/-buy%20me%20a%20coffee-FF5E5B?logo=kofi&logoColor=white"></a>
 </p>
 
 ![Veyla home screen](docs/images/home-2.6.5.png)
@@ -137,6 +138,16 @@ Not promises, just the direction - roughly in order:
 - **Localisation** - more interface languages.
 
 Ideas and bug reports are welcome in [Issues](../../issues).
+
+## Support
+
+Veyla is free, and it stays free. If it saves you a walk to the living room,
+you can buy me a coffee - it goes into test hardware, the Windows build machine
+and the hours spent chasing the last few milliseconds.
+
+<p align="center">
+  <a href="https://ko-fi.com/bulinatu"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support Veyla on Ko-fi" height="38"></a>
+</p>
 
 ## Credits
 
