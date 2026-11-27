@@ -45,8 +45,6 @@ AiBackend ReadBackend(const FlatMap& flat, const std::string& key, AiBackend fal
     const std::string value = FlatJson::GetString(flat, key, "");
     if (value == "none") return AiBackend::None;
     if (value == "dlss-sr") return AiBackend::DlssSr;
-    if (value == "tensorrt-sr") return AiBackend::TensorRtSr;
-    if (value == "rife") return AiBackend::Rife;
     if (value == "dlss-fg") return AiBackend::DlssFg;
     if (value == "nvidia-vfg") return AiBackend::NvidiaVfg;
     return fallback;
@@ -116,12 +114,6 @@ void AppSettings::Validate(std::vector<std::string>& warnings,
     }
     if (ai.sr_preset < 0 || ai.sr_preset > 4) {
         errors.push_back("ai.dlss_preset must be 0..4");
-    }
-    if (ai.blend < 0 || ai.blend > 40) {
-        errors.push_back("ai.blend must be 0..40");
-    }
-    if (ai.rife_model < 0 || ai.rife_model > 1) {
-        errors.push_back("ai.rife_model must be 0 or 1");
     }
     if (ai.fg_multiplier < 2 || ai.fg_multiplier > 6) {
         errors.push_back("ai.fg_multiplier must be 2..6");
@@ -228,9 +220,6 @@ FlatMap SettingsToFlat(const AppSettings& s) {
     FlatJson::PutInt(f, "ai.quality", s.ai.quality);
     FlatJson::PutBool(f, "ai.occlusion", s.ai.occlusion);
     FlatJson::PutBool(f, "ai.adaptive", s.ai.adaptive);
-    FlatJson::PutInt(f, "ai.rife_model", s.ai.rife_model);
-    FlatJson::PutInt(f, "ai.blend", s.ai.blend);
-    FlatJson::PutBool(f, "ai.motion_safety", s.ai.motion_safety);
     FlatJson::PutBool(f, "ai.neural_render", s.ai.neural_render);
     FlatJson::PutInt(f, "ai.neural_style", s.ai.neural_style);
     FlatJson::PutInt(f, "ai.neural_intensity", s.ai.neural_intensity);
@@ -364,11 +353,6 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
     s.ai.quality = ClampInt(FlatJson::GetInt(f, "ai.quality", s.ai.quality), 0, 3);
     s.ai.occlusion = FlatJson::GetBool(f, "ai.occlusion", s.ai.occlusion);
     s.ai.adaptive = FlatJson::GetBool(f, "ai.adaptive", s.ai.adaptive);
-    s.ai.rife_model =
-        ClampInt(FlatJson::GetInt(f, "ai.rife_model", s.ai.rife_model), 0, 1);
-    s.ai.blend = ClampInt(FlatJson::GetInt(f, "ai.blend", s.ai.blend), 0, 40);
-    s.ai.motion_safety =
-        FlatJson::GetBool(f, "ai.motion_safety", s.ai.motion_safety);
     s.ai.neural_render =
         FlatJson::GetBool(f, "ai.neural_render", s.ai.neural_render);
     s.ai.neural_style =
@@ -508,13 +492,9 @@ Status ImportLegacySettings(const std::filesystem::path& path, AppSettings& out,
     }
     out.ai.frame_generation = FlatJson::GetInt(flat, "dlss_fg", 0) >= 2;
     out.ai.fg_multiplier = ClampInt(FlatJson::GetInt(flat, "dlss_fg", 2), 2, 6);
-    const bool rife = FlatJson::GetInt(flat, "fg_engine", 0) == 1;
-    out.ai.fg_backend = out.ai.frame_generation
-                           ? (rife ? AiBackend::Rife : AiBackend::DlssFg)
-                           : AiBackend::None;
-    out.ai.rife_model = ClampInt(FlatJson::GetInt(flat, "rife_model", 0), 0, 1);
-    out.ai.blend = ClampInt(FlatJson::GetInt(flat, "rife_blend", 10), 0, 40);
-    out.ai.motion_safety = FlatJson::GetInt(flat, "rife_safe_motion", 1) != 0;
+    // Legacy profiles that selected the removed TensorRT interpolator fall
+    // back to DLSS-G (or off when frame generation was off).
+    out.ai.fg_backend = out.ai.frame_generation ? AiBackend::DlssFg : AiBackend::None;
     out.audio.buffer_ms =
         ClampInt(FlatJson::GetInt(flat, "audio_buffer_ms", 20), 5, 200);
     out.controller.haptics = FlatJson::GetInt(flat, "haptic_intensity", 3) > 0;

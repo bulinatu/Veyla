@@ -181,10 +181,9 @@ void TestLegacyImport(const std::filesystem::path& root) {
     Expect(imported.streaming.input == brp::next::Resolution::R1080, "resolution mapped");
     Expect(imported.ai.super_resolution, "SR flag mapped");
     Expect(imported.ai.frame_generation, "FG flag mapped");
-    Expect(imported.ai.fg_backend == brp::next::AiBackend::Rife, "RIFE backend mapped");
+    Expect(imported.ai.fg_backend == brp::next::AiBackend::DlssFg,
+           "legacy engine falls back to DLSS-G");
     Expect(imported.ai.fg_multiplier == 2, "DLSS-G multiplier mapped");
-    Expect(imported.ai.rife_model == 1 && imported.ai.blend == 20, "RIFE tuning mapped");
-    Expect(!imported.ai.motion_safety, "motion safety mapped");
     Expect(imported.advanced.debug_log, "testing log mapped");
     Expect(!warnings.empty(), "import reports warnings");
 }

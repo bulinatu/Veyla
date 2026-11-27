@@ -65,9 +65,6 @@ struct AiSettings {
     int quality = 1;  // QualityPreset index
     bool occlusion = true;
     bool adaptive = true;
-    int rife_model = 0;  // 0 lite, 1 heavy
-    int blend = 10;
-    bool motion_safety = true;
     // DLSS Neural Rendering (NGX feature 18) through the NeuralScreen worker.
     // A video has no 3D guides, so the worker runs with synthetic depth/motion
     // and resets history each frame: a real but subtle video enhancer.
@@ -214,8 +211,6 @@ struct StreamSnapshot {
 
 struct GpuSnapshot {
     bool present = false;
-    bool cuda = false;
-    bool tensorrt = false;
     bool nvdec = false;
     bool optical_flow = false;
     std::string name;
@@ -277,8 +272,6 @@ struct Notification {
 
 struct HardwareCapabilities {
     bool nvidia = false;
-    bool cuda = false;
-    bool tensorrt = false;
     bool nvdec = false;
     bool optical_flow = false;
     bool hdr = false;

@@ -302,11 +302,10 @@ float SettingsControls::SuperResolution(float x, float y, float width) {
 }
 
 float SettingsControls::FrameGeneration(float x, float y, float width) {
-    std::vector<AiBackend> backends = {AiBackend::DlssFg, AiBackend::Rife};
-    std::vector<std::wstring> labels = {L"DLSS-G (NVIDIA)", L"RIFE (TensorRT)"};
-    std::vector<bool> item_enabled = {system_.dlss_fg, system_.rife_lite};
-    const bool fg_available =
-        frame_generation_wired_ && (item_enabled[0] || item_enabled[1]);
+    std::vector<AiBackend> backends = {AiBackend::DlssFg};
+    std::vector<std::wstring> labels = {L"DLSS-G (NVIDIA)"};
+    std::vector<bool> item_enabled = {system_.dlss_fg};
+    const bool fg_available = frame_generation_wired_ && item_enabled[0];
     if (widgets_.Toggle(Next(), Row(x, y, width), L"Frame generation",
                         settings_.ai.frame_generation, fg_available)) {
         Touch();
@@ -350,45 +349,9 @@ float SettingsControls::FrameGeneration(float x, float y, float width) {
         widgets_.Label(Row(x, y, width),
                        system_.nr_worker
                            ? L"FG unavailable: nvngx_dlssg.dll is missing"
-                           : L"FG unavailable: worker and RIFE engine are not installed",
+                           : L"FG unavailable: the NVIDIA worker is not installed",
                        widgets_.Tokens().text_faint, 12.0f,
                        DWRITE_FONT_WEIGHT_MEDIUM);
-        y += kRow + kGap;
-    }
-
-    if (settings_.ai.fg_backend == AiBackend::Rife &&
-        settings_.ai.frame_generation) {
-        int model = settings_.ai.rife_model;
-        const std::vector<bool> model_enabled = {true, system_.rife_heavy};
-        if (widgets_.Choice(Next(), Row(x, y, width), L"RIFE model",
-                            {L"Lite 4.25", L"Heavy 4.26"}, model,
-                            settings_.ai.frame_generation, &model_enabled)) {
-            if (model_enabled[static_cast<std::size_t>(model)]) {
-                settings_.ai.rife_model = model;
-                Touch();
-            }
-        }
-        y += kRow + kGap;
-        if (settings_.ai.rife_model == 1 && !system_.rife_heavy) {
-            widgets_.Label(Rect(x, y, x + width, y + 34),
-                           L"Heavy engine is not built; Lite is used until the heavy "
-                           L"engine is generated.",
-                           widgets_.Tokens().warning, 11.5f, DWRITE_FONT_WEIGHT_MEDIUM);
-            y += 36.0f;
-        }
-
-        float blend = static_cast<float>(settings_.ai.blend);
-        if (widgets_.Slider(Next(), Row(x, y, width), L"RIFE blend", blend, 0.0f, 40.0f,
-                            10.0f, L"%.0f%%")) {
-            settings_.ai.blend = static_cast<int>(std::lround(blend));
-            Touch();
-        }
-        y += kRow + kGap;
-
-        if (widgets_.Toggle(Next(), Row(x, y, width), L"Motion safety",
-                            settings_.ai.motion_safety)) {
-            Touch();
-        }
         y += kRow + kGap;
     }
 
@@ -453,10 +416,9 @@ float SettingsControls::Gpu(float x, float y, float width) {
                    widgets_.Tokens().text_dim, 11.0f, DWRITE_FONT_WEIGHT_MEDIUM);
     y += kRow + kGap - 6.0f;
     widgets_.Label(Row(x, y, width),
-                   (std::wstring(L"CUDA: ") +
-                    (system_.cuda ? L"driver present" : L"missing") +
-                    L"  |  TensorRT: " +
-                    (system_.tensorrt_runtime ? L"runtime present" : L"missing"))
+                   (std::wstring(L"VRAM: ") +
+                    std::to_wstring(system_.gpu.vram_mb / 1024) + L" GB" + L"  |  DLSS: " +
+                    (system_.dlss_sr ? L"available" : L"missing"))
                        .c_str(),
                    widgets_.Tokens().text_faint, 11.0f, DWRITE_FONT_WEIGHT_MEDIUM);
     y += kRow + kGap;

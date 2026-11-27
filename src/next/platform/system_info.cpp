@@ -181,14 +181,6 @@ SystemInfo ProbeSystem() {
     const std::filesystem::path dir(info.exe_dir);
     std::error_code ec;
     info.dlss_sr = std::filesystem::exists(dir / "nvngx_dlss.dll", ec);
-    info.rife_lite = std::filesystem::exists(dir / "rife" / "rife425_1080.engine", ec);
-    info.rife_heavy = std::filesystem::exists(dir / "rife" / "rife426h_1080.engine", ec);
-    info.tensorrt_runtime =
-        std::filesystem::exists(dir / "rife" / "runtime" / "nvinfer_10.dll", ec);
-    if (HMODULE cuda = ::LoadLibraryW(L"nvcuda.dll")) {
-        info.cuda = true;
-        ::FreeLibrary(cuda);
-    }
     info.nr_worker = false;
     std::vector<std::filesystem::path> nr_candidates;
     nr_candidates.push_back(dir / "nr" / "native");

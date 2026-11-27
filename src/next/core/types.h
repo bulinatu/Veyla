@@ -44,8 +44,6 @@ enum class FrameRate {
 enum class AiBackend {
     None,
     DlssSr,
-    TensorRtSr,
-    Rife,
     DlssFg,
     NvidiaVfg,
 };
@@ -119,8 +117,6 @@ inline std::string_view ToString(AiBackend backend) {
     switch (backend) {
         case AiBackend::None: return "none";
         case AiBackend::DlssSr: return "dlss-sr";
-        case AiBackend::TensorRtSr: return "tensorrt-sr";
-        case AiBackend::Rife: return "rife";
         case AiBackend::DlssFg: return "dlss-fg";
         case AiBackend::NvidiaVfg: return "nvidia-vfg";
     }

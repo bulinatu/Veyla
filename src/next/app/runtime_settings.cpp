@@ -51,9 +51,7 @@ ApplyScope ClassifySettingsChange(const AppSettings& before, const AppSettings& 
         a.ai.sr_preset != b.ai.sr_preset ||
         a.ai.frame_generation != b.ai.frame_generation ||
         a.ai.fg_backend != b.ai.fg_backend ||
-        a.ai.fg_multiplier != b.ai.fg_multiplier ||
-        a.ai.rife_model != b.ai.rife_model || a.ai.blend != b.ai.blend ||
-        a.ai.motion_safety != b.ai.motion_safety) {
+        a.ai.fg_multiplier != b.ai.fg_multiplier) {
         bump(ApplyScope::PipelineReconfiguration);
     }
 

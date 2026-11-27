@@ -34,21 +34,6 @@ if (MSVC)
     target_compile_options(brp-bench PRIVATE /W4 /permissive- /utf-8)
 endif()
 
-# --- RIFE (TensorRT, loaded at run time; no CUDA/TensorRT SDK link) ----------
-add_library(brp_rife STATIC src/media/rife.cpp)
-target_include_directories(brp_rife PUBLIC src)
-target_include_directories(brp_rife PRIVATE
-    "${CMAKE_SOURCE_DIR}/third_party/tensorrt/include"
-    "${CMAKE_SOURCE_DIR}/third_party/tensorrt/cuda_shim")
-if (MSVC)
-    target_compile_options(brp_rife PRIVATE /W4 /permissive- /utf-8)
-endif()
-
-add_executable(rife_probe tools/rife_probe/main.cpp)
-target_link_libraries(rife_probe PRIVATE brp_rife)
-if (MSVC)
-    target_compile_options(rife_probe PRIVATE /W4 /permissive- /utf-8)
-endif()
 # --- updater (applies a patch zip over an installed folder) ------------------
 add_executable(brp_update tools/brp_update/main.cpp)
 target_link_libraries(brp_update PRIVATE shell32)
@@ -82,10 +67,6 @@ target_link_libraries(nr_fg_probe PRIVATE brp_media)
 target_compile_options(dlss_sr_module_probe PRIVATE /Zi)
 target_link_options(dlss_sr_module_probe PRIVATE /DEBUG)
 
-add_executable(vsr_probe tools/vsr_probe/main.cpp)
-target_link_libraries(vsr_probe PRIVATE brp_media)
-target_compile_options(vsr_probe PRIVATE /Zi)
-target_link_options(vsr_probe PRIVATE /DEBUG)
 
 # Diagnostic only: DLSSNR signed-snippet host probe. Needs the NGX SDK headers;
 # disabled unless NGX_SDK_INC points at a folder containing nvsdk_ngx.h.
@@ -121,7 +102,6 @@ target_link_libraries(brp_ui PUBLIC brp_media d2d1 dwrite)
 add_executable(brp
     src/main_app.cpp
     src/app/app.cpp
-    src/app/rife_setup.cpp
     src/session/profile.cpp
     src/platform/gamepad.cpp
     src/audio/audio_engine.cpp
@@ -135,7 +115,7 @@ set_target_properties(brp PROPERTIES WIN32_EXECUTABLE TRUE)
 if (MSVC)
     target_link_options(brp PRIVATE /ENTRY:mainCRTStartup)
 endif()
-target_link_libraries(brp PRIVATE brp_ui brp_decode brp_session brp_rife hid setupapi xinput ole32 avrt uuid ws2_32 winhttp shell32 bcrypt winmm)
+target_link_libraries(brp PRIVATE brp_ui brp_decode brp_session hid setupapi xinput ole32 avrt uuid ws2_32 winhttp shell32 bcrypt winmm)
 if(EXISTS "${CMAKE_SOURCE_DIR}/assets/fonts/NotoSans-Regular.ttf")
     add_custom_command(TARGET brp POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -173,7 +153,7 @@ set(USE_SHARED_MBEDTLS_LIBRARY OFF CACHE BOOL "" FORCE)
 set(USE_STATIC_MBEDTLS_LIBRARY ON CACHE BOOL "" FORCE)
 FetchContent_Declare(mbedtls
     GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
-    GIT_TAG 8b3f26a5ac38d4fdccbc5c5366229f3e01dafcc0  # v2.28.0
+    GIT_TAG f2f9399769ac5dafb75d9da7f6895b7b0da50efd  # v2.28.10, last 2.28 LTS
     GIT_PROGRESS TRUE)
 FetchContent_MakeAvailable(mbedtls)
 
@@ -368,7 +348,7 @@ set(BRP_NEXT_SHELL_SOURCES
     "${CMAKE_CURRENT_BINARY_DIR}/app.rc"
 )
 add_executable(brpnext ${BRP_NEXT_SHELL_SOURCES})
-target_link_libraries(brpnext PRIVATE brp_next_core brp_next_streaming brp_ui brp_media brp_rife comdlg32 shell32 winmm ws2_32)
+target_link_libraries(brpnext PRIVATE brp_next_core brp_next_streaming brp_ui brp_media comdlg32 shell32 winmm ws2_32)
 set_target_properties(brpnext PROPERTIES WIN32_EXECUTABLE TRUE)
 if (MSVC)
     target_compile_options(brpnext PRIVATE /W4 /permissive- /utf-8)
@@ -376,7 +356,7 @@ endif()
 
 # Headless stream engine driven by the Rust/GPUI shell over the UI bridge.
 add_executable(brpnext-engine ${BRP_NEXT_SHELL_SOURCES})
-target_link_libraries(brpnext-engine PRIVATE brp_next_core brp_next_streaming brp_ui brp_media brp_rife comdlg32 shell32 winmm ws2_32)
+target_link_libraries(brpnext-engine PRIVATE brp_next_core brp_next_streaming brp_ui brp_media comdlg32 shell32 winmm ws2_32)
 set_target_properties(brpnext-engine PROPERTIES WIN32_EXECUTABLE TRUE)
 if (MSVC)
     target_compile_options(brpnext-engine PRIVATE /W4 /permissive- /utf-8)

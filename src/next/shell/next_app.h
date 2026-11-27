@@ -36,7 +36,6 @@ namespace media {
 class NvDlssSr;
 class NvDlssnr;
 class NvReflex;
-class Rife;
 }
 }  // namespace brp
 
@@ -90,12 +89,6 @@ private:
     bool EnsureDlssSr(int input_width, int input_height);
     bool EnsureDlssFg(int width, int height);
     void StopDlssFg();
-    bool EnsureRife();
-    void StartRifeThread();
-    void StopRifeThread();
-    void RifeWorkerMain();
-    void ScheduleRifeFrame(const media::DecodedFrame& frame);
-    void PushDisplayFrame(media::DecodedFrame frame, double due);
     void RecordVideoShown();
     void ConnectStream();
     void DisconnectStream();
@@ -247,42 +240,6 @@ private:
     ApplyScope last_apply_scope_ = ApplyScope::Immediate;
     bool stream_restart_pending_ = false;
 
-    struct DisplayFrame {
-        media::DecodedFrame frame;
-        double due = 0.0;
-        bool generated = false;
-    };
-    struct RifeJob {
-        std::vector<uint8_t> a;
-        std::vector<uint8_t> b;
-        double mid_due = 0.0;
-        bool pq = false;
-        float blend = 0.0f;
-        bool motion_safety = true;
-    };
-    std::unique_ptr<brp::media::Rife> rife_;
-    std::thread rife_thread_;
-    std::mutex rife_mutex_;
-    std::condition_variable rife_cv_;
-    std::deque<RifeJob> rife_jobs_;
-    std::deque<DisplayFrame> display_queue_;
-    std::mutex display_mutex_;
-    std::vector<uint8_t> rife_prev_;
-    int rife_prev_w_ = 0;
-    int rife_prev_h_ = 0;
-    bool rife_prev_pq_ = false;
-    bool rife_prev_valid_ = false;
-    bool rife_prev_pushed_ = false;
-    bool rife_ready_ = false;
-    std::atomic<bool> rife_failed_{false};
-    std::atomic<bool> rife_run_{false};
-    double rife_interval_ = 1.0 / 30.0;
-    media::DecodedFrame rife_last_shown_;
-    bool rife_have_shown_ = false;
-    std::atomic<int> rife_generated_{0};
-    int rife_generated_last_ = 0;
-    int rife_generated_rate_ = 0;
-    double rife_generated_at_ = -1.0;
     std::atomic<int> display_shown_{0};
     RollingStats video_intervals_{512};
     RollingStats loop_intervals_{512};

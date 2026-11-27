@@ -39,10 +39,6 @@ struct SystemInfo {
     GpuInfo gpu;
     std::vector<DisplayInfo> displays;
     bool dlss_sr = false;
-    bool rife_lite = false;
-    bool rife_heavy = false;
-    bool tensorrt_runtime = false;
-    bool cuda = false;
     bool nr_worker = false;
     bool dlss_fg = false;
     bool dlss_fg_multi = false;

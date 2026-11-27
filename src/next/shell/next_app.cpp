@@ -7,7 +7,6 @@
 #include "media/nv_dlssnr.h"
 #include "media/nv_reflex.h"
 #include "media/pipeline.h"
-#include "media/rife.h"
 #include "media/rgba_scale.h"
 #include "platform/win32_window.h"
 #include "shell/settings_controls.h"
@@ -131,18 +130,14 @@ int OutputFps(const AppSettings& settings) {
     }
     if (settings.ai.fg_backend == AiBackend::DlssFg) {
         fps *= std::clamp(settings.ai.fg_multiplier, 2, 6);
-    } else if (settings.ai.fg_backend == AiBackend::Rife) {
-        fps *= 2;
     }
     return fps;
 }
 std::wstring BackendLabel(AiBackend backend) {
     switch (backend) {
         case AiBackend::DlssFg: return L"DLSS-G";
-        case AiBackend::Rife: return L"RIFE";
         case AiBackend::NvidiaVfg: return L"NVIDIA VFG";
         case AiBackend::DlssSr: return L"DLSS SR";
-        case AiBackend::TensorRtSr: return L"TensorRT SR";
         default: return L"Off";
     }
 }
@@ -260,7 +255,6 @@ NextApp::NextApp(bool engine_mode, unsigned short bridge_port)
 
 NextApp::~NextApp() {
     StopNr();
-    StopRifeThread();
     StopDlssFg();
     if (decode_context_) {
         decode_context_->Release();
@@ -302,8 +296,8 @@ bool NextApp::CreateDecodeDevice() {
 }
 
 bool NextApp::NeedsCpuPixels() const {
-    // Every AI stage consumes tightly packed RGBA in system memory: DLSS SR
-    // and RIFE in-process, NR and DLSS-G in the worker.
+    // Every AI stage consumes tightly packed RGBA in system memory: DLSS SR,
+    // NR and DLSS-G in the worker.
     return settings_.ai.super_resolution || settings_.ai.neural_render ||
            settings_.ai.frame_generation;
 }
@@ -448,7 +442,6 @@ int NextApp::Run() {
     g_hook_app = nullptr;
     StopPadThread();
     StopNr();
-    StopRifeThread();
     StopDlssFg();
     overlay_.Destroy();
     if (streaming_) {
@@ -831,7 +824,6 @@ void NextApp::Frame() {
         }
         if (watching_ && !streaming_->Connected()) {
             ToggleWatch(false);
-            StopRifeThread();
             Toast(L"Stream ended", true);
         }
         const StreamSnapshot snapshot = streaming_->Snapshot();
@@ -855,7 +847,6 @@ void NextApp::Frame() {
     if (presenter_ && (presenter_->device_lost() ||
                        (stream_presenter_ && stream_presenter_->device_lost()))) {
         watching_ = false;
-        StopRifeThread();
         StopDlssFg();
         StopNr();
         streaming_->Disconnect();
@@ -889,20 +880,16 @@ void NextApp::Frame() {
             overlay_control_ = false;
         }
     }
-    if (rife_generated_at_ < 0.0 || now_ - rife_generated_at_ >= 1.0) {
-        const int total = rife_generated_.load();
-        rife_generated_rate_ = total - rife_generated_last_;
-        rife_generated_last_ = total;
-        rife_generated_at_ = now_;
+    if (stats_at_ < 0.0 || now_ - stats_at_ >= 1.0) {
         const int shown = display_shown_.load();
         display_rate_ = shown - display_shown_last_;
         display_shown_last_ = shown;
         cadence_p50_ = video_intervals_.Percentile(0.50);
         cadence_p99_ = video_intervals_.Percentile(0.99);
         loop_p99_ = loop_intervals_.Percentile(0.99);
+        const double span = stats_at_ >= 0.0 ? std::max(0.001, now_ - stats_at_) : 1.0;
+        stats_at_ = now_;
         if (presenter_) {
-            const double span = stats_at_ >= 0.0 ? std::max(0.001, now_ - stats_at_) : 1.0;
-            stats_at_ = now_;
             brp::Presenter* stats_presenter = ActivePresenter();
             const unsigned long long misses =
                 stats_presenter ? stats_presenter->present_misses() : 0;
@@ -1237,9 +1224,9 @@ void NextApp::RenderSidebar(Widgets& widgets) {
             ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
         wchar_t line[96] = {};
         std::swprintf(line, 96, L"%d fps  |  %s", OutputFps(settings_),
-                      settings_.ai.frame_generation
-                          ? (settings_.ai.fg_backend == AiBackend::DlssFg ? L"DLSS-G"
-                                                                          : L"RIFE")
+                      settings_.ai.frame_generation &&
+                              settings_.ai.fg_backend == AiBackend::DlssFg
+                          ? L"DLSS-G"
                           : L"native");
         renderer_->Text(line, Rect(18, card_top + 54, width - 20, card_top + 74),
                         9.5f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
@@ -1329,10 +1316,7 @@ void NextApp::RenderHome(Widgets& widgets) {
     const bool fg_on = settings_.ai.frame_generation;
     std::wstring pipeline = sr_on ? (dlaa ? L"DLAA" : L"DLSS SR") : L"Native";
     pipeline += L"  +  ";
-    pipeline += fg_on ? (settings_.ai.fg_backend == AiBackend::DlssFg
-                             ? L"DLSS-G " + std::to_wstring(settings_.ai.fg_multiplier) +
-                                   L"x"
-                             : L"RIFE 2x")
+    pipeline += fg_on ? (L"DLSS-G " + std::to_wstring(settings_.ai.fg_multiplier) + L"x")
                       : L"No frame generation";
     tile(1, L"PIPELINE", pipeline.c_str(),
          std::to_wstring(OutputFps(settings_)) + L" fps output  |  " +
@@ -1370,10 +1354,7 @@ void NextApp::RenderHome(Widgets& widgets) {
                                     : L"Off",
          sr_on ? L"NGX on the decoded frame" : L"presenter upscale", sr_on},
         {L"FRAME GENERATION",
-         fg_on ? (settings_.ai.fg_backend == AiBackend::DlssFg
-                      ? L"DLSS-G " + std::to_wstring(settings_.ai.fg_multiplier) + L"x"
-                      : L"RIFE 2x")
-               : L"Off",
+         fg_on ? (L"DLSS-G " + std::to_wstring(settings_.ai.fg_multiplier) + L"x") : L"Off",
          fg_on ? (std::to_wstring(OutputFps(settings_)) + L" fps") : L"source cadence",
          fg_on},
         {L"PRESENT", (std::to_wstring(OutputFps(settings_)) + L" fps").c_str(),
@@ -1458,12 +1439,6 @@ void NextApp::RenderHome(Widgets& widgets) {
         {L"DLSS Frame Generation", system_.dlss_fg,
          system_.dlss_fg ? L"AVAILABLE" : L"MISSING",
          system_.dlss_fg_multi ? L"up to 6x" : L"2x"},
-        {L"RIFE Lite 4.25", system_.rife_lite,
-         system_.rife_lite ? L"AVAILABLE" : L"MISSING", L"TensorRT 1080p"},
-        {L"RIFE Heavy 4.26", system_.rife_heavy,
-         system_.rife_heavy ? L"AVAILABLE" : L"MISSING", L"engine on demand"},
-        {L"TensorRT", system_.tensorrt_runtime,
-         system_.tensorrt_runtime ? L"AVAILABLE" : L"MISSING", L"nvinfer_10"},
     };
     int available = 0;
     for (const auto& cap : caps) {
@@ -1474,9 +1449,10 @@ void NextApp::RenderHome(Widgets& widgets) {
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM,
                     DWRITE_TEXT_ALIGNMENT_TRAILING);
     const float cap_gap = 10.0f;
-    const float cap_w = (w - 32.0f - cap_gap * 4.0f) / 5.0f;
+    const int cap_count = static_cast<int>(sizeof(caps) / sizeof(caps[0]));
+    const float cap_w = (w - 32.0f - cap_gap * (cap_count - 1)) / cap_count;
     const float cap_y = ai_y + 38.0f;
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < cap_count; ++i) {
         const float cx = x + 16.0f + (cap_w + cap_gap) * i;
         const D2D1_RECT_F r = Rect(cx, cap_y, cx + cap_w, cap_y + 94.0f);
         renderer_->FillRounded(r, 10.0f, ToD2D(theme.surface_alt));
@@ -1493,8 +1469,7 @@ void NextApp::RenderHome(Widgets& widgets) {
                                                      cap_y + 76),
                                 8.5f, ToD2D(theme.text_faint));
     }
-    renderer_->Text(L"Capabilities are file checks. DLSS SR and DLSS-G run in Watch; "
-                    L"RIFE is the in-process 30 -> 60 path.",
+    renderer_->Text(L"Capabilities are file checks. DLSS SR and DLSS-G run in Watch.",
                     Rect(x + 16, ai_y + 142, x + w - 16, ai_y + 158), 9.0f,
                     ToD2D(theme.text_faint));
 
@@ -1789,14 +1764,13 @@ void NextApp::RenderAi(Widgets& widgets) {
     int available = 0;
     available += system_.dlss_sr ? 1 : 0;
     available += system_.dlss_fg ? 1 : 0;
-    available += system_.rife_lite ? 1 : 0;
-    available += system_.tensorrt_runtime ? 1 : 0;
+    available += system_.nr_worker ? 1 : 0;
     PageHeader(widgets, L"PROCESSING", L"AI Video Engine",
                L"Super resolution, frame generation and inference runtimes",
-               available >= 3 ? L"READY" : L"LIMITED", available >= 3);
+               available >= 2 ? L"READY" : L"LIMITED", available >= 2);
 
     const float gap = 10.0f;
-    const float card_w = (w - gap * 3.0f) / 4.0f;
+    const float card_w = (w - gap * 2.0f) / 3.0f;
     auto capability_card = [&](int index, const wchar_t* title, const wchar_t* status,
                                bool good, const wchar_t* detail) {
         const float cx = x + (card_w + gap) * index;
@@ -1816,11 +1790,8 @@ void NextApp::RenderAi(Widgets& widgets) {
     capability_card(1, L"DLSS Frame Generation", system_.dlss_fg ? L"AVAILABLE" : L"MISSING",
                     system_.dlss_fg,
                     system_.dlss_fg_multi ? L"NVIDIA + SM86 proxy" : L"NVIDIA 2x");
-    capability_card(2, L"RIFE TensorRT", system_.rife_lite ? L"AVAILABLE" : L"MISSING",
-                    system_.rife_lite, L"30 -> 60 in-process");
-    capability_card(3, L"TensorRT runtime", system_.tensorrt_runtime ? L"AVAILABLE"
-                                                                      : L"MISSING",
-                    system_.tensorrt_runtime, L"nvinfer_10");
+    capability_card(2, L"Neural Rendering", system_.nr_worker ? L"AVAILABLE" : L"MISSING",
+                    system_.nr_worker, L"ngx + DLSS NR");
 
     const float tab_y = 228.0f;
     const float tab_w = (w - 16.0f) / 3.0f;
@@ -2033,9 +2004,9 @@ void NextApp::RenderProfiles(Widgets& widgets) {
         p.video.render_target = 1440;
         p.ai.super_resolution = false;
         p.ai.frame_generation = true;
-        p.ai.fg_backend = AiBackend::Rife;
-        p.ai.rife_model = 0;
-        presets.push_back({L"1440p RIFE", L"RIFE 30 -> 60 at 1440p", p});
+        p.ai.fg_backend = AiBackend::DlssFg;
+        p.ai.fg_multiplier = 2;
+        presets.push_back({L"1440p DLSS-G", L"DLSS-G 2x at 1440p", p});
     }
     {
         AppSettings p = base;
@@ -2188,10 +2159,10 @@ void NextApp::RenderDiagnostics(Widgets& widgets) {
                             .c_str(),
                         Rect(cx, cy + 26, cx + card_w - 32, cy + 46), 11.0f,
                         ToD2D(theme.text_dim));
-        renderer_->Text((std::wstring(L"CUDA: ") +
-                         (system_.cuda ? L"driver present" : L"missing") +
-                         L"  |  TensorRT: " +
-                         (system_.tensorrt_runtime ? L"runtime present" : L"runtime missing"))
+        renderer_->Text((std::wstring(L"VRAM: ") +
+                         std::to_wstring(system_.gpu.vram_mb / 1024) + L" GB" +
+                         L"  |  DLSS: " +
+                         (system_.dlss_sr ? L"available" : L"missing"))
                             .c_str(),
                         Rect(cx, cy + 50, cx + card_w - 32, cy + 72), 11.0f,
                         ToD2D(theme.text_faint));
@@ -2405,7 +2376,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
-                    L"DLSS-G through the NVIDIA worker, and TensorRT RIFE.",
+                    L"DLSS-G through the NVIDIA worker.",
                     Rect(x + 80, 204, x + w - 20, 226), 11.5f,
                     ToD2D(theme.text_faint));
 
@@ -2431,9 +2402,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     runtime(L"DLSS Frame Generation", system_.dlss_fg,
             system_.dlss_fg_multi ? L"NVIDIA runtime + SM86 proxy (up to 6x)"
                                   : L"NVIDIA runtime (2x)");
-    runtime(L"RIFE Lite 4.25", system_.rife_lite, L"TensorRT 1080p engine");
-    runtime(L"RIFE Heavy 4.26", system_.rife_heavy, L"TensorRT 1080p engine");
-    runtime(L"TensorRT", system_.tensorrt_runtime, L"nvinfer_10 runtime");
+    runtime(L"Neural Rendering", system_.nr_worker, L"NGX + DLSS NR worker");
 
     const float rx = x + col + gap;
     widgets.Card(Rect(rx, 252, rx + col, 484));
@@ -2492,7 +2461,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     }
 
     renderer_->Text(L"Components: chiaki-ng session core, FFmpeg, NVIDIA NGX/DLSS, "
-                    L"TensorRT, RIFE, NeuralScreen worker. No RTX VSR. "
+                    L"NeuralScreen worker. No RTX VSR. "
                     L"Noto Sans is SIL OFL.",
                     Rect(x, 706, x + w, 726), 10.0f, ToD2D(theme.text_faint));
 }
@@ -2549,13 +2518,8 @@ bool NextApp::Apply() {
     }
     if (previous_ai.frame_generation != settings_.ai.frame_generation ||
         previous_ai.fg_backend != settings_.ai.fg_backend ||
-        previous_ai.fg_multiplier != settings_.ai.fg_multiplier ||
-        previous_ai.rife_model != settings_.ai.rife_model ||
-        previous_ai.blend != settings_.ai.blend ||
-        previous_ai.motion_safety != settings_.ai.motion_safety) {
+        previous_ai.fg_multiplier != settings_.ai.fg_multiplier) {
         StopDlssFg();
-        StopRifeThread();
-        rife_failed_ = false;
         dlss_fg_failed_ = false;
     }
     if (previous_ai.neural_render != settings_.ai.neural_render ||
@@ -2702,7 +2666,6 @@ void NextApp::BuildOverlayView() {
     const bool sr_on = settings_.ai.super_resolution;
     const bool fg_on = settings_.ai.frame_generation;
     const bool dlss_fg = fg_on && settings_.ai.fg_backend == AiBackend::DlssFg;
-    const bool rife_fg = fg_on && settings_.ai.fg_backend == AiBackend::Rife;
     const bool dlaa = sr_on && (settings_.ai.sr_quality >= 5 ||
                                 settings_.ai.sr_output == Resolution::R1080);
 
@@ -2778,15 +2741,14 @@ void NextApp::BuildOverlayView() {
                   : L"presenter upscale only"));
         overview.rows.push_back(info(
             L"FRAME GENERATION",
-            fg_on ? (dlss_fg ? std::wstring(L"DLSS-G ") +
-                                   std::to_wstring(settings_.ai.fg_multiplier) + L"x"
-                             : std::wstring(L"RIFE"))
-                  : L"Off",
+            fg_on && dlss_fg
+                ? std::wstring(L"DLSS-G ") +
+                      std::to_wstring(settings_.ai.fg_multiplier) + L"x"
+                : L"Off",
             dlss_fg ? (fg_fps_ > 0.5
                            ? std::to_wstring(static_cast<int>(fg_fps_)) + L" shown fps"
                            : std::to_wstring(OutputFps(settings_)) + L" fps requested")
-                    : (rife_fg ? std::to_wstring(rife_generated_rate_) + L" generated/s"
-                               : L"source cadence only")));
+                    : L"source cadence only"));
     }
     if (settings_.overlay.show_stream) {
         std::swprintf(buffer, 220, L"%.0f kbps  |  loss %.2f%%", snapshot.bitrate_kbps,
@@ -2845,13 +2807,11 @@ void NextApp::BuildOverlayView() {
     OverlayPage fg;
     fg.title = L"FG";
     fg.rows.push_back(toggle(L"Frame generation", fg_on, OverlayAction::ToggleFg,
-                             L"generator owns presentation", system_.dlss_fg ||
-                                 system_.rife_lite));
+                             L"generator owns presentation", system_.dlss_fg));
     fg.rows.push_back(action_row(
-        L"Backend", dlss_fg ? L"DLSS-G" : (rife_fg ? L"RIFE" : L"Off"),
+        L"Backend", dlss_fg ? L"DLSS-G" : L"Off",
         OverlayAction::FgBackendNext,
-        dlss_fg ? L"NVIDIA worker presenter"
-                : (rife_fg ? L"TensorRT, one midpoint" : L"select a generator"),
+        dlss_fg ? L"NVIDIA worker presenter" : L"select a generator",
         fg_on));
     fg.rows.push_back(stepper(
         L"Multiplier",
@@ -2863,7 +2823,7 @@ void NextApp::BuildOverlayView() {
     fg.rows.push_back(info(
         L"RUNTIME",
         dlss_fg ? (settings_.ai.fg_multiplier > 2 ? L"SM86 proxy" : L"NVIDIA official")
-                : (rife_fg ? L"RIFE 4.25" : L"none"),
+                : L"none",
         dlss_fg ? (settings_.ai.fg_multiplier > 2 ? L"up to 6x, modded kernels"
                                                   : L"2x, NVIDIA-signed runtime")
                 : L""));
@@ -2937,9 +2897,8 @@ void NextApp::BuildOverlayView() {
     performance.rows.push_back(info(L"CADENCE", buffer, L"p50 / p99"));
     performance.rows.push_back(info(L"GENERATED",
                                     dlss_fg ? std::to_wstring(fg_dropped_) + L" dropped"
-                                            : std::to_wstring(rife_generated_rate_) +
-                                                  L" /s",
-                                    dlss_fg ? L"worker queue" : L"RIFE midpoints"));
+                                            : L"—",
+                                    dlss_fg ? L"worker queue" : L"frame generation off"));
     std::swprintf(buffer, 220, L"%.2f / %.2f ms", diagnostics.frame_p50_ms,
                   diagnostics.frame_p99_ms);
     performance.rows.push_back(info(L"UI FRAME", buffer, L"p50 / p99"));
@@ -3082,12 +3041,12 @@ void NextApp::HandleOverlayAction(OverlayAction action) {
             changed();
             break;
         case OverlayAction::FgBackendNext:
-            settings_.ai.fg_backend = settings_.ai.fg_backend == AiBackend::Rife
-                                          ? AiBackend::DlssFg
-                                          : AiBackend::Rife;
-            if (settings_.ai.fg_backend == AiBackend::Rife) {
-                settings_.ai.fg_multiplier = 2;
-            }
+            // DLSS-G is the only generator left.
+            settings_.ai.fg_backend =
+                settings_.ai.fg_backend == AiBackend::DlssFg ? AiBackend::None
+                                                             : AiBackend::DlssFg;
+            settings_.ai.frame_generation =
+                settings_.ai.fg_backend == AiBackend::DlssFg;
             changed();
             break;
         case OverlayAction::FgMultPrev:
@@ -3175,9 +3134,6 @@ void NextApp::HandleOverlayAction(OverlayAction action) {
             display_shown_.store(0);
             display_shown_last_ = 0;
             display_rate_ = 0;
-            rife_generated_.store(0);
-            rife_generated_last_ = 0;
-            rife_generated_rate_ = 0;
             video_intervals_.Reset();
             cadence_p50_ = 0.0;
             cadence_p99_ = 0.0;
@@ -3415,9 +3371,6 @@ std::wstring NextApp::ProfileWarning(const Profile& profile) const {
             if (!system_.dlss_fg) {
                 return L"DLSS-G worker runtime missing";
             }
-        }
-        if (ai.fg_backend == AiBackend::Rife && !system_.rife_lite) {
-            return L"RIFE engine missing";
         }
     }
     return {};
@@ -3715,59 +3668,6 @@ void NextApp::PresentVideo() {
         // for no visible gain.
         return;
     }
-    const bool rife_mode =
-        settings_.ai.frame_generation && settings_.ai.fg_backend == AiBackend::Rife &&
-        content < 45.0 && EnsureRife();
-    if (rife_mode) {
-        rife_interval_ = 1.0 / std::clamp(content, 24.0, 60.0);
-        bool new_frame = false;
-        media::DecodedFrame frame;
-        if (streaming_->TakeFrameOrdered(frame, 3)) {
-            video_frame_ = std::move(frame);
-            have_frame_ = true;
-            new_frame = true;
-            EnhanceNeural(video_frame_);
-        }
-        if (new_frame && !video_frame_.duplicate) {
-            ScheduleRifeFrame(video_frame_);
-        }
-        DisplayFrame shown;
-        bool have_shown = false;
-        {
-            std::lock_guard<std::mutex> lock(display_mutex_);
-            if (!display_queue_.empty() && display_queue_.front().due <= now_) {
-                shown = std::move(display_queue_.front());
-                display_queue_.pop_front();
-                have_shown = true;
-            }
-        }
-        if (have_shown) {
-            rife_last_shown_ = std::move(shown.frame);
-            rife_have_shown_ = true;
-            video->SetSourceFrame(rife_last_shown_.rgba.data(),
-                                       rife_last_shown_.width, rife_last_shown_.height,
-                                       rife_last_shown_.pq);
-            video->SetSourceFinal(false);
-            RecordVideoShown();
-        }
-        if (!have_shown && !redraw_needed_) {
-            return;
-        }
-        redraw_needed_ = false;
-        if (rife_have_shown_ && !rife_last_shown_.rgba.empty()) {
-            // Redraw the standing frame when a frame is due on the swapchain.
-            // Skipping the redraw made the flip chain alternate between the new
-            // frame and the backbuffer contents from earlier in the queue, which
-            // reads as a backwards skip even though the decode cadence was
-            // perfect.
-            video->Render(now_);
-        } else {
-            const float background[4] = {0.015f, 0.017f, 0.022f, 1.0f};
-            video->Clear(background);
-        }
-        present_frame_ = true;
-        return;
-    }
 
     bool new_frame = false;
     media::DecodedFrame frame;
@@ -3966,226 +3866,6 @@ void NextApp::EnhanceNeural(media::DecodedFrame& frame) {
     }
 }
 
-bool NextApp::EnsureRife() {
-    if (rife_failed_) {
-        return false;
-    }
-    if (rife_ready_) {
-        StartRifeThread();
-        return true;
-    }
-    if (rife_failed_ || !settings_.ai.frame_generation ||
-        settings_.ai.fg_backend != AiBackend::Rife) {
-        return false;
-    }
-    if (!system_.rife_lite) {
-        rife_failed_ = true;
-        Toast(L"RIFE engine not built; run the RIFE setup tool first", true);
-        return false;
-    }
-    std::wstring runtime;
-    if (const char* env = std::getenv("BRP_TENSORRT_DIR")) {
-        runtime = Widen(env);
-    }
-    const std::filesystem::path exe_dir(system_.exe_dir);
-    if (runtime.empty()) {
-        const std::filesystem::path local = exe_dir / "rife" / "runtime";
-        if (std::filesystem::exists(local / "nvinfer_10.dll")) {
-            runtime = local.wstring();
-        }
-    }
-    if (runtime.empty()) {
-        std::ifstream marker(exe_dir / "rife" / "runtime.txt");
-        std::string line;
-        if (marker && std::getline(marker, line) && !line.empty()) {
-            const std::filesystem::path candidate(line);
-            if (std::filesystem::exists(candidate / "nvinfer_10.dll")) {
-                runtime = candidate.wstring();
-            }
-        }
-    }
-    if (runtime.empty()) {
-        const std::filesystem::path fallback =
-            L"C:\\mpv-upscaler-video-player\\vs-plugins\\vsmlrt-cuda";
-        if (std::filesystem::exists(fallback / "nvinfer_10.dll")) {
-            runtime = fallback.wstring();
-        }
-    }
-    if (runtime.empty()) {
-        rife_failed_ = true;
-        Toast(L"RIFE needs TensorRT and an engine next to the app", true);
-        return false;
-    }
-    const bool heavy = settings_.ai.rife_model == 1 && system_.rife_heavy;
-    const std::filesystem::path engine =
-        exe_dir / "rife" / (heavy ? "rife426h_1080.engine" : "rife425_1080.engine");
-    if (!std::filesystem::exists(engine)) {
-        rife_failed_ = true;
-        Toast(L"RIFE engine missing; build it before enabling RIFE", true);
-        return false;
-    }
-    rife_ = std::make_unique<brp::media::Rife>();
-    std::string detail;
-    std::fprintf(stderr, "[next] RIFE runtime=%ls engine=%ls\n", runtime.c_str(),
-                 engine.c_str());
-    if (!rife_->Load(Narrow(runtime), engine.string(), 1920, 1080, detail)) {
-        rife_failed_ = true;
-        Toast(L"RIFE: " + Widen(detail), true);
-        return false;
-    }
-    rife_ready_ = true;
-    std::fprintf(stderr, "[next] RIFE ready: %s\n", detail.c_str());
-    StartRifeThread();
-    return true;
-}
-
-void NextApp::StartRifeThread() {
-    if (rife_run_.load()) {
-        return;
-    }
-    rife_run_ = true;
-    rife_thread_ = std::thread([this]() { RifeWorkerMain(); });
-}
-
-void NextApp::StopRifeThread() {
-    {
-        std::lock_guard<std::mutex> lock(rife_mutex_);
-        rife_run_ = false;
-        rife_jobs_.clear();
-    }
-    rife_cv_.notify_all();
-    if (rife_thread_.joinable()) {
-        rife_thread_.join();
-    }
-    {
-        std::lock_guard<std::mutex> lock(display_mutex_);
-        display_queue_.clear();
-    }
-    rife_prev_valid_ = false;
-    rife_prev_pushed_ = false;
-    rife_have_shown_ = false;
-}
-
-void NextApp::RifeWorkerMain() {
-    for (;;) {
-        RifeJob job;
-        {
-            std::unique_lock<std::mutex> lock(rife_mutex_);
-            rife_cv_.wait(lock, [this]() { return !rife_run_ || !rife_jobs_.empty(); });
-            if (!rife_run_) {
-                return;
-            }
-            job = std::move(rife_jobs_.front());
-            rife_jobs_.pop_front();
-        }
-        if (job.motion_safety) {
-            double diff = 0.0;
-            int samples = 0;
-            for (std::size_t i = 0; i + 3 < job.a.size() && i + 3 < job.b.size();
-                 i += 256) {
-                diff += std::abs(static_cast<int>(job.a[i]) - job.b[i]);
-                diff += std::abs(static_cast<int>(job.a[i + 1]) - job.b[i + 1]);
-                diff += std::abs(static_cast<int>(job.a[i + 2]) - job.b[i + 2]);
-                samples += 3;
-            }
-            if (samples > 0 && diff / samples > 22.0) {
-                // Very fast motion: skip the invented midpoint.
-                continue;
-            }
-        }
-        std::vector<uint8_t> mid;
-        std::string detail;
-        if (!rife_ || !rife_->Process(job.a.data(), job.b.data(), 0.5f, mid, detail)) {
-            std::fprintf(stderr, "[next] RIFE process failed: %s\n", detail.c_str());
-            rife_failed_ = true;
-            rife_run_.store(false);
-            return;
-        }
-        if (job.blend > 0.0f && mid.size() == job.a.size()) {
-            const float keep = 1.0f - job.blend;
-            for (std::size_t i = 0; i + 3 < mid.size(); i += 4) {
-                mid[i] = static_cast<std::uint8_t>(mid[i] * keep + job.a[i] * job.blend);
-                mid[i + 1] = static_cast<std::uint8_t>(mid[i + 1] * keep +
-                                                       job.a[i + 1] * job.blend);
-                mid[i + 2] = static_cast<std::uint8_t>(mid[i + 2] * keep +
-                                                       job.a[i + 2] * job.blend);
-                mid[i + 3] = 255;
-            }
-        }
-        rife_generated_.fetch_add(1);
-        media::DecodedFrame frame;
-        frame.rgba = std::move(mid);
-        frame.width = rife_->width();
-        frame.height = rife_->height();
-        frame.pq = job.pq;
-        PushDisplayFrame(std::move(frame), job.mid_due);
-    }
-}
-
-void NextApp::PushDisplayFrame(media::DecodedFrame frame, double due) {
-    std::lock_guard<std::mutex> lock(display_mutex_);
-    DisplayFrame entry;
-    entry.frame = std::move(frame);
-    entry.due = due;
-    display_queue_.push_back(std::move(entry));
-    std::sort(display_queue_.begin(), display_queue_.end(),
-              [](const DisplayFrame& a, const DisplayFrame& b) { return a.due < b.due; });
-    while (display_queue_.size() > 8) {
-        display_queue_.pop_front();
-    }
-}
-
-void NextApp::ScheduleRifeFrame(const media::DecodedFrame& frame) {
-    if (frame.rgba.empty()) {
-        return;
-    }
-    const double interval = rife_interval_;
-    if (!rife_prev_valid_ || rife_prev_.size() != frame.rgba.size()) {
-        rife_prev_ = frame.rgba;
-        rife_prev_w_ = frame.width;
-        rife_prev_h_ = frame.height;
-        rife_prev_pq_ = frame.pq;
-        rife_prev_valid_ = true;
-        rife_prev_pushed_ = false;
-        return;
-    }
-    if (!rife_prev_pushed_) {
-        media::DecodedFrame previous;
-        previous.rgba = rife_prev_;
-        previous.width = rife_prev_w_;
-        previous.height = rife_prev_h_;
-        previous.pq = rife_prev_pq_;
-        PushDisplayFrame(std::move(previous), now_);
-        rife_prev_pushed_ = true;
-    }
-    RifeJob job;
-    job.a = rife_prev_;
-    job.b = frame.rgba;
-    job.pq = frame.pq;
-    job.mid_due = now_ + interval * 0.5;
-    job.blend = std::clamp(settings_.ai.blend, 0, 40) / 100.0f;
-    job.motion_safety = settings_.ai.motion_safety;
-    {
-        std::lock_guard<std::mutex> lock(rife_mutex_);
-        if (rife_jobs_.size() < 4) {
-            rife_jobs_.push_back(std::move(job));
-        }
-    }
-    rife_cv_.notify_one();
-
-    media::DecodedFrame current;
-    current.rgba = frame.rgba;
-    current.width = frame.width;
-    current.height = frame.height;
-    current.pq = frame.pq;
-    PushDisplayFrame(std::move(current), now_ + interval);
-
-    rife_prev_ = frame.rgba;
-    rife_prev_w_ = frame.width;
-    rife_prev_h_ = frame.height;
-    rife_prev_pq_ = frame.pq;
-    rife_prev_pushed_ = true;
-}
 void NextApp::ToggleWatch(bool watching) {
     if (watching) {
         if (!streaming_ || !streaming_->Connected()) {
@@ -4208,7 +3888,6 @@ void NextApp::ToggleWatch(bool watching) {
         content_changed_ = false;
         video_intervals_.Reset();
         last_video_shown_at_ = -1.0;
-        StopRifeThread();
         // Keep the DLSS-G worker alive between sessions. Starting and stopping
         // it costs seconds (worker, NGX context and job object); hiding its
         // window is instant, and the next Watch resumes the same worker.
@@ -4244,7 +3923,6 @@ void NextApp::ToggleWatch(bool watching) {
         watching_ = false;
         have_frame_ = false;
         SetOverlayControl(false);
-        StopRifeThread();
         StopNr();
         if (dlss_fg_) {
             dlss_fg_->Hide();
@@ -4593,7 +4271,6 @@ void NextApp::DisconnectStream() {
     if (watching_) {
         ToggleWatch(false);
     }
-    StopRifeThread();
     streaming_->Disconnect();
     streaming_->SetAudio(nullptr);
     audio_.Close();
@@ -4750,9 +4427,6 @@ void NextApp::PublishBridgeStatus() {
     flag("restart_pending", stream_restart_pending_, true);
     number("sr_ms", dlss_sr_ ? dlss_sr_->last_ms() : 0.0, true);
     number("fg_ms", 0.0, true);
-    integer("generated", static_cast<long long>(rife_generated_.load()), true);
-    flag("cuda", system_.cuda, true);
-    flag("tensorrt", system_.tensorrt_runtime, true);
     flag("dlss_fg_ready", system_.dlss_fg, true);
     flag("dlss_fg_multi", system_.dlss_fg_multi, true);
     flag("dlss_sr_ready", system_.dlss_sr, true);
@@ -4943,8 +4617,6 @@ void NextApp::WriteSessionReport() {
     file << "  \"decode_ms\": " << stream.decode_ms << ",\n";
     file << "  \"bitrate_kbps\": " << stream.bitrate_kbps << ",\n";
     file << "  \"loss_percent\": " << stream.loss_percent << ",\n";
-    file << "  \"rife_ready\": " << (rife_ready_ ? "true" : "false") << ",\n";
-    file << "  \"rife_generated_per_s\": " << rife_generated_rate_ << ",\n";
     file << "  \"displayed_per_s\": " << display_rate_ << ",\n";
     file << "  \"dlss_sr\": " << (dlss_ready_ ? "true" : "false") << ",\n";
     file << "  \"dlss_fg\": " << ((dlss_fg_ && dlss_fg_->ready()) ? "true" : "false")
@@ -4956,7 +4628,6 @@ void NextApp::WriteSessionReport() {
     file << "  \"ui_p50_ms\": " << diagnostics.frame_p50_ms << ",\n";
     file << "  \"ui_p95_ms\": " << diagnostics.frame_p95_ms << ",\n";
     file << "  \"ui_p99_ms\": " << diagnostics.frame_p99_ms << ",\n";
-    file << "  \"generated_total\": " << rife_generated_.load() << ",\n";
     file << "  \"ui_frames\": " << ui_frames_ << "\n";
     file << "}\n";
     Toast(L"Session report: " + path.wstring());
@@ -5024,7 +4695,6 @@ void NextApp::TickBenchmark() {
         ApplyPresenterTarget();
         if (snapshot.connected || snapshot.connecting) {
             streaming_->Disconnect();
-            StopRifeThread();
         }
         ConnectStream();
         bench_phase_ = 1;
@@ -5052,7 +4722,6 @@ void NextApp::TickBenchmark() {
             result.ok = false;
             bench_results_.push_back(result);
             ToggleWatch(false);
-            StopRifeThread();
             streaming_->Disconnect();
             audio_.Close();
             bench_case_++;
@@ -5085,10 +4754,9 @@ void NextApp::TickBenchmark() {
     result.ui_p50 = diagnostics.frame_p50_ms;
     result.ui_p95 = diagnostics.frame_p95_ms;
     result.ui_p99 = diagnostics.frame_p99_ms;
-    result.generated = rife_generated_.load();
+    result.generated = 0;
     bench_results_.push_back(result);
     ToggleWatch(false);
-    StopRifeThread();
     streaming_->Disconnect();
     audio_.Close();
     bench_case_++;

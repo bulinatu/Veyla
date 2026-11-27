@@ -2,9 +2,7 @@
 # The user profile is never copied: session.json lives in %APPDATA%, not here.
 
 param(
-    [switch]$NoZip,
-    # Leave the optional RIFE TensorRT engine out of this package.
-    [switch]$WithoutRife
+    [switch]$NoZip
 )
 
 $ErrorActionPreference = "Stop"
@@ -122,19 +120,6 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
     }
 }
 
-# --- optional RIFE engine (TensorRT, built for one GPU architecture) --------
-$rife = Join-Path $release "rife"
-if (-not $WithoutRife -and (Test-Path $rife)) {
-    # Only the portable pieces: engine, model and the CUDA runtime. The
-    # downloaded zip, the extracted SDK and runtime.txt stay on this machine.
-    $rifeDest = Join-Path $dest "rife"
-    New-Item -ItemType Directory -Path $rifeDest -Force | Out-Null
-    foreach ($name in @("rife425_1080.engine", "rife425lite.onnx", "rife426h.onnx", "cudart64_13.dll")) {
-        $source = Join-Path $rife $name
-        if (Test-Path -LiteralPath $source) {
-            Copy-Item -LiteralPath $source -Destination $rifeDest -Force
-        }
-    }
 }
 # --- readme -----------------------------------------------------------------
 $readme = @"
@@ -218,7 +203,7 @@ Video and AI
 - Video: output resolution, render target, VSync, VRR, colour space,
   sharpening, display, bit depth, fullscreen on play.
 - Neural: DLSS Super Resolution (including DLAA), temporal history, DLSS
-  Frame Generation 2x/3x/4x, RIFE, occlusion and motion safety, blend.
+  Frame Generation 2x/3x/4x, occlusion and motion safety.
 - Neural Render is the real depth + optical-flow path. Until its runtime is
   installed the toggles are labelled and do not claim to be active.
 - DLSS 5 Neural Rendering runs in video mode through the vendor NGX feature-18
@@ -269,12 +254,9 @@ Credits
 GPUI by Zed Industries (Apache-2.0). Inter and JetBrains Mono under the SIL
 Open Font License.
 "@
-if ($WithoutRife) {
-    $readme += "`nRIFE`n----`nThis package does not include the optional RIFE TensorRT engine.`nDLSS Frame Generation and everything else work as described.`n"
-}
 Set-Content -LiteralPath (Join-Path $dest "README.txt") -Value $readme -Encoding UTF8
 # --- zip --------------------------------------------------------------------
-$suffix = if ($WithoutRife) { "-norife" } else { "" }
+$suffix = ""
 $zip = Join-Path $distRoot "BetterRemotePlay-$version-standalone$suffix.zip"
 if (-not $NoZip) {
     if (Test-Path $zip) {

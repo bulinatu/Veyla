@@ -1637,3 +1637,38 @@ every 33 ms, so the client-side queue work from round 5 was not enough.
 - `brpnext.exe` `97B03E1DBBA716700FBA3F9641F2245AAB2753EFF7136BE70C1907A873A8C40F`
 - `brpnext-engine.exe` `64C022E514880ABF63C705605E1B4441566FD37DF11478646E399E1706E7554E`
 - Patch verified on a copy of the earlier 2.5.0: `hash-diff=update.exe` only.
+
+## 2.5.0 code cleanup - RIFE removed, dependencies refreshed
+
+RIFE and everything that existed only for it is gone from the source tree:
+
+- deleted `src/media/rife.{h,cpp}`, `src/app/rife_setup.{h,cpp}`, `tools/rife_probe/`,
+  `third_party/tensorrt/` (headers + CUDA shim).
+- `brp_rife`/`rife_probe` targets and every link/include reference removed.
+- `AiBackend::Rife`, `ai.rife_model`, `ai.blend`, `ai.motion_safety`, the profile
+  `fg_engine`/`rife_*` fields, the Genesis presets, the frame-gen backend chips,
+  the overlay tab rows, the classic-shell setup modal and its Home pill, the
+  session/testing reports and the packager's `-WithoutRife` path are removed.
+- Old profiles that selected RIFE import as DLSS-G (or off if FG was off).
+- The standalone archive is now `BetterRemotePlay-<version>-standalone.zip`
+  (no `-norife` suffix).
+
+Dependency refresh (all verified with a full Release build + `brp_next_tests`
+ALL PASS + a live PS5 stream):
+
+- FFmpeg **9.0.2 -> 9.1** (gyan full shared; same sonames `avcodec-63`,
+  `avutil-61`, `swscale-10`, `swresample-7`). Decode probe unchanged:
+  `dec 2.7/3.2 ms`, `content 60 fps`, `age 0.0 ms`, `drops 0`.
+- mbedTLS **2.28.0 -> 2.28.10** (last 2.28 LTS patch, the tag chiaki-ng pins
+  against); pairing/TLS still connects.
+- Rust lockfile refreshed to the newest semver-compatible crates (23 packages;
+  `gpui` stays 0.2.2, already the newest published).
+- chiaki-ng is already at/above upstream HEAD (3 local MSVC fixes on the weekly
+  canary); nothing to pull.
+- TensorRT 10.16 is the last 10.x line; 11.x would break the RIFE runtime we
+  just removed, so nothing to keep.
+- DLSS runtime is already the newest SDK, 310.9.16.
+
+Build note: GPUI's build script needs `fxc.exe`. Put the Windows SDK bin on
+PATH before `cargo build`, e.g.
+`C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64`.

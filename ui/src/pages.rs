@@ -814,7 +814,6 @@ impl Root {
             .into_any_element()
     }
     pub(crate) fn page_frame_gen(&self, cx: &mut Context<Self>) -> AnyElement {
-        let rife_backend = self.settings.s("ai.fg_backend", "none") == "rife";
         let dlss_backend = self.settings.s("ai.fg_backend", "none") == "dlss-fg";
         let mut fg_rows: Vec<AnyElement> = vec![
             self.toggle_row(
@@ -826,8 +825,8 @@ impl Root {
             self.seg_row(
                 "ai.fg_backend",
                 "Backend",
-                "DLSS-G needs an RTX 40/50; RIFE runs on the app's presenter",
-                &[("None", "none"), ("DLSS-G", "dlss-fg"), ("RIFE", "rife")],
+                "DLSS-G needs an RTX 40/50",
+                &[("None", "none"), ("DLSS-G", "dlss-fg")],
                 cx,
             ),
         ];
@@ -861,58 +860,6 @@ impl Root {
                 "Multiplier",
                 "Only with the DLSS-G backend",
                 format!("{}x", self.settings.i("ai.fg_multiplier", 2)),
-            ));
-        }
-        if rife_backend {
-            fg_rows.push(self.toggle_row(
-                "ai.motion_safety",
-                "Motion safety",
-                "Fall back to real frames on fast cuts",
-                cx,
-            ));
-        } else {
-            fg_rows.push(self.disabled_row(
-                "Motion safety",
-                "Only with the RIFE backend",
-                if self.settings.b("ai.motion_safety", true) {
-                    "On"
-                } else {
-                    "Off"
-                },
-            ));
-        }
-        if rife_backend {
-            fg_rows.push(self.seg_int_row(
-                "ai.rife_model",
-                "RIFE model",
-                "Only used by the RIFE backend",
-                &[(0, "Lite"), (1, "Heavy")],
-                cx,
-            ));
-            fg_rows.push(self.stepper_row(
-                "ai.blend",
-                "Blend",
-                "Mix generated and real frames",
-                0,
-                100,
-                5,
-                pct,
-                cx,
-            ));
-        } else {
-            fg_rows.push(self.disabled_row(
-                "RIFE model",
-                "Only with the RIFE backend",
-                if self.settings.i("ai.rife_model", 0) == 0 {
-                    "Lite"
-                } else {
-                    "Heavy"
-                },
-            ));
-            fg_rows.push(self.disabled_row(
-                "Blend",
-                "Only with the RIFE backend",
-                format!("{}%", self.settings.i("ai.blend", 10)),
             ));
         }
         let fg = group(

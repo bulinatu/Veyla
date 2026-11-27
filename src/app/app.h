@@ -19,13 +19,11 @@
 #include <filesystem>
 #include <fstream>
 
-#include "app/rife_setup.h"
 #include "audio/audio_engine.h"
 #include "media/nv_vfx.h"
 #include "media/nv_dlss_sr.h"
 #include "media/nv_dlssnr.h"
 #include "media/nv_reflex.h"
-#include "media/rife.h"
 #include "media/pipeline.h"
 #include "net/reachability.h"
 #include "platform/gamepad.h"
@@ -218,14 +216,6 @@ private:
     bool FrameIsDuplicate(const media::DecodedFrame& frame);
     void UpdateInterpolationMode();
 
-    // RIFE (TensorRT) engine. Frames are generated on a worker thread and
-    // presented from a small queue, so inference never blocks the frame loop.
-    bool EnsureRife();
-    void StopRife();
-    void RifeThreadMain();
-    void RifePush(media::DecodedFrame& frame, bool unique = false);
-    void RifePresentDue();
-    void RenderSetupModal();
     std::filesystem::path ExeDirPath() const;
 
     bool TakeNrResult(int& width, int& height, bool& pq);
@@ -385,64 +375,7 @@ private:
     int fg_pending_streak_ = 0;
     double fg_mult_changed_at_ = -1.0;
 
-    // RIFE (TensorRT): an alternative interpolation engine. Frames are
-    // generated on a worker thread and presented from a small queue, so
-    // inference never blocks the frame loop.
-    std::unique_ptr<media::Rife> rife_;
-    std::thread rife_thread_;
-    std::mutex rife_mutex_;
-    std::condition_variable rife_cv_;
-    struct RifePair {
-        std::vector<uint8_t> a;
-        std::vector<uint8_t> b;
-        int width = 0;
-        int height = 0;
-        double t0 = 0.0;
-        double t1 = 0.0;
-        double base_due = 0.0;  // when the held frame is shown
-        int blend = 0;          // percent of the previous real frame mixed in
-    };
-    struct RifeOut {
-        std::vector<uint8_t> rgba;
-        int width = 0;
-        int height = 0;
-        double due = 0.0;
-        bool pq = false;
-    };
-    std::deque<RifePair> rife_jobs_;
-    std::deque<RifeOut> rife_out_;
-    bool rife_run_ = false;
-    bool rife_has_prev_ = false;
-    std::vector<uint8_t> rife_prev_;
-    int rife_prev_w_ = 0;
-    int rife_prev_h_ = 0;
-    bool rife_prev_pq_ = false;
-    double rife_prev_t_ = 0.0;
-    double rife_ms_ = 0.0;
-    int rife_generated_ = 0;
-    int rife_shown_ = 0;
-    double rife_rate_at_ = -1.0;
-    double rife_out_fps_ = 0.0;
-    double rife_last_show_ = -1.0;
-    double rife_interval_sum_ = 0.0;
-    double rife_interval_max_ = 0.0;
-    int rife_interval_n_ = 0;
-    int rife_dupes_ = 0;
-    int rife_sim_skip_ = 0;
-    std::wstring rife_note_;
-    std::atomic<double> rife_headroom_ms_{0.0};
-    std::array<double, 12> rife_samples_{};
-    int rife_sample_pos_ = 0;
-    int rife_sample_n_ = 0;
-    double rife_gap_ema_ = 0.0;
-    double rife_cadence_ms_ = 0.0;
-    double rife_cadence_max_ms_ = 0.0;
-    int rife_skip_gap_ = 0;
-    int rife_skip_motion_ = 0;
-    int rife_pass_ = 0;
     double last_frame_diff_ = 0.0;
-    RifeSetup rife_setup_;
-    bool setup_modal_ = false;
 
     // neural rendering (DLSS Super Resolution, D3D12)
     media::NvDlssSr dlss_sr_;

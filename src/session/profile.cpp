@@ -389,9 +389,6 @@ bool Save(const Profile& profile, const std::string& path, std::string& detail) 
     json << "  \"nr_order\": " << profile.nr_order << ",\n";
     json << "  \"dlss_fg\": " << profile.dlss_fg << ",\n";
 json << "  \"fg_target\": " << profile.fg_target << ",\n";
-json << "  \"fg_engine\": " << profile.fg_engine << ",\n";
-json << "  \"rife_output\": " << profile.rife_output << ",\n";
-json << "  \"rife_model\": " << profile.rife_model << ",\n";
     json << "  \"reflex\": " << profile.reflex << ",\n";
     json << "  \"hud_mask\": " << profile.hud_mask << ",\n";
     json << "  \"neural_nr\": " << profile.neural_nr << ",\n";
@@ -415,8 +412,6 @@ json << "  \"rife_model\": " << profile.rife_model << ",\n";
     json << "  \"console_triggers\": " << profile.console_triggers << ",\n";
 json << "  \"haptic_intensity\": " << profile.haptic_intensity << ",\n";
 json << "  \"testing_log\": " << profile.testing_log << ",\n";
-json << "  \"rife_blend\": " << profile.rife_blend << ",\n";
-json << "  \"rife_safe_motion\": " << profile.rife_safe_motion << ",\n";
     json << "  \"motion\": " << profile.motion << "\n";
     json << "}\n";
 
@@ -486,9 +481,6 @@ bool Load(const std::string& path, Profile& profile, std::string& detail) {
     if (ExtractNumber(json, "nr_order", number)) p.nr_order = static_cast<int>(number);
     if (ExtractNumber(json, "dlss_fg", number)) p.dlss_fg = static_cast<int>(number);
 if (ExtractNumber(json, "fg_target", number)) p.fg_target = static_cast<int>(number);
-if (ExtractNumber(json, "fg_engine", number)) p.fg_engine = static_cast<int>(number);
-if (ExtractNumber(json, "rife_output", number)) p.rife_output = static_cast<int>(number);
-if (ExtractNumber(json, "rife_model", number)) p.rife_model = static_cast<int>(number);
     if (ExtractNumber(json, "reflex", number)) p.reflex = static_cast<int>(number);
     if (ExtractNumber(json, "hud_mask", number)) p.hud_mask = static_cast<int>(number);
     if (ExtractNumber(json, "nr_passes", number)) p.nr_passes = static_cast<int>(number);
@@ -508,14 +500,9 @@ if (ExtractNumber(json, "rife_model", number)) p.rife_model = static_cast<int>(n
     p.nr_order = std::clamp(p.nr_order, 0, 1);
     p.dlss_fg = p.dlss_fg >= 2 ? 2 : 0;  // on or off; the multiplier is chosen live
 p.fg_target = p.fg_target == 60 || p.fg_target == 90 || p.fg_target == 120 ? p.fg_target : 0;
-p.fg_engine = p.fg_engine == 1 ? 1 : 0;
-p.rife_output = p.rife_output == 0 ? 0 : 60;
-p.rife_model = p.rife_model == 1 ? 1 : 0;
     p.reflex = std::clamp(p.reflex, 0, 2);
     p.haptic_intensity = std::clamp(p.haptic_intensity, 0, 5);
     p.testing_log = p.testing_log != 0 ? 1 : 0;
-    p.rife_blend = std::clamp(p.rife_blend, 0, 40);
-    p.rife_safe_motion = p.rife_safe_motion != 0 ? 1 : 0;
     p.sharpness = std::clamp(p.sharpness, 0, 100);
     p.color_on = std::clamp(p.color_on, 0, 1);
     p.color_exposure = std::clamp(p.color_exposure, -100, 100);
@@ -540,8 +527,6 @@ p.rife_model = p.rife_model == 1 ? 1 : 0;
     if (ExtractNumber(json, "console_triggers", number)) p.console_triggers = static_cast<int>(number);
 if (ExtractNumber(json, "haptic_intensity", number)) p.haptic_intensity = static_cast<int>(number);
 if (ExtractNumber(json, "testing_log", number)) p.testing_log = static_cast<int>(number);
-if (ExtractNumber(json, "rife_blend", number)) p.rife_blend = static_cast<int>(number);
-if (ExtractNumber(json, "rife_safe_motion", number)) p.rife_safe_motion = static_cast<int>(number);
     if (ExtractNumber(json, "motion", number)) p.motion = static_cast<int>(number);
     if (ExtractNumber(json, "sharpness", number)) p.sharpness = static_cast<int>(number);
     if (ExtractNumber(json, "color_on", number)) p.color_on = static_cast<int>(number);
