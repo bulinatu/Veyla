@@ -93,7 +93,7 @@ pub fn slider(
                 .w(px(knob_x + 8.0))
                 .h(px(4.0))
                 .rounded(px(2.0))
-                .bg(rgba(0x8B5CF6FF)),
+                .bg(theme::accent_rgba(0xFF)),
         )
         .child(
             div()
@@ -185,7 +185,7 @@ pub fn section(title: impl Into<SharedString>, hint: impl Into<SharedString>) ->
                         .text_color(theme::accent())
                         .child(title.to_uppercase()),
                 )
-                .child(div().h(px(1.0)).w(px(28.0)).bg(rgba(0x8B5CF640))),
+                .child(div().h(px(1.0)).w(px(28.0)).bg(theme::accent_rgba(0x40))),
         )
         .child(
             div()
@@ -259,13 +259,13 @@ pub fn button_with_id(
     let label: SharedString = label.into();
     let element_id: SharedString = id.into();
     let (bg, fg, border) = match tone {
-        Tone::Primary => (0x8B5CF6FF, 0xFFFFFFFF, 0x00000000),
+        Tone::Primary => (theme::accent_packed(0xFF), 0xFFFFFFFF, 0x00000000),
         Tone::Ghost => (0xFFFFFF0F, theme::TEXT, theme::BORDER),
         Tone::Danger => (0xF871711F, 0xF87171, 0xF8717155),
         Tone::Subtle => (0x00000000, theme::TEXT_DIM, 0x00000000),
     };
     let hover = match tone {
-        Tone::Primary => 0x9D74FFFF,
+        Tone::Primary => theme::accent_bright_packed(0xFF),
         Tone::Ghost => 0xFFFFFF1A,
         Tone::Danger => 0xF8717133,
         Tone::Subtle => 0xFFFFFF0F,
@@ -302,7 +302,7 @@ pub fn switch(
         .w(px(46.0))
         .h(px(26.0))
         .rounded(px(13.0))
-        .bg(if on { rgba(0x8B5CF6FF) } else { rgba(0xFFFFFF1F) })
+        .bg(if on { theme::accent_rgba(0xFF) } else { rgba(0xFFFFFF1F) })
         .cursor_pointer()
         .hover(move |s| {
             if on {
@@ -405,8 +405,8 @@ pub fn logo_mark(size: f32) -> AnyElement {
         .rounded(px(size * 0.28))
         .bg(gpui::linear_gradient(
             140.0,
-            gpui::linear_color_stop(rgba(0x8B5CF6FF), 0.0),
-            gpui::linear_color_stop(rgba(0x4F46E5FF), 1.0),
+            gpui::linear_color_stop(theme::accent_rgba(0xFF), 0.0),
+            gpui::linear_color_stop(theme::accent_deep_rgba(0xFF), 1.0),
         ))
         .flex()
         .items_center()

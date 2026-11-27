@@ -304,13 +304,13 @@ impl OverlayView {
             .px(px(7.0))
             .rounded(px(7.0))
             .bg(if editing {
-                rgba(0x8B5CF626)
+                theme::accent_rgba(0x26)
             } else {
                 rgba(0x00000040)
             })
             .border_1()
             .border_color(if editing {
-                rgba(0x8B5CF6CC)
+                theme::accent_rgba(0xCC)
             } else {
                 rgba(0xFFFFFF10)
             })
@@ -426,7 +426,7 @@ impl OverlayView {
             .px(px(9.0))
             .rounded(px(6.0))
             .bg(if selected {
-                rgba(0x8B5CF6FF)
+                theme::accent_rgba(0xFF)
             } else {
                 rgba(0xFFFFFF0A)
             })
@@ -955,7 +955,7 @@ impl Render for OverlayView {
                     .px(px(9.0))
                     .rounded(px(7.0))
                     .bg(if selected {
-                        rgba(0x8B5CF626)
+                        theme::accent_rgba(0x26)
                     } else {
                         rgba(0x00000000)
                     })
@@ -984,7 +984,7 @@ impl Render for OverlayView {
             .size_full()
             .rounded(px(16.0))
             .border_1()
-            .border_color(rgba(0x8B5CF63D))
+            .border_color(theme::accent_rgba(0x3D))
             .bg(rgba(0x0B0B14F7))
             .font_family(theme::UI_FONT)
             .text_size(theme::body())

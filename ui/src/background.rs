@@ -13,6 +13,7 @@ use gpui::{div, prelude::*, px, relative, rgba, Animation, AnimationExt as _, An
 
 use crate::theme::{self, BG_DEEP};
 
+#[derive(Clone, Copy)]
 struct Blob {
     color: u32,
     size: f32,
@@ -24,9 +25,11 @@ struct Blob {
     drift: f32,
 }
 
-const BLOBS: [Blob; 6] = [
+fn blobs() -> [Blob; 6] {
+    let p = theme::palette();
+    [
     Blob {
-        color: 0x7C3AED,
+        color: p.blobs[0],
         size: 780.0,
         x: -180.0,
         y: -220.0,
@@ -36,7 +39,7 @@ const BLOBS: [Blob; 6] = [
         drift: 46.0,
     },
     Blob {
-        color: 0x4F46E5,
+        color: p.blobs[1],
         size: 640.0,
         x: 900.0,
         y: -160.0,
@@ -46,7 +49,7 @@ const BLOBS: [Blob; 6] = [
         drift: 38.0,
     },
     Blob {
-        color: 0xDB2777,
+        color: p.blobs[2],
         size: 560.0,
         x: 520.0,
         y: 560.0,
@@ -56,7 +59,7 @@ const BLOBS: [Blob; 6] = [
         drift: 30.0,
     },
     Blob {
-        color: 0x0891B2,
+        color: p.blobs[3],
         size: 520.0,
         x: -120.0,
         y: 520.0,
@@ -66,7 +69,7 @@ const BLOBS: [Blob; 6] = [
         drift: 34.0,
     },
     Blob {
-        color: 0xA855F7,
+        color: p.blobs[4],
         size: 420.0,
         x: 760.0,
         y: 260.0,
@@ -78,7 +81,7 @@ const BLOBS: [Blob; 6] = [
     // Very large, very weak wash: fills the middle so the background reads as
     // one soft field instead of separate circles.
     Blob {
-        color: 0x6D28D9,
+        color: p.blobs[5],
         size: 1500.0,
         x: 120.0,
         y: -140.0,
@@ -87,7 +90,8 @@ const BLOBS: [Blob; 6] = [
         seconds: 58.0,
         drift: 18.0,
     },
-];
+    ]
+}
 
 fn blob_stack(blob: &Blob) -> Div {
     let mut stack = div()
@@ -134,16 +138,17 @@ fn blob_stack(blob: &Blob) -> Div {
     stack
 }
 
-fn animated_blob(blob: &'static Blob) -> AnyElement {
+fn blobs_animated(blob: Blob) -> AnyElement {
     let base_x = blob.x;
     let base_y = blob.y;
     let drift = blob.drift;
-    blob_stack(blob)
+    let phase = blob.phase;
+    blob_stack(&blob)
         .with_animation(
             ("aurora", (blob.phase * 10.0) as u32),
             Animation::new(Duration::from_secs_f32(blob.seconds)).repeat(),
             move |el, t| {
-                let angle = t * std::f32::consts::TAU + blob.phase;
+                let angle = t * std::f32::consts::TAU + phase;
                 el.left(px(base_x + angle.cos() * drift))
                     .top(px(base_y + (angle * 1.3).sin() * drift * 0.8))
             },
@@ -168,12 +173,13 @@ pub fn aurora(animated: bool, reduce_motion: bool) -> AnyElement {
         )),
     );
 
+    let palette_blobs = blobs();
     if animated && !reduce_motion {
-        for blob in BLOBS.iter() {
-            root = root.child(animated_blob(blob));
+        for blob in palette_blobs {
+            root = root.child(blobs_animated(blob));
         }
     } else {
-        for blob in BLOBS.iter() {
+        for blob in palette_blobs.iter() {
             root = root.child(blob_stack(blob));
         }
     }

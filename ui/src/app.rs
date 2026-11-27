@@ -50,7 +50,7 @@ impl Tab {
             Tab::FrameGen => "Frame Gen",
             Tab::Neural => "Neural",
             Tab::Overlay => "Overlay",
-            Tab::Advanced => "Advanced",
+            Tab::Advanced => "Settings",
         }
     }
 
@@ -142,6 +142,8 @@ pub struct Root {
     /// Previous top-level tab index, so the dock pill can slide from where it
     /// was to where it is going.
     pub(crate) dock_from: usize,
+    /// Sub-page inside Settings.
+    pub(crate) settings_page: usize,
     /// Message from a failed self-update, read once at startup.
     pub(crate) update_failure: Option<String>,
     /// Pending "Delete" confirmation for a saved profile: (profile id, when
@@ -440,6 +442,7 @@ impl Root {
             settings_rev: 0,
             confirm_profile: None,
             dock_from: 0,
+            settings_page: 0,
             update_failure: take_update_failure(),
             profile_delete_cooldown: None,
             applied_rev: 0,
@@ -906,9 +909,9 @@ impl Root {
             .h(px(ITEM_H))
             .w(px(ITEM_W))
             .rounded(px(16.0))
-            .bg(rgba(0x8B5CF62E))
+            .bg(theme::accent_rgba(0x2E))
             .border_1()
-            .border_color(rgba(0x8B5CF63D))
+            .border_color(theme::accent_rgba(0x3D))
             .with_animation(
                 ("dock-pill", current),
                 Animation::new(Duration::from_millis(320))
@@ -1000,7 +1003,7 @@ impl Root {
                     .px(px(13.0))
                     .rounded(px(8.0))
                     .bg(if active {
-                        rgba(0x8B5CF626)
+                        theme::accent_rgba(0x26)
                     } else {
                         rgba(0x00000000)
                     })
@@ -1223,13 +1226,13 @@ impl Root {
             .p(px(10.0))
             .rounded(px(9.0))
             .bg(if selected {
-                rgba(0x8B5CF626)
+                theme::accent_rgba(0x26)
             } else {
                 rgba(0xFFFFFF08)
             })
             .border_1()
             .border_color(if selected {
-                rgba(0x8B5CF666)
+                theme::accent_rgba(0x66)
             } else {
                 rgba(0xFFFFFF0F)
             })
@@ -1450,7 +1453,7 @@ impl Root {
                     .w(px(64.0))
                     .h(px(4.0))
                     .rounded(px(2.0))
-                    .bg(rgba(0x8B5CF6FF))
+                    .bg(theme::accent_rgba(0xFF))
                     .with_animation(
                         "connect-slide",
                         Animation::new(Duration::from_millis(1100)).repeat(),
@@ -1540,7 +1543,7 @@ impl Root {
                             .relative()
                             .h_full()
                             .rounded(px(2.0))
-                            .bg(rgba(0x8B5CF6FF))
+                            .bg(theme::accent_rgba(0xFF))
                             .with_animation(
                                 "boot-bar",
                                 Animation::new(Duration::from_millis(1350)),
@@ -1577,7 +1580,7 @@ impl Root {
                     .border_color(if error {
                         rgba(0xF8717166)
                     } else {
-                        rgba(0x8B5CF666)
+                        theme::accent_rgba(0x66)
                     })
                     .shadow_lg()
                     .child(widgets::dot(if error { theme::RED } else { theme::GREEN }))
@@ -1702,6 +1705,7 @@ impl Render for Root {
             return self.boot_screen();
         }
         theme::set_text_scale(self.settings.i("ui.scale", 100));
+    theme::set_palette(self.settings.i("ui.palette", 0).max(0) as usize);
     if let Some(message) = self.update_failure.take() {
         // The updater could not apply a patch and relaunched the old build.
         self.toast(message, true, cx);

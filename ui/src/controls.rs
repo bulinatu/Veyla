@@ -77,13 +77,13 @@ impl Root {
             .px(px(9.0))
             .rounded(px(8.0))
             .bg(if editing {
-                rgba(0x8B5CF626)
+                theme::accent_rgba(0x26)
             } else {
                 rgba(0x00000040)
             })
             .border_1()
             .border_color(if editing {
-                rgba(0x8B5CF6CC)
+                theme::accent_rgba(0xCC)
             } else {
                 rgba(0xFFFFFF10)
             })
@@ -157,7 +157,7 @@ impl Root {
             .px(px(12.0))
             .rounded(px(8.0))
             .bg(if selected {
-                rgba(0x8B5CF6FF)
+                theme::accent_rgba(0xFF)
             } else {
                 rgba(0xFFFFFF0A)
             })
@@ -436,7 +436,7 @@ impl Root {
             .bg(rgba(theme::FIELD))
             .border_1()
             .border_color(if editing {
-                rgba(0x8B5CF6CC)
+                theme::accent_rgba(0xCC)
             } else {
                 rgba(0xFFFFFF14)
             })
@@ -463,7 +463,7 @@ impl Root {
                         .w(px(1.5))
                         .h(px(16.0))
                         .ml(px(1.0))
-                        .bg(rgba(0x8B5CF6FF)),
+                        .bg(theme::accent_rgba(0xFF)),
                 )
             })
             .into_any_element()

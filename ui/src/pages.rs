@@ -52,6 +52,23 @@ fn group(title: &'static str, hint: &'static str, rows: Vec<AnyElement>) -> AnyE
     card.into_any_element()
 }
 
+const SETTINGS_PAGES: [(&str, &str); 5] = [
+    ("Appearance", "Theme, type and motion"),
+    ("Updates", "GitHub releases"),
+    ("System", "Hardware, shell and pacing"),
+    ("Diagnostics", "Logging, measurements and reset"),
+    ("About", "What this build is"),
+];
+
+fn swatch(color: u32) -> AnyElement {
+    div()
+        .w(px(18.0))
+        .h(px(18.0))
+        .rounded(px(9.0))
+        .bg(rgba((color << 8) | 0xFF))
+        .into_any_element()
+}
+
 impl Root {
     pub(crate) fn page_home(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let (session_name, session_host) = crate::model::session_identity();
@@ -116,7 +133,7 @@ impl Root {
             .h(px(52.0))
             .px(px(28.0))
             .rounded(px(13.0))
-            .bg(rgba(0x8B5CF6FF))
+            .bg(theme::accent_rgba(0xFF))
             .text_size(px(16.0))
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(rgb(0xFFFFFF))
@@ -181,7 +198,7 @@ impl Root {
                     )
                     .child(widgets::chip(
                         if streaming { "Live" } else { "Ready" },
-                        if streaming { theme::GREEN } else { theme::ACCENT_BRIGHT },
+                        if streaming { theme::GREEN } else { theme::accent_bright_u32() },
                     ))
                     .when(self.status.restart_pending, |el| {
                         el.child(widgets::chip("Stream restart required", theme::AMBER))
@@ -269,7 +286,7 @@ impl Root {
                             .min_w(px(0.0))
                             .p(px(12.0))
                             .cursor_pointer()
-                            .hover(|s| s.bg(rgba(0xFFFFFF16)).border_color(rgba(0x8B5CF666)))
+                            .hover(|s| s.bg(rgba(0xFFFFFF16)).border_color(theme::accent_rgba(0x66)))
                             .on_click(cx.listener(move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
                                 this.preset(preset, cx);                            }))
                             .child(
@@ -342,7 +359,7 @@ impl Root {
                                         .child(profile.name),
                                 )
                                 .when(is_default, |el| {
-                                    el.child(widgets::chip("Default", theme::ACCENT_BRIGHT))
+                                    el.child(widgets::chip("Default", theme::accent_bright_u32()))
                                 }),
                         )
                         .child(widgets::button_with_id(
@@ -454,7 +471,7 @@ impl Root {
                 div()
                     .text_size(theme::tiny())
                     .text_color(theme::muted())
-                    .child("Veyla 2.6.2  -  original project: BetterRemotePlay"),
+                    .child(format!("Veyla {}  -  original project: BetterRemotePlay", crate::model::APP_VERSION)),
             )
             .child(
                 div()
@@ -463,15 +480,15 @@ impl Root {
                     .gap(px(8.0))
                     .child(widgets::chip(
                         format!("{} fps", self.settings.s("streaming.fps", "60")),
-                        theme::ACCENT_BRIGHT,
+                        theme::accent_bright_u32(),
                     ))
                     .child(widgets::chip(
                         format!("Buffer {}", self.settings.i("streaming.frame_buffer", 0)),
-                        theme::CYAN,
+                        theme::cyan_u32(),
                     ))
                     .child(widgets::chip(
                         format!("{} Hz pad", self.settings.i("controller.poll_hz", 250)),
-                        theme::PINK,
+                        theme::pink_u32(),
                     ))
                     .when(!self.status.gpu.is_empty(), |el| {
                         el.child(widgets::chip(
@@ -498,7 +515,7 @@ impl Root {
                         "Install and restart to apply it".to_string(),
                     ),
                     "downloading" => (
-                        theme::ACCENT_BRIGHT,
+                        theme::accent_bright_u32(),
                         format!("Downloading v{}", self.status.update_version),
                         format!("{:.0}%", progress * 100.0),
                     ),
@@ -602,11 +619,11 @@ impl Root {
                                     .bg(gpui::linear_gradient(
                                         90.0,
                                         gpui::linear_color_stop(
-                                            rgba((theme::ACCENT << 8) | 0xFF),
+                                            rgba((theme::accent_u32() << 8) | 0xFF),
                                             0.0,
                                         ),
                                         gpui::linear_color_stop(
-                                            rgba((theme::PINK << 8) | 0xFF),
+                                            rgba((theme::pink_u32() << 8) | 0xFF),
                                             1.0,
                                         ),
                                     )),
@@ -1201,7 +1218,7 @@ impl Root {
                             .text_color(theme::text())
                             .child("DLSS 5 Neural Rendering"),
                     )
-                    .child(widgets::chip("Video mode", theme::ACCENT_BRIGHT)),
+                    .child(widgets::chip("Video mode", theme::accent_bright_u32())),
             )
             .child(
                 div()
@@ -1345,7 +1362,7 @@ impl Root {
                 widgets::row(
                     "Hotkey",
                     "Fixed F10 while streaming; Esc arms disconnect",
-                    widgets::chip("F10", theme::ACCENT_BRIGHT),
+                    widgets::chip("F10", theme::accent_bright_u32()),
                 ),
             ],
         );
@@ -1369,7 +1386,7 @@ impl Root {
         let progress = self.status.update_progress.clamp(0.0, 1.0) as f32;
         let (accent, headline, detail) = match state {
             "checking" => (
-                theme::ACCENT_BRIGHT,
+                theme::accent_bright_u32(),
                 "Checking GitHub releases".to_string(),
                 "Reading the latest tag and its assets".to_string(),
             ),
@@ -1383,7 +1400,7 @@ impl Root {
                 },
             ),
             "downloading" => (
-                theme::ACCENT_BRIGHT,
+                theme::accent_bright_u32(),
                 format!("Downloading v{}", self.status.update_version),
                 format!("{:.0}% of the updater", progress * 100.0),
             ),
@@ -1537,8 +1554,8 @@ impl Root {
                                 .rounded(px(3.0))
                                 .bg(gpui::linear_gradient(
                                     90.0,
-                                    gpui::linear_color_stop(rgba((theme::ACCENT << 8) | 0xFF), 0.0),
-                                    gpui::linear_color_stop(rgba((theme::PINK << 8) | 0xFF), 1.0),
+                                    gpui::linear_color_stop(rgba((theme::accent_u32() << 8) | 0xFF), 0.0),
+                                    gpui::linear_color_stop(rgba((theme::pink_u32() << 8) | 0xFF), 1.0),
                                 )),
                         )
                         .child(shimmer),
@@ -1547,6 +1564,73 @@ impl Root {
         }
 
         widgets::card_pad().child(column).into_any_element()
+    }
+
+    fn theme_group(&self, cx: &mut Context<Self>) -> AnyElement {
+        let current = self.settings.i("ui.palette", 0).max(0) as usize;
+        let mut grid = div().flex().flex_wrap().gap(px(10.0));
+        for (index, palette) in theme::PALETTES.iter().enumerate() {
+            let active = index == current;
+            grid = grid.child(
+                div()
+                    .id(("theme", index))
+                    .flex()
+                    .flex_col()
+                    .gap(px(9.0))
+                    .w(px(152.0))
+                    .p(px(12.0))
+                    .rounded(px(12.0))
+                    .bg(if active {
+                        theme::accent_rgba(0x1F)
+                    } else {
+                        rgba(0xFFFFFF08)
+                    })
+                    .border_1()
+                    .border_color(if active {
+                        theme::accent_rgba(0x99)
+                    } else {
+                        rgba(0xFFFFFF14)
+                    })
+                    .cursor_pointer()
+                    .hover(|style| style.bg(rgba(0xFFFFFF10)))
+                    .on_click(cx.listener(
+                        move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                            this.settings.set_int("ui.palette", index as i64);
+                            this.persist();
+                            cx.notify();
+                        },
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(5.0))
+                            .child(swatch(palette.accent))
+                            .child(swatch(palette.accent_bright))
+                            .child(swatch(palette.accent_deep))
+                            .child(swatch(palette.pink)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_size(theme::small())
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(theme::text())
+                                    .child(theme::PALETTE_NAMES[index]),
+                            )
+                            .when(active, |el| el.child(widgets::dot(theme::accent_u32()))),
+                    ),
+            );
+        }
+        group(
+            "Theme",
+            "Colour scheme for the shell and the control center",
+            vec![grid.into_any_element()],
+        )
     }
 
     pub(crate) fn page_advanced(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1763,22 +1847,57 @@ impl Root {
             ],
         );
 
-        div()
+        let page = self.settings_page.min(SETTINGS_PAGES.len() - 1);
+        let mut nav = div().flex().items_center().gap(px(4.0));
+        for (index, (label, _)) in SETTINGS_PAGES.iter().enumerate() {
+            let active = index == page;
+            nav = nav.child(
+                div()
+                    .id(("settings-tab", index))
+                    .flex()
+                    .items_center()
+                    .h(px(30.0))
+                    .px(px(13.0))
+                    .rounded(px(8.0))
+                    .bg(if active {
+                        theme::accent_rgba(0x26)
+                    } else {
+                        rgba(0x00000000)
+                    })
+                    .text_size(theme::small())
+                    .font_weight(if active {
+                        FontWeight::BOLD
+                    } else {
+                        FontWeight::SEMIBOLD
+                    })
+                    .text_color(if active { theme::text() } else { theme::muted() })
+                    .cursor_pointer()
+                    .hover(|style| style.bg(rgba(0xFFFFFF0D)).text_color(theme::text()))
+                    .on_click(cx.listener(
+                        move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                            this.settings_page = index;
+                            cx.notify();
+                        },
+                    ))
+                    .child(*label),
+            );
+        }
+
+        let theme_picker = self.theme_group(cx);
+        let mut column = div()
             .flex()
             .flex_col()
             .gap(px(20.0))
-            .child(widgets::page_title(
-                "Advanced",
-                "System, shell, measurements, diagnostics and reset",
-            ))
-            .child(updates)
-            .child(system)
-            .child(shell)
-            .child(pacing)
-            .child(diagnostics)
-            .child(brand)
-            .child(widgets::card_pad().child(reset))
-            .into_any_element()
+            .child(widgets::page_title("Settings", SETTINGS_PAGES[page].1))
+            .child(nav);
+        column = match page {
+            0 => column.child(theme_picker).child(shell),
+            1 => column.child(updates),
+            2 => column.child(system).child(pacing),
+            3 => column.child(diagnostics).child(widgets::card_pad().child(reset)),
+            _ => column.child(brand),
+        };
+        column.into_any_element()
     }
 }
 
