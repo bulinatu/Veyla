@@ -452,6 +452,11 @@ pub struct Status {
     /// "wifi", "ethernet", "other" or "unknown": the adapter carrying the
     /// default route, published by the engine.
     pub link: String,
+    pub has_credentials: bool,
+    pub discovering: bool,
+    pub pairing: bool,
+    pub pairing_message: String,
+    pub psn_id: String,
     pub vram_mb: i64,
 }
 
@@ -510,6 +515,11 @@ impl Status {
             gpu: s("gpu"),
             driver: s("driver"),
             link: s("link"),
+            has_credentials: b("has_credentials"),
+            discovering: b("discovering"),
+            pairing: b("pairing"),
+            pairing_message: s("pairing_message"),
+            psn_id: s("psn_id"),
             vram_mb: i("vram_mb"),
         }
     }

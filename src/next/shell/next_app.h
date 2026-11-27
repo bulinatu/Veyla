@@ -239,6 +239,8 @@ private:
     void HandleBridgeCommand(const std::string& command);
     void PublishBridgeStatus();
     void PublishDevices();
+    void PublishConsoles();
+    std::string consoles_sig_;
     void ReloadSettingsFromDisk();
     OverlayWindow overlay_;
     double last_overlay_update_ = -1.0;

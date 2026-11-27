@@ -75,10 +75,25 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"2.6.5";
+constexpr wchar_t kVersion[] = L"2.7.0";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
+
+// Minimal JSON string escaping for the small events the bridge publishes.
+std::string JsonEscape(const std::string& text) {
+    std::string out;
+    out.reserve(text.size() + 8);
+    for (const char ch : text) {
+        if (ch == '"' || ch == '\\') {
+            out += '\\';
+            out += ch;
+        } else if (static_cast<unsigned char>(ch) >= 0x20) {
+            out += ch;
+        }
+    }
+    return out;
+}
 
 // Type of the adapter that carries the default route. Wi-Fi and Ethernet need
 // different bitrates: 100 Mbps over the air queues up in the access point and
@@ -1158,7 +1173,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"Veyla", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  2.6.5", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  2.7.0", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -1272,7 +1287,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"Veyla 2.6.5",
+        renderer_->Text(L"Veyla 2.7.0",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -2401,7 +2416,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"Veyla 2.6.5  |  stable release", L"STABLE", true);
+               L"Veyla 2.7.0  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -2410,7 +2425,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"Veyla", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 2.6.5  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 2.7.0  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -4405,6 +4420,57 @@ void NextApp::HandleBridgeCommand(const std::string& command) {
         }
     } else if (command == "devices") {
         publish_devices_ = true;
+    } else if (command == "discover") {
+        if (streaming_) {
+            const Status status = streaming_->StartDiscovery();
+            if (!status.ok()) {
+                Toast(Widen(status.message()), true);
+            }
+        }
+    } else if (command.rfind("console_use ", 0) == 0) {
+        const std::string address = command.substr(12);
+        if (streaming_) {
+            for (const auto& candidate : streaming_->Discovered()) {
+                if (candidate.address == address) {
+                    const Status status = streaming_->SetConsole(candidate);
+                    if (!status.ok()) {
+                        Toast(Widen(status.message()), true);
+                    }
+                    break;
+                }
+            }
+        }
+    } else if (command.rfind("pair ", 0) == 0) {
+        if (streaming_) {
+            const unsigned long pin = std::strtoul(command.c_str() + 5, nullptr, 10);
+            if (pin == 0) {
+                Toast(L"Enter the PIN shown on the console", true);
+            } else {
+                const Status status = streaming_->Pair(static_cast<std::uint32_t>(pin));
+                Toast(status.ok() ? std::wstring(L"Pairing...") : Widen(status.message()),
+                      !status.ok());
+            }
+        }
+    } else if (command == "psn-open") {
+        if (streaming_) {
+            std::string detail;
+            const Status status = streaming_->OpenPsnLogin(detail);
+            if (status.ok() && !detail.empty()) {
+                bridge_.Publish("E {\"kind\":\"psn_url\",\"url\":\"" + JsonEscape(detail) +
+                                "\"}");
+            } else {
+                Toast(status.ok() ? std::wstring(L"PSN login unavailable")
+                                  : Widen(status.message()),
+                      true);
+            }
+        }
+    } else if (command.rfind("psn-complete ", 0) == 0) {
+        if (streaming_) {
+            std::string detail;
+            const Status status = streaming_->CompletePsnLogin(command.substr(13), detail);
+            Toast(status.ok() ? std::wstring(L"PSN account linked") : Widen(detail),
+                  !status.ok());
+        }
     } else if (command == "profiles") {
         publish_profiles_ = true;
     } else if (command.rfind("profile_apply ", 0) == 0) {
@@ -4518,6 +4584,11 @@ void NextApp::PublishBridgeStatus() {
     flag("streaming", streaming_now, true);
     flag("connecting", stream.connecting, true);
     flag("armed", disconnect_armed_, true);
+    flag("has_credentials", stream.has_credentials, true);
+    flag("discovering", stream.discovering, true);
+    flag("pairing", stream.pairing, true);
+    text("pairing_message", stream.pairing_message, true);
+    text("psn_id", streaming_ ? streaming_->Profile().psn_numeric_id : std::string(), true);
     text("message", stream.message, true);
     const std::string console_name =
         streaming_ && !streaming_->Profile().name.empty() ? streaming_->Profile().name
@@ -4579,6 +4650,36 @@ void NextApp::PublishBridgeStatus() {
     text("link", link_type_, true);
     integer("vram_mb", static_cast<long long>(system_.gpu.vram_mb), false);
     json += '}';
+    bridge_.Publish(std::move(json));
+    if (streaming_ && !stream.discovering) {
+        const auto consoles = streaming_->Discovered();
+        std::string sig;
+        for (const auto& candidate : consoles) {
+            sig += candidate.address + "|" + candidate.name + "|" + candidate.status + ";";
+        }
+        if (sig != consoles_sig_) {
+            consoles_sig_ = sig;
+            PublishConsoles();
+        }
+    }
+}
+
+void NextApp::PublishConsoles() {
+    if (!streaming_) {
+        return;
+    }
+    const auto consoles = streaming_->Discovered();
+    std::string json = "E {\"kind\":\"consoles\",\"items\":[";
+    for (std::size_t i = 0; i < consoles.size(); ++i) {
+        if (i > 0) {
+            json += ',';
+        }
+        json += "{\"name\":\"" + JsonEscape(consoles[i].name) + "\",\"address\":\"" +
+                JsonEscape(consoles[i].address) + "\",\"type\":\"" +
+                JsonEscape(consoles[i].device_type) + "\",\"status\":\"" +
+                JsonEscape(consoles[i].status) + "\"}";
+    }
+    json += "]}";
     bridge_.Publish(std::move(json));
 }
 

@@ -484,6 +484,76 @@ impl Root {
 
     /// Keyboard routing for the single active inline editor.
     pub fn on_key(&mut self, event: &gpui::KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // First-run setup fields own the keyboard while they are focused.
+        if let Some(field) = self.setup_field {
+            use crate::app::SetupField;
+            let key = event.keystroke.key.as_str();
+            match key {
+                "escape" => {
+                    self.setup_field = None;
+                    cx.notify();
+                    return;
+                }
+                "enter" => {
+                    match field {
+                        SetupField::Pin => self.setup_pair(cx),
+                        SetupField::Psn => self.setup_psn_complete(cx),
+                    }
+                    cx.notify();
+                    return;
+                }
+                "backspace" => {
+                    match field {
+                        SetupField::Pin => {
+                            self.pin_text.pop();
+                        }
+                        SetupField::Psn => {
+                            self.psn_redirect.pop();
+                        }
+                    }
+                    cx.notify();
+                    return;
+                }
+                "v" if event.keystroke.modifiers.control || event.keystroke.modifiers.platform => {
+                    if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                        match field {
+                            SetupField::Pin => {
+                                for ch in text.chars().filter(|c| c.is_ascii_digit()) {
+                                    if self.pin_text.len() < 8 {
+                                        self.pin_text.push(ch);
+                                    }
+                                }
+                            }
+                            SetupField::Psn => {
+                                self.psn_redirect.push_str(text.trim());
+                            }
+                        }
+                    }
+                    cx.notify();
+                    return;
+                }
+                _ => {
+                    if let Some(ch) = event.keystroke.key_char.as_ref() {
+                        match field {
+                            SetupField::Pin => {
+                                if ch.chars().all(|c| c.is_ascii_digit())
+                                    && self.pin_text.len() < 8
+                                {
+                                    self.pin_text.push_str(ch);
+                                }
+                            }
+                            SetupField::Psn => {
+                                if !ch.is_empty() && !ch.chars().any(|c| c.is_control()) {
+                                    self.psn_redirect.push_str(ch);
+                                }
+                            }
+                        }
+                    }
+                    cx.notify();
+                    return;
+                }
+            }
+        }
         if let Some(key) = self.num_edit {
             match event.keystroke.key.as_str() {
                 "escape" => {

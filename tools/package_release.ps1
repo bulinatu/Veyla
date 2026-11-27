@@ -130,10 +130,18 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 2.6.5 - standalone build
+Veyla 2.7.0 - standalone build
 =======================================
 
 Run veyla.exe. No installer, no console window, no background service.
+
+What changed in 2.7.0
+---------------------
+- New users can set up a console inside the app: a "Set up your PS5" chip under
+  the logo opens Settings > Pairing, with LAN discovery, PIN pairing and the PSN
+  account link. Before 2.7.0 there was no setup screen at all and pairing had to
+  be done in veyla-classic.exe (Streaming > Console).
+- The chip only appears while no console is paired.
 
 What changed in 2.6.2
 ---------------------

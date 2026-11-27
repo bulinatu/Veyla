@@ -88,6 +88,14 @@ impl Devices {
     }
 }
 
+#[derive(Clone, Default)]
+pub struct ConsoleInfo {
+    pub name: String,
+    pub address: String,
+    pub kind: String,
+    pub status: String,
+}
+
 #[derive(Default)]
 pub struct Shared {
     pub status: Status,
@@ -97,6 +105,9 @@ pub struct Shared {
     pub devices_rev: u64,
     pub profiles: Vec<ProfileInfo>,
     pub profiles_rev: u64,
+    pub consoles: Vec<ConsoleInfo>,
+    pub consoles_rev: u64,
+    pub psn_url: Option<String>,
     pub events: Vec<String>,
 }
 
@@ -196,6 +207,25 @@ impl Engine {
                                 }
                             }
                             state.profiles_rev += 1;
+                            }
+                            Some("consoles") => {
+                                let mut state = state.lock().unwrap();
+                                state.consoles.clear();
+                                if let Some(items) = value.get("items").and_then(Value::as_array) {
+                                    for item in items {
+                                        state.consoles.push(ConsoleInfo {
+                                            name: item.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
+                                            address: item.get("address").and_then(Value::as_str).unwrap_or_default().to_string(),
+                                            kind: item.get("type").and_then(Value::as_str).unwrap_or_default().to_string(),
+                                            status: item.get("status").and_then(Value::as_str).unwrap_or_default().to_string(),
+                                        });
+                                    }
+                                }
+                                state.consoles_rev += 1;
+                            }
+                            Some("psn_url") => {
+                                let mut state = state.lock().unwrap();
+                                state.psn_url = value.get("url").and_then(Value::as_str).map(|s| s.to_string());
                             }
                             Some("devices") => {
                             let devices = Devices::from_json(&value);

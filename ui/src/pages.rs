@@ -8,7 +8,7 @@ use gpui::{
     Context, FontWeight, IntoElement, SharedString, Window,
 };
 
-use crate::app::Root;
+use crate::app::{Root, SetupField};
 use crate::model::Preset;
 use crate::theme;
 use crate::widgets::{self, Tone};
@@ -52,8 +52,9 @@ fn group(title: &'static str, hint: &'static str, rows: Vec<AnyElement>) -> AnyE
     card.into_any_element()
 }
 
-const SETTINGS_PAGES: [(&str, &str); 5] = [
+const SETTINGS_PAGES: [(&str, &str); 6] = [
     ("Appearance", "Theme, type and motion"),
+    ("Pairing", "Console discovery, PIN and PSN account"),
     ("Updates", "GitHub releases"),
     ("System", "Hardware, shell and pacing"),
     ("Diagnostics", "Logging, measurements and reset"),
@@ -70,6 +71,236 @@ fn swatch(color: u32) -> AnyElement {
 }
 
 impl Root {
+    /// First-run console setup: discovery, PIN pairing and the PSN account link.
+    fn console_setup(&self, cx: &mut Context<Self>) -> AnyElement {
+        let consoles = self.consoles();
+        let mut discovered = div().flex().flex_col().gap(px(8.0));
+        if self.status.discovering {
+            discovered = discovered.child(
+                div()
+                    .text_size(theme::small())
+                    .text_color(theme::muted())
+                    .child("Searching the LAN for consoles..."),
+            );
+        } else if consoles.is_empty() {
+            discovered = discovered.child(
+                div()
+                    .text_size(theme::small())
+                    .text_color(theme::muted())
+                    .child("No consoles found yet. Wake the PS5 and press Discover."),
+            );
+        } else {
+            for console in consoles {
+                let address = console.address.clone();
+                let label = if console.name.is_empty() {
+                    address.clone()
+                } else {
+                    console.name.clone()
+                };
+                discovered = discovered.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(12.0))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(2.0))
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .child(
+                                    div()
+                                        .text_size(theme::small())
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(theme::text())
+                                        .child(label),
+                                )
+                                .child(
+                                    div()
+                                        .font_family(theme::MONO_FONT)
+                                        .text_size(theme::tiny())
+                                        .text_color(theme::muted())
+                                        .child(address.clone()),
+                                ),
+                        )
+                        .child(widgets::button_with_id(
+                            format!("use-{address}"),
+                            "Use",
+                            Tone::Ghost,
+                            cx.listener(
+                                move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                                    this.setup_use(&address, cx);
+                                },
+                            ),
+                        )),
+                );
+            }
+        }
+
+        let pin_focused = self.setup_field == Some(SetupField::Pin);
+        let pin_value: SharedString = if self.pin_text.is_empty() {
+            "8-digit PIN".into()
+        } else {
+            self.pin_text.clone().into()
+        };
+        let pin_box = div()
+            .id("pin-field")
+            .flex()
+            .items_center()
+            .w(px(150.0))
+            .h(px(38.0))
+            .px(px(12.0))
+            .rounded(px(9.0))
+            .bg(rgba(0x00000059))
+            .border_1()
+            .border_color(if pin_focused {
+                theme::accent_rgba(0xCC)
+            } else {
+                rgba(0xFFFFFF14)
+            })
+            .font_family(theme::MONO_FONT)
+            .text_size(theme::body())
+            .text_color(if self.pin_text.is_empty() {
+                theme::muted()
+            } else {
+                theme::text()
+            })
+            .cursor_text()
+            .on_click(cx.listener(
+                |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                    this.setup_field = Some(SetupField::Pin);
+                    cx.notify();
+                },
+            ))
+            .child(pin_value);
+
+        let psn_focused = self.setup_field == Some(SetupField::Psn);
+        let psn_value: SharedString = if self.psn_redirect.is_empty() {
+            "Paste redirect URL".into()
+        } else {
+            self.psn_redirect.clone().into()
+        };
+        let psn_box = div()
+            .id("psn-redirect")
+            .flex()
+            .items_center()
+            .w(px(330.0))
+            .h(px(38.0))
+            .px(px(12.0))
+            .rounded(px(9.0))
+            .bg(rgba(0x00000059))
+            .border_1()
+            .border_color(if psn_focused {
+                theme::accent_rgba(0xCC)
+            } else {
+                rgba(0xFFFFFF14)
+            })
+            .text_size(theme::small())
+            .text_color(if self.psn_redirect.is_empty() {
+                theme::muted()
+            } else {
+                theme::text()
+            })
+            .cursor_text()
+            .overflow_hidden()
+            .on_click(cx.listener(
+                |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                    this.setup_field = Some(SetupField::Psn);
+                    cx.notify();
+                },
+            ))
+            .child(psn_value);
+
+        let psn_state: SharedString = if self.status.psn_id.is_empty() {
+            "No PSN account linked".into()
+        } else {
+            format!("Linked: {}", self.status.psn_id).into()
+        };
+
+        widgets::card_pad()
+            .flex()
+            .flex_col()
+            .gap(px(14.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(widgets::section("Set up a console", "Discovery, pairing, account"))
+                    .child(widgets::button(
+                        if self.status.discovering {
+                            "Searching..."
+                        } else {
+                            "Discover"
+                        },
+                        Tone::Ghost,
+                        cx.listener(
+                            |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                                this.setup_discover(cx);
+                            },
+                        ),
+                    )),
+            )
+            .child(discovered)
+            .child(widgets::divider())
+            .child(widgets::row(
+                "Pairing PIN",
+                "PS5: Settings > System > Remote Play > Link Device",
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(pin_box)
+                    .child(widgets::button(
+                        "Pair",
+                        Tone::Primary,
+                        cx.listener(
+                            |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                                this.setup_pair(cx);
+                            },
+                        ),
+                    ))
+                    .into_any_element(),
+            ))
+            .child(widgets::divider())
+            .child(widgets::row(
+                "PSN account",
+                psn_state,
+                widgets::button(
+                    "Open login",
+                    Tone::Ghost,
+                    cx.listener(
+                        |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                            this.setup_psn_open(cx);
+                        },
+                    ),
+                ),
+            ))
+            .child(widgets::row(
+                "Redirect URL",
+                "Paste what the browser lands on, then Link",
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(psn_box)
+                    .child(widgets::button(
+                        "Link",
+                        Tone::Primary,
+                        cx.listener(
+                            |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                                this.setup_psn_complete(cx);
+                            },
+                        ),
+                    ))
+                    .into_any_element(),
+            ))
+            .into_any_element()
+    }
+
     pub(crate) fn page_home(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let (session_name, session_host) = crate::model::session_identity();
         let name: SharedString = if !self.status.console_name.is_empty() &&
@@ -1892,9 +2123,10 @@ impl Root {
             .child(nav);
         column = match page {
             0 => column.child(theme_picker).child(shell),
-            1 => column.child(updates),
-            2 => column.child(system).child(pacing),
-            3 => column.child(diagnostics).child(widgets::card_pad().child(reset)),
+            1 => column.child(self.console_setup(cx)),
+            2 => column.child(updates),
+            3 => column.child(system).child(pacing),
+            4 => column.child(diagnostics).child(widgets::card_pad().child(reset)),
             _ => column.child(brand),
         };
         column.into_any_element()

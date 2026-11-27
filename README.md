@@ -61,6 +61,24 @@ You pair once, pick a preset, and press **Connect & Play**.
 4. On the PS5, enable **Settings > System > Remote Play > Enable Remote Play**.
 5. In Veyla, press **Connect & Play** and enter the code shown on the console.
 
+### First-time setup (2.7.0 and later)
+
+With no console paired, a **Set up your PS5** chip appears under the logo. It
+opens **Settings > Pairing**:
+
+1. Press **Discover** - your console appears with its name and address.
+2. Press **Use**, then enter the 8-digit PIN shown by
+   **PS5 > Settings > System > Remote Play > Link Device** and press **Pair**.
+3. Optional, for play outside the LAN: **Open login** links a PSN account. Sign
+   in through the browser, paste the redirect URL back and press **Link**.
+
+The chip disappears once a console is paired.
+
+Before 2.7.0 there was no setup screen at all: a new user could not discover or
+pair from the app and had to run `veyla-classic.exe`, open *Streaming > Console*
+and pair there. That detour is no longer needed.
+
+
 Your settings live in `%APPDATA%\BetterRemotePlayNext` (kept from the original
 project name, so existing pairings keep working).
 

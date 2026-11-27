@@ -75,6 +75,12 @@ impl Tab {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SetupField {
+    Pin,
+    Psn,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PickerKind {
     Audio,
     Monitor,
@@ -144,6 +150,11 @@ pub struct Root {
     pub(crate) dock_from: usize,
     /// Sub-page inside Settings.
     pub(crate) settings_page: usize,
+    /// First-run console setup: PIN and PSN redirect text fields.
+    pub(crate) pin_text: String,
+    pub(crate) psn_redirect: String,
+    pub(crate) setup_field: Option<SetupField>,
+    pub(crate) consoles_rev: u64,
     /// Message from a failed self-update, read once at startup.
     pub(crate) update_failure: Option<String>,
     /// Pending "Delete" confirmation for a saved profile: (profile id, when
@@ -201,7 +212,7 @@ impl Root {
                     let Some(engine) = this.engine.as_ref() else {
                         return;
                     };
-                    let (rev, status, online, devices_rev, profiles_rev, events) = {
+                    let (rev, status, online, devices_rev, profiles_rev, consoles_rev, psn_url, events) = {
                         let mut state = match engine.shared.lock() {
                             Ok(state) => state,
                             Err(_) => return,
@@ -212,6 +223,8 @@ impl Root {
                             state.online,
                             state.devices_rev,
                             state.profiles_rev,
+                            state.consoles_rev,
+                            state.psn_url.take(),
                             std::mem::take(&mut state.events),
                         )
                     };
@@ -257,6 +270,16 @@ impl Root {
                     this.devices_rev = devices_rev;
                     let profiles_changed = profiles_rev != this.profiles_rev;
                     this.profiles_rev = profiles_rev;
+                    if consoles_rev != this.consoles_rev {
+                        this.consoles_rev = consoles_rev;
+                        cx.notify();
+                    }
+                    if let Some(url) = psn_url {
+                        let _ = std::process::Command::new("rundll32")
+                            .args(["url.dll,FileProtocolHandler", &url])
+                            .spawn();
+                        this.toast("PSN login opened in your browser", false, cx);
+                    }
                     if this.pending_optimize {
                         this.optimize_ticks = this.optimize_ticks.saturating_add(1);
                         // The launch request for devices can race engine startup,
@@ -443,6 +466,10 @@ impl Root {
             confirm_profile: None,
             dock_from: 0,
             settings_page: 0,
+            pin_text: String::new(),
+            psn_redirect: String::new(),
+            setup_field: None,
+            consoles_rev: 0,
             update_failure: take_update_failure(),
             profile_delete_cooldown: None,
             applied_rev: 0,
@@ -1079,6 +1106,60 @@ impl Root {
         Vec::new()
     }
 
+    pub(crate) fn consoles(&self) -> Vec<crate::bridge::ConsoleInfo> {
+        if let Some(engine) = self.engine.as_ref() {
+            if let Ok(state) = engine.shared.lock() {
+                return state.consoles.clone();
+            }
+        }
+        Vec::new()
+    }
+
+    pub(crate) fn setup_discover(&mut self, cx: &mut Context<Self>) {
+        if self.engine.is_none() {
+            self.toast("Engine is not running", true, cx);
+            return;
+        }
+        self.send("discover");
+        self.toast("Searching for consoles on the LAN...", false, cx);
+    }
+
+    pub(crate) fn setup_use(&mut self, address: &str, cx: &mut Context<Self>) {
+        self.send(&format!("console_use {address}"));
+        self.toast("Console selected; enter the PIN to pair", false, cx);
+    }
+
+    pub(crate) fn setup_pair(&mut self, cx: &mut Context<Self>) {
+        let pin = self.pin_text.trim().to_string();
+        if pin.len() < 4 {
+            self.toast("Enter the PIN shown on the console", true, cx);
+            return;
+        }
+        self.send(&format!("pair {pin}"));
+        self.toast("Pairing...", false, cx);
+        self.setup_field = None;
+    }
+
+    pub(crate) fn setup_psn_open(&mut self, cx: &mut Context<Self>) {
+        if self.engine.is_none() {
+            self.toast("Engine is not running", true, cx);
+            return;
+        }
+        self.send("psn-open");
+        cx.notify();
+    }
+
+    pub(crate) fn setup_psn_complete(&mut self, cx: &mut Context<Self>) {
+        let url = self.psn_redirect.trim().to_string();
+        if url.is_empty() {
+            self.toast("Paste the redirect URL from the browser", true, cx);
+            return;
+        }
+        self.send(&format!("psn-complete {url}"));
+        self.toast("Linking PSN account...", false, cx);
+        self.setup_field = None;
+    }
+
     pub(crate) fn apply_profile(&mut self, id: &str, cx: &mut Context<Self>) {
         self.send(&format!("profile_apply {id}"));
         self.toast("Profile applied", false, cx);
@@ -1104,6 +1185,13 @@ impl Root {
         // so deleting one and saving again cannot overwrite a survivor.
         self.send("profile_save");
         self.toast("Profile saved", false, cx);
+    }
+
+    /// Sends the user to Settings > Pairing, used by the first-run banner.
+    pub(crate) fn open_pairing(&mut self, cx: &mut Context<Self>) {
+        self.select(Tab::Advanced);
+        self.settings_page = 1;
+        cx.notify();
     }
 
     /// Two-step delete: the first click arms the row, a second click within
@@ -1722,6 +1810,48 @@ impl Render for Root {
         let subnav = self.sub_nav(cx);
         let page = self.page(cx);
         let dock = self.dock(cx);
+        // First run: a single, quiet pointer to setup instead of a whole panel
+        // on Home. It disappears the moment a console is paired.
+        let setup_banner = if self.engine_online
+            && !self.status.has_credentials
+            && !(self.tab == Tab::Advanced && self.settings_page == 1)
+        {
+            div()
+                .id("setup-banner")
+                .absolute()
+                .top(px(62.0))
+                .left(px(18.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .h(px(32.0))
+                .px(px(13.0))
+                .rounded(px(16.0))
+                .bg(rgba(0x0C0C16F2))
+                .border_1()
+                .border_color(theme::accent_rgba(0x66))
+                .text_size(theme::small())
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::text())
+                .cursor_pointer()
+                .shadow_lg()
+                .hover(|style| style.bg(theme::accent_rgba(0x3D)))
+                .on_click(cx.listener(
+                    |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                        this.open_pairing(cx);
+                    },
+                ))
+                .child(widgets::dot(theme::accent_u32()))
+                .child("Set up your PS5")
+                .child(
+                    div()
+                        .text_color(theme::dim())
+                        .child("\u{2192}"),
+                )
+                .into_any_element()
+        } else {
+            div().into_any_element()
+        };
         let toast = self.toast_overlay();
         let connecting = self.connect_overlay(cx);
         let picker = self.picker_overlay(cx);
@@ -1823,6 +1953,7 @@ impl Render for Root {
                     .bottom(px(18.0))
                     .child(dock),
             )
+            .child(setup_banner)
             .child(connecting)
             .child(picker)
             .child(toast)
