@@ -11,7 +11,7 @@
     <meta name="theme-color" content="#07070d" />
     <link rel="icon" href="images/app.png" type="image/png" />
     <link rel="apple-touch-icon" href="images/app.png" />
-    <link rel="stylesheet" href="site.css?v=2" />
+    <link rel="stylesheet" href="site.css?v=3" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Veyla - PS5 Remote Play for Windows" />
     <meta
@@ -36,12 +36,19 @@
           <span class="logo">V</span>
           Veyla
         </a>
-        <a class="support-chip" href="https://ko-fi.com/bulinatu" rel="noopener" aria-label="Support Veyla on Ko-fi" title="Support the project on Ko-fi">
+        <a
+          class="support-chip"
+          href="https://ko-fi.com/bulinatu"
+          rel="noopener"
+          aria-label="Support Veyla on Ko-fi"
+          title="Support the project on Ko-fi"
+        >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h12v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z"/><path d="M16 9h2a3 3 0 0 1 0 6h-2"/><path d="M7 4.5c0 .8.6 1.2 1.2 1.5M11 4.5c0 .8.6 1.2 1.2 1.5"/></svg>
           <span>Support</span>
         </a>
         <span class="spacer"></span>
         <nav class="top-links" aria-label="Sections">
+          <a href="#compare">Compare</a>
           <a href="#features">Features</a>
           <a href="#themes">Themes</a>
           <a href="#install">Install</a>
@@ -62,7 +69,7 @@
     <main id="top">
       <div class="wrap">
         <section class="hero" id="home">
-          <div>
+          <div class="hero-copy">
             <span class="eyebrow"><span class="dot"></span>PS5 Remote Play for Windows</span>
             <h1>Your PS5 on your PC.<br /><span class="grad">Without feeling the distance.</span></h1>
             <p class="lede">
@@ -79,7 +86,7 @@
                 <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 Download for Windows
               </a>
-              <a class="btn ghost" href="#features">See what it does</a>
+              <a class="btn ghost" href="#compare">See the difference</a>
             </div>
             <p class="meta">
               <span class="pill"><span class="dot"></span><span data-version>v2.7.2</span></span>
@@ -91,7 +98,22 @@
                 Already on Veyla? Get the 6 MB update
               </a>
             </p>
+            <div class="hero-metrics">
+              <div class="hm">
+                <span class="hm-k">Input to photon</span>
+                <span class="hm-v"><span data-live="input">23</span><small>ms</small></span>
+              </div>
+              <div class="hm">
+                <span class="hm-k">Present lag</span>
+                <span class="hm-v"><span data-live="lag">2.1</span><small>ms</small></span>
+              </div>
+              <div class="hm">
+                <span class="hm-k">Shown</span>
+                <span class="hm-v"><span data-live="fps">60</span><small>fps</small></span>
+              </div>
+            </div>
           </div>
+
           <div class="app" aria-label="Live preview of the Veyla Home screen">
             <div class="app-bar">
               <div class="app-brand"><span class="logo sm">V</span> Veyla</div>
@@ -113,9 +135,6 @@
                   <div class="tiny muted" style="margin-top: 10px">
                     Lowest latency: 60 fps, 50 Mbps, buffer 0, vsync off, AI off
                   </div>
-                  <div class="tiny muted" style="margin-top: 4px">
-                    Esc arms disconnect · F10 control center · Alt+F4 leave stream
-                  </div>
                 </div>
                 <div class="app-card">
                   <div class="section-row"><span class="m-label">Profiles</span><span class="tiny muted">One click</span></div>
@@ -133,17 +152,7 @@
                 <div class="stat"><div class="k">Bitrate</div><div class="v">100 Mbps</div></div>
                 <div class="stat">
                   <div class="k">Latency</div>
-                  <div class="v green"><span data-live="age">0.9</span> + <span data-live="lag">2.2</span> ms</div>
-                </div>
-              </div>
-              <div class="app-card saved">
-                <div class="section-row" style="margin-bottom: 6px">
-                  <span class="m-label">Saved profiles</span>
-                  <span class="tiny muted">Engine configuration · 1 / 12</span>
-                </div>
-                <div class="saved-row">
-                  <span>Profile 1</span>
-                  <span class="links"><span>Apply</span><span>Delete</span></span>
+                  <div class="v green"><span data-live="age">0.9</span> + <span data-live="lag">2.1</span> ms</div>
                 </div>
               </div>
               <div class="mini-dock" aria-hidden="true">
@@ -157,6 +166,98 @@
               </div>
             </div>
           </div>
+        </section>
+
+        <section class="pipeline" id="pipeline" aria-label="How a frame travels">
+          <div class="pipeline-head">
+            <span class="section-label">One frame, end to end</span>
+            <span class="tiny muted">measured on a wired local session</span>
+          </div>
+          <div class="track">
+            <div class="track-line"></div>
+            <div class="track-runner" aria-hidden="true"></div>
+            <div class="node">
+              <span class="node-dot"></span>
+              <b>Console</b>
+              <span>capture + encode</span>
+            </div>
+            <div class="node">
+              <span class="node-dot"></span>
+              <b>Network</b>
+              <span>local LAN, ~1 ms</span>
+            </div>
+            <div class="node">
+              <span class="node-dot"></span>
+              <b>Decode</b>
+              <span>NVDEC / D3D11</span>
+            </div>
+            <div class="node accent">
+              <span class="node-dot"></span>
+              <b>Present</b>
+              <span>on arrival, tear-aware</span>
+            </div>
+          </div>
+        </section>
+
+        <section id="compare">
+          <div class="section-head">
+            <div>
+              <div class="section-label">Side by side</div>
+              <h2>What the milliseconds actually feel like</h2>
+              <p>
+                Same console, same 60 fps stream. One side waits for a buffer and a
+                vblank; the other presents the frame the moment it is decoded.
+              </p>
+            </div>
+            <div class="metric-switch" role="tablist" aria-label="Compare metric">
+              <button type="button" data-metric="delay" class="on" role="tab" aria-selected="true">Delay</button>
+              <button type="button" data-metric="frame" role="tab" aria-selected="false">Frame time</button>
+              <button type="button" data-metric="fps" role="tab" aria-selected="false">FPS</button>
+            </div>
+          </div>
+
+          <div class="compare">
+            <article class="cmp-card base">
+              <header>
+                <div>
+                  <div class="cmp-name">Typical stream</div>
+                  <div class="cmp-tag">buffer 1 · vblank synced</div>
+                </div>
+                <span class="cmp-state">without Veyla</span>
+              </header>
+              <div class="cmp-big"><span data-cmp="base-big">58</span><small data-cmp-unit>ms to photon</small></div>
+              <canvas class="cmp-chart" data-cmp-chart="base" height="120"></canvas>
+              <div class="cmp-rows">
+                <div><span>Frame age</span><b data-cmp="base-age">41.0 ms</b></div>
+                <div><span>Present lag</span><b data-cmp="base-lag">16.7 ms</b></div>
+                <div><span>Pacing</span><b data-cmp="base-jitter">± 7.4 ms</b></div>
+                <div><span>Drops</span><b data-cmp="base-drops">2 / min</b></div>
+              </div>
+            </article>
+
+            <article class="cmp-card veyla">
+              <header>
+                <div>
+                  <div class="cmp-name">Veyla</div>
+                  <div class="cmp-tag">buffer 0 · present on arrival</div>
+                </div>
+                <span class="cmp-state">with Veyla</span>
+              </header>
+              <div class="cmp-big"><span data-cmp="veyla-big">23</span><small data-cmp-unit>ms to photon</small></div>
+              <canvas class="cmp-chart" data-cmp-chart="veyla" height="120"></canvas>
+              <div class="cmp-rows">
+                <div><span>Frame age</span><b data-cmp="veyla-age">0.9 ms</b></div>
+                <div><span>Present lag</span><b data-cmp="veyla-lag">2.1 ms</b></div>
+                <div><span>Pacing</span><b data-cmp="veyla-jitter">± 0.4 ms</b></div>
+                <div><span>Drops</span><b data-cmp="veyla-drops">0 / min</b></div>
+              </div>
+            </article>
+          </div>
+          <p class="cmp-note">
+            Illustrative figures from a wired 1080p60 session; your network and display
+            move the absolute numbers. The gap is what a frame buffer and vblank sync
+            cost.
+          </p>
         </section>
 
         <section id="features">
@@ -216,7 +317,7 @@
             </div>
           </div>
 
-          <div class="app" style="margin-top: 18px" aria-label="Live preview of Veyla Settings">
+          <div class="app" aria-label="Live preview of Veyla Settings">
             <div class="app-bar">
               <div class="app-brand"><span class="logo sm">V</span> Veyla</div>
               <span class="spacer"></span>
@@ -307,6 +408,7 @@
               </p>
             </article>
           </div>
+
           <div style="display: flex; justify-content: center; margin-top: 22px">
             <div class="cc" aria-label="Live preview of the in-game control center">
               <div class="cc-head">
@@ -321,9 +423,9 @@
               <div class="cc-card">
                 <div class="cc-row"><span class="k">Input</span><span class="v">1920x1080 @ 60.0 fps</span></div>
                 <div class="cc-row"><span class="k">Frame age</span><span class="v"><span data-live="age">0.9</span> ms</span></div>
-                <div class="cc-row"><span class="k">Present lag</span><span class="v"><span data-live="lag">2.2</span> ms</span></div>
+                <div class="cc-row"><span class="k">Present lag</span><span class="v"><span data-live="lag">2.1</span> ms</span></div>
                 <div class="cc-row"><span class="k">Decode</span><span class="v"><span data-live="decode">2.6</span> ms</span></div>
-                <div class="cc-row"><span class="k">Cadence</span><span class="v"><span data-live="cadence">16.6 / 17.1</span> ms</span></div>
+                <div class="cc-row"><span class="k">Cadence</span><span class="v"><span data-live="cadence">16.6 / 16.9</span> ms</span></div>
                 <div class="cc-row"><span class="k">Bitrate</span><span class="v">100 Mbps</span></div>
                 <div class="cc-row"><span class="k">GPU</span><span class="v">NVIDIA GeForce RTX 4090</span></div>
                 <div class="cc-row"><span class="k">Super resolution</span><span class="v">DLSS</span></div>
@@ -429,6 +531,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
         Home
       </a>
+      <a href="#compare" data-target="#compare">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>
+        Compare
+      </a>
       <a href="#features" data-target="#features">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         Features
@@ -447,6 +553,6 @@
       </a>
     </nav>
 
-    <script src="site.js?v=2"></script>
+    <script src="site.js?v=3"></script>
   </body>
 </html>
