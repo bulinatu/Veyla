@@ -488,9 +488,16 @@ impl OverlayView {
         let mut rows: Vec<AnyElement> = Vec::new();
         match self.tab {
             0 => {
+                let content = if self.status.content_fps > 1.0
+                    && (self.status.fps - self.status.content_fps).abs() > 1.0
+                {
+                    format!(" ({:.0} content)", self.status.content_fps)
+                } else {
+                    String::new()
+                };
                 let input = format!(
-                    "{}x{} @ {:.1} fps",
-                    self.status.width, self.status.height, self.status.fps
+                    "{}x{} @ {:.1} fps{}",
+                    self.status.width, self.status.height, self.status.fps, content
                 );
                 let cadence = if self.status.cadence_p50 > 0.0 {
                     format!(
@@ -501,14 +508,20 @@ impl OverlayView {
                     "\u{2014}".to_string()
                 };
                 rows.push(widgets::kv("Input", input));
-                rows.push(widgets::kv("Codec", self.status.codec.clone()));
+                rows.push(widgets::kv(
+                    "Frame age",
+                    format!("{:.1} ms", self.status.age_ms),
+                ));
+                rows.push(widgets::kv(
+                    "Present lag",
+                    format!("{:.1} ms", self.status.present_lag_ms),
+                ));
+                rows.push(widgets::kv("Decode", format!("{:.1} ms", self.status.decode_ms)));
+                rows.push(widgets::kv("Cadence", cadence));
                 rows.push(widgets::kv(
                     "Bitrate",
                     format!("{:.0} Mbps", self.status.bitrate_kbps / 1000.0),
                 ));
-                rows.push(widgets::kv("Decode", format!("{:.1} ms", self.status.decode_ms)));
-                rows.push(widgets::kv("Cadence", cadence));
-                rows.push(widgets::kv("Loss", format!("{:.2}%", self.status.loss_percent)));
                 rows.push(widgets::kv("GPU", self.status.gpu.clone()));
                 rows.push(widgets::kv(
                     "Super resolution",

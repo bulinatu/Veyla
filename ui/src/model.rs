@@ -26,6 +26,30 @@ pub fn log_path() -> PathBuf {
     config_dir().join("ui.log")
 }
 
+/// Name and host of the paired console from the shared session file. The
+/// engine also publishes these once it has a session, but reading the file
+/// keeps Home useful before the first connect.
+pub fn session_identity() -> (Option<String>, Option<String>) {
+    let path = config_dir().join("session.json");
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return (None, None);
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&text) else {
+        return (None, None);
+    };
+    let name = value
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let host = value
+        .get("host")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    (name, host)
+}
+
 #[derive(Clone, Debug)]
 pub struct Settings {
     path: PathBuf,
@@ -366,6 +390,7 @@ pub struct Status {
     pub armed: bool,
     pub message: String,
     pub console_name: String,
+    pub console_address: String,
     pub codec: String,
     pub width: i64,
     pub height: i64,
@@ -383,6 +408,8 @@ pub struct Status {
     pub scanout_hz: f64,
     pub present_misses: f64,
     pub shown_fps: f64,
+    pub age_ms: f64,
+    pub present_lag_ms: f64,
     pub restart_pending: bool,
     pub sr_ms: f64,
     pub fg_ms: f64,
@@ -413,6 +440,7 @@ impl Status {
             armed: b("armed"),
             message: s("message"),
             console_name: s("console_name"),
+            console_address: s("console_address"),
             codec: s("codec"),
             width: i("width"),
             height: i("height"),
@@ -430,6 +458,8 @@ impl Status {
             scanout_hz: f("scanout_hz"),
             present_misses: f("present_misses"),
             shown_fps: f("shown_fps"),
+            age_ms: f("age_ms"),
+            present_lag_ms: f("present_lag_ms"),
             restart_pending: b("restart_pending"),
             sr_ms: f("sr_ms"),
             fg_ms: f("fg_ms"),

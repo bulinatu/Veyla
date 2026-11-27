@@ -178,6 +178,7 @@ private:
     double probe_wait_ms_ = 0.0;
     double probe_frame_ms_ = 0.0;
     double content_fps_ = 0.0;
+    double last_age_ms_ = 0.0;
     int content_unique_ = 0;
     double content_window_ = -1.0;
     bool watching_ = false;

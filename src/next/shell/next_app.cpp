@@ -2718,6 +2718,23 @@ void NextApp::BuildOverlayView() {
 
     OverlayPage overview;
     overview.title = L"Info";
+    {
+        wchar_t fps_text[96] = {};
+        if (content_fps_ > 10.0 && std::abs(content_fps_ - snapshot.source_fps) > 1.0) {
+            std::swprintf(fps_text, 96, L"%.0f fps  (%.0f content)", snapshot.source_fps,
+                          content_fps_);
+        } else {
+            std::swprintf(fps_text, 96, L"%.0f fps", snapshot.source_fps);
+        }
+        wchar_t latency[96] = {};
+        std::swprintf(latency, 96, L"age %.1f ms  |  %.1f ms to screen", last_age_ms_,
+                      ActivePresenter() ? ActivePresenter()->present_lag_ms() : 0.0);
+        overview.rows.push_back(info(L"FRAME", fps_text, latency));
+    }
+    if (settings_.overlay.show_performance) {
+        std::swprintf(buffer, 220, L"%.1f / %.1f ms", cadence_p50_, cadence_p99_);
+        overview.rows.push_back(info(L"CADENCE", buffer, L"p50 / p99 source interval"));
+    }
     std::swprintf(buffer, 220, L"%dx%d @ %.1f fps", snapshot.source_width,
                   snapshot.source_height, snapshot.source_fps);
     overview.rows.push_back(info(L"INPUT", buffer, L"decoded source"));
@@ -2729,8 +2746,6 @@ void NextApp::BuildOverlayView() {
     if (settings_.overlay.show_performance) {
         std::swprintf(buffer, 220, L"%.2f ms", snapshot.decode_ms);
         overview.rows.push_back(info(L"DECODE", buffer, L"network to RGBA"));
-        std::swprintf(buffer, 220, L"%.1f / %.1f ms", cadence_p50_, cadence_p99_);
-        overview.rows.push_back(info(L"CADENCE", buffer, L"p50 / p99 source interval"));
     }
     if (settings_.overlay.show_processing) {
         overview.rows.push_back(info(
@@ -2876,7 +2891,22 @@ void NextApp::BuildOverlayView() {
     OverlayPage performance;
     performance.title = L"Perf";
     std::swprintf(buffer, 220, L"%.1f fps", snapshot.source_fps);
-    performance.rows.push_back(info(L"SOURCE", buffer));
+    performance.rows.push_back(info(L"SOURCE", buffer,
+                                    content_fps_ > 10.0
+                                        ? std::to_wstring(static_cast<int>(content_fps_)) +
+                                              L" fps unique content"
+                                        : L""));
+    {
+        wchar_t age_text[96] = {};
+        std::swprintf(age_text, 96, L"%.1f ms", last_age_ms_);
+        performance.rows.push_back(info(L"FRAME AGE", age_text,
+                                        L"packet to pull; 0 is the target"));
+        wchar_t present_text[96] = {};
+        std::swprintf(present_text, 96, L"%.1f ms",
+                      ActivePresenter() ? ActivePresenter()->present_lag_ms() : 0.0);
+        performance.rows.push_back(info(L"PRESENT", present_text,
+                                        L"until the next scanout, below one refresh"));
+    }
     performance.rows.push_back(info(
         L"DISPLAYED",
         std::to_wstring(static_cast<int>(
@@ -2889,8 +2919,14 @@ void NextApp::BuildOverlayView() {
     if (!dlss_fg && watching_) {
         wchar_t scanout_detail[96] = {};
         std::swprintf(buffer, 220, L"%.1f Hz", present_refresh_hz_);
-        std::swprintf(scanout_detail, 96, L"%llu present misses/s",
-                      present_misses_rate_);
+        // A held refresh is normal when the source is slower than the display.
+        // Subtract that baseline so this reads zero when pacing is healthy.
+        const double expected_holds =
+            std::max(0.0, present_refresh_hz_ - static_cast<double>(display_rate_));
+        const double real_misses =
+            static_cast<double>(present_misses_rate_) - expected_holds;
+        std::swprintf(scanout_detail, 96, L"%llu real misses/s",
+                      static_cast<unsigned long long>(std::max(0.0, real_misses)));
         performance.rows.push_back(info(L"SCANOUT", buffer, scanout_detail));
     }
     std::swprintf(buffer, 220, L"%.1f / %.1f ms", cadence_p50_, cadence_p99_);
@@ -3409,6 +3445,9 @@ bool NextApp::PullFrame(media::DecodedFrame& out) {
         probe_age_sum_ += age;
         probe_age_max_ = std::max(probe_age_max_, age);
         ++probe_age_n_;
+        // Smoothed copy for the UI: a single frame's age is noisy because the
+        // pull can land anywhere between two decode threads.
+        last_age_ms_ = last_age_ms_ * 0.8 + age * 0.2;
     }
     // Unique content rate: a 30 fps game streamed at 60 fps repeats every other
     // frame. Counting non-duplicates gives the real cadence for the UI and for
@@ -4406,7 +4445,14 @@ void NextApp::PublishBridgeStatus() {
     flag("connecting", stream.connecting, true);
     flag("armed", disconnect_armed_, true);
     text("message", stream.message, true);
-    text("console_name", settings_.console.name, true);
+    const std::string console_name =
+        streaming_ && !streaming_->Profile().name.empty() ? streaming_->Profile().name
+                                                          : settings_.console.name;
+    text("console_name", console_name, true);
+    text("console_address",
+         !settings_.console.address.empty()
+             ? settings_.console.address
+             : (streaming_ ? streaming_->Profile().host : std::string()), true);
     text("codec", stream.codec, true);
     integer("width", stream.source_width, true);
     integer("height", stream.source_height, true);
@@ -4424,6 +4470,9 @@ void NextApp::PublishBridgeStatus() {
     number("scanout_hz", present_refresh_hz_, true);
     number("present_misses", static_cast<double>(present_misses_rate_), true);
     number("shown_fps", static_cast<double>(display_rate_), true);
+    number("age_ms", last_age_ms_, true);
+    number("present_lag_ms",
+           ActivePresenter() ? ActivePresenter()->present_lag_ms() : 0.0, true);
     flag("restart_pending", stream_restart_pending_, true);
     number("sr_ms", dlss_sr_ ? dlss_sr_->last_ms() : 0.0, true);
     number("fg_ms", 0.0, true);

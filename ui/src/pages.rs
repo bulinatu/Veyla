@@ -52,13 +52,26 @@ fn group(title: &'static str, hint: &'static str, rows: Vec<AnyElement>) -> AnyE
 
 impl Root {
     pub(crate) fn page_home(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let name: SharedString = if self.status.console_name.is_empty() {
-            self.settings.s("console.name", "PS5").into()
-        } else {
+        let (session_name, session_host) = crate::model::session_identity();
+        let name: SharedString = if !self.status.console_name.is_empty() &&
+            self.status.console_name != "PS5"
+        {
             self.status.console_name.clone().into()
+        } else if let Some(session_name) = session_name {
+            session_name.into()
+        } else if !self.status.console_name.is_empty() {
+            self.status.console_name.clone().into()
+        } else {
+            self.settings.s("console.name", "PS5").into()
         };
         let address: SharedString = {
-            let a = self.settings.s("console.address", "");
+            let a = if !self.status.console_address.is_empty() {
+                self.status.console_address.clone()
+            } else if let Some(host) = session_host {
+                host
+            } else {
+                self.settings.s("console.address", "")
+            };
             if a.is_empty() {
                 "Not configured".into()
             } else {
@@ -217,13 +230,16 @@ impl Root {
                 theme::TEXT,
             ))
             .child(widgets::stat_tile(
-                "Decode",
-                if self.status.decode_ms > 0.0 {
-                    format!("{:.1} ms", self.status.decode_ms)
+                "Latency",
+                if self.status.connected || self.status.streaming {
+                    format!(
+                        "{:.1} + {:.1} ms",
+                        self.status.age_ms, self.status.present_lag_ms
+                    )
                 } else {
                     "\u{2014}".to_string()
                 },
-                if self.status.decode_ms > 12.0 {
+                if self.status.age_ms + self.status.present_lag_ms > 12.0 {
                     theme::AMBER
                 } else {
                     theme::GREEN
@@ -1288,6 +1304,8 @@ impl Root {
                     },
                 ),
                 widgets::kv("Shown", format!("{:.0} fps", self.status.shown_fps)),
+                widgets::kv("Frame age", format!("{:.1} ms", self.status.age_ms)),
+                widgets::kv("Present lag", format!("{:.1} ms", self.status.present_lag_ms)),
                 widgets::kv(
                     "Decode avg / max",
                     format!("{:.1} / {:.1} ms", self.status.decode_ms, self.status.decode_max),
