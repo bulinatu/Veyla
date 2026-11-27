@@ -156,12 +156,16 @@ pub fn page_title(title: &'static str, subtitle: &'static str) -> AnyElement {
                 .text_color(theme::text())
                 .child(title),
         )
-        .child(
-            div()
-                .text_size(theme::small())
-                .text_color(theme::dim())
-                .child(subtitle),
-        )
+        // An empty subtitle draws an empty line of text and leaves a gap; skip
+        // it so a page can show just its name.
+        .when(!subtitle.trim().is_empty(), |el| {
+            el.child(
+                div()
+                    .text_size(theme::small())
+                    .text_color(theme::dim())
+                    .child(subtitle),
+            )
+        })
         .into_any_element()
 }
 

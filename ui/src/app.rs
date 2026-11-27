@@ -730,6 +730,8 @@ impl Root {
         };
         let _ = handle.update(cx, |_, window, _| window.remove_window());
         self.send("overlay_close");
+        // The panel is topmost while it is open; the shell must not inherit it.
+        crate::overlay::clear_topmost("Veyla");
     }
 
     fn open_overlay_window(&mut self, cx: &mut Context<Self>) {
@@ -1718,6 +1720,7 @@ pub(crate) fn restore_shell_window() {
         if hwnd != 0 {
             ShowWindow(hwnd, 9); // SW_RESTORE
             SetForegroundWindow(hwnd);
+            crate::overlay::clear_topmost("Veyla");
         }
     }
 }
@@ -1767,6 +1770,9 @@ impl Render for Root {
         if !self.focus_initialized {
             self.focus_initialized = true;
             window.focus(&self.focus);
+            // Never inherit an always-on-top flag: a launcher that covers other
+            // applications is the one thing users notice immediately.
+            crate::overlay::clear_topmost("Veyla");
         }
         if self.status.streaming && !self.shell_minimized {
             self.shell_minimized = true;
@@ -1817,36 +1823,41 @@ impl Render for Root {
             && !(self.tab == Tab::Advanced && self.settings_page == 1)
         {
             div()
-                .id("setup-banner")
                 .absolute()
-                .top(px(62.0))
-                .left(px(18.0))
+                .bottom(px(112.0))
+                .left(px(0.0))
+                .right(px(0.0))
                 .flex()
-                .items_center()
-                .gap(px(8.0))
-                .h(px(32.0))
-                .px(px(13.0))
-                .rounded(px(16.0))
-                .bg(rgba(0x0C0C16F2))
-                .border_1()
-                .border_color(theme::accent_rgba(0x66))
-                .text_size(theme::small())
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::text())
-                .cursor_pointer()
-                .shadow_lg()
-                .hover(|style| style.bg(theme::accent_rgba(0x3D)))
-                .on_click(cx.listener(
-                    |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
-                        this.open_pairing(cx);
-                    },
-                ))
-                .child(widgets::dot(theme::accent_u32()))
-                .child("Set up your PS5")
+                .justify_center()
                 .child(
                     div()
-                        .text_color(theme::dim())
-                        .child("\u{2192}"),
+                        .id("setup-banner")
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .h(px(36.0))
+                        .px(px(16.0))
+                        .rounded(px(18.0))
+                        .bg(rgba(0x0C0C16F5))
+                        .border_1()
+                        .border_color(theme::accent_rgba(0x66))
+                        .text_size(theme::small())
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::text())
+                        .cursor_pointer()
+                        .shadow_lg()
+                        .hover(|style| style.bg(theme::accent_rgba(0x3D)))
+                        .on_click(cx.listener(
+                            |this,
+                             _: &gpui::ClickEvent,
+                             _: &mut Window,
+                             cx: &mut Context<Self>| {
+                                this.open_pairing(cx);
+                            },
+                        ))
+                        .child(widgets::dot(theme::accent_u32()))
+                        .child("Set up your PS5")
+                        .child(div().text_color(theme::dim()).child("\u{2192}")),
                 )
                 .into_any_element()
         } else {

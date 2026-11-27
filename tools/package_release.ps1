@@ -130,10 +130,18 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 2.7.0 - standalone build
+Veyla 2.7.1 - standalone build
 =======================================
 
 Run veyla.exe. No installer, no console window, no background service.
+
+What changed in 2.7.1
+---------------------
+- The window no longer stays above other applications: any inherited
+  always-on-top flag is cleared at startup and whenever the control center
+  closes.
+- The first-run "Set up your PS5" chip sits centred just above the dock instead
+  of under the logo, so it is harder to miss.
 
 What changed in 2.7.0
 ---------------------

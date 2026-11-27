@@ -1149,6 +1149,7 @@ impl Render for OverlayView {
 #[link(name = "user32")]
 extern "system" {
     fn FindWindowW(class: *const u16, title: *const u16) -> isize;
+    fn FindWindowExW(parent: isize, after: isize, class: *const u16, title: *const u16) -> isize;
     fn SetWindowPos(hwnd: isize, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
     fn SetForegroundWindow(hwnd: isize) -> i32;
     fn SetFocus(hwnd: isize) -> isize;
@@ -1156,6 +1157,7 @@ extern "system" {
     fn GetCurrentThreadId() -> u32;
     fn AttachThreadInput(attach: u32, to: u32, enable: i32) -> i32;
     fn GetForegroundWindow() -> isize;
+    fn GetCurrentProcessId() -> u32;
 }
 
 fn wide(text: &str) -> Vec<u16> {
@@ -1187,6 +1189,26 @@ pub(crate) fn activate_by_title(title: &str) {
         } else {
             SetForegroundWindow(hwnd);
             SetFocus(hwnd);
+        }
+    }
+}
+
+/// Removes WS_EX_TOPMOST from our own window with this title. A topmost shell
+/// stays above every other application, which is exactly what a launcher must
+/// not do. The engine owns a hidden window with the same title, so match on pid.
+pub(crate) fn clear_topmost(title: &str) {
+    let name = wide(title);
+    unsafe {
+        let me = GetCurrentProcessId();
+        let mut hwnd = FindWindowW(std::ptr::null(), name.as_ptr());
+        while hwnd != 0 {
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid == me {
+                SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0010);
+                return;
+            }
+            hwnd = FindWindowExW(0, hwnd, std::ptr::null(), name.as_ptr());
         }
     }
 }

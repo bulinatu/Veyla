@@ -871,7 +871,7 @@ impl Root {
             .gap(px(20.0))
             .child(widgets::page_title(
                 "Home",
-                "One console, one click, no menus in the way",
+                "",
             ))
             .child(
                 div()
