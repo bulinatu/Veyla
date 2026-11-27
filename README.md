@@ -116,7 +116,7 @@ Not promises, just the direction - roughly in order:
   export of a diagnostics report.
 - **Screenshots and clips** - a hotkey that saves a screenshot, and later the
   last few seconds of the stream.
-- **Localisation** - English first, Romanian next.
+- **Localisation** - more interface languages.
 
 Ideas and bug reports are welcome in [Issues](../../issues).
 
