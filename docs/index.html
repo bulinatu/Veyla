@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Veyla - PS5 Remote Play for Windows</title>
+    <meta
+      name="description"
+      content="Play your PS5 on your Windows PC with almost no lag: 60 fps at frame buffer 0, DLSS upscaling, frame generation, DualSense support and one-click updates."
+    />
+    <meta name="theme-color" content="#07070d" />
+    <link rel="icon" href="images/app.png" type="image/png" />
+    <link rel="apple-touch-icon" href="images/app.png" />
+    <link rel="stylesheet" href="site.css" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Veyla - PS5 Remote Play for Windows" />
+    <meta
+      property="og:description"
+      content="Low-latency PS5 Remote Play with DLSS, frame generation and one-click updates."
+    />
+    <meta property="og:image" content="images/home.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <div class="aurora" aria-hidden="true">
+      <div class="blob b1"></div>
+      <div class="blob b2"></div>
+      <div class="blob b3"></div>
+      <div class="blob b4"></div>
+      <div class="blob b5"></div>
+    </div>
+
+    <header class="topbar">
+      <div class="wrap">
+        <a class="brand" href="#top" aria-label="Veyla home">
+          <span class="logo">V</span>
+          Veyla
+        </a>
+        <span class="spacer"></span>
+        <nav class="top-links" aria-label="Sections">
+          <a href="#features">Features</a>
+          <a href="#themes">Themes</a>
+          <a href="#install">Install</a>
+          <a href="#faq">FAQ</a>
+          <a class="keep" href="https://github.com/bulinatu/Veyla">GitHub</a>
+        </nav>
+        <a
+          class="btn small"
+          href="https://github.com/bulinatu/Veyla/releases/latest"
+          data-download-zip
+        >
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download
+        </a>
+      </div>
+    </header>
+
+    <main id="top">
+      <div class="wrap">
+        <section class="hero" id="home">
+          <div>
+            <span class="eyebrow"><span class="dot"></span>PS5 Remote Play for Windows</span>
+            <h1>Your PS5 on your PC.<br /><span class="grad">Without feeling the distance.</span></h1>
+            <p class="lede">
+              Veyla streams your console into a normal window with the frame buffer at
+              zero, DLSS on the GPU and a shell that stays out of the way. Pair once,
+              press play.
+            </p>
+            <div class="hero-actions">
+              <a
+                class="btn"
+                href="https://github.com/bulinatu/Veyla/releases/latest"
+                data-download-zip
+              >
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download for Windows
+              </a>
+              <a class="btn ghost" href="#features">See what it does</a>
+            </div>
+            <p class="meta">
+              <span class="pill"><span class="dot"></span><span data-version>v2.7.2</span></span>
+              <span class="mono">Windows 10/11</span>
+              <span aria-hidden="true">·</span>
+              <span class="mono">PS5</span>
+              <span aria-hidden="true">·</span>
+              <a href="https://github.com/bulinatu/Veyla/releases" data-download-update>
+                Already on Veyla? Get the 6 MB update
+              </a>
+            </p>
+          </div>
+          <div class="app" aria-label="Live preview of the Veyla Home screen">
+            <div class="app-bar">
+              <div class="app-brand"><span class="logo sm">V</span> Veyla</div>
+              <span class="spacer"></span>
+              <span class="status-pill"><span class="dot live"></span>Streaming</span>
+              <span class="win-btns" aria-hidden="true">– ▢ ✕</span>
+            </div>
+            <div class="app-body">
+              <h3 class="app-h1">Home</h3>
+              <div class="home-grid">
+                <div class="app-card">
+                  <div class="console-head"><span class="dot live"></span>PS5-580<span class="chip">Live</span></div>
+                  <div class="mono dim tiny" style="margin-top: 4px">192.168.1.21</div>
+                  <div class="m-row" style="margin-top: 12px">
+                    <span class="abtn">▶ Watch</span>
+                    <span class="abtn ghost">Disconnect</span>
+                    <span class="abtn ghost">Lowest latency</span>
+                  </div>
+                  <div class="tiny muted" style="margin-top: 10px">
+                    Lowest latency: 60 fps, 50 Mbps, buffer 0, vsync off, AI off
+                  </div>
+                  <div class="tiny muted" style="margin-top: 4px">
+                    Esc arms disconnect · F10 control center · Alt+F4 leave stream
+                  </div>
+                </div>
+                <div class="app-card">
+                  <div class="section-row"><span class="m-label">Profiles</span><span class="tiny muted">One click</span></div>
+                  <div class="preset-grid">
+                    <div class="preset"><b>Low latency</b><span>Buffer 0 · no AI · 60 fps</span></div>
+                    <div class="preset"><b>Performance</b><span>FG on · buffer 0 · 1000 Hz</span></div>
+                    <div class="preset"><b>Balanced</b><span>SR quality · buffer 1</span></div>
+                    <div class="preset"><b>Cinematic</b><span>30 fps · DLAA · FG 2x</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="stats">
+                <div class="stat"><div class="k">Source</div><div class="v">1920x1080</div></div>
+                <div class="stat"><div class="k">Frame rate</div><div class="v">60 fps</div></div>
+                <div class="stat"><div class="k">Bitrate</div><div class="v">100 Mbps</div></div>
+                <div class="stat">
+                  <div class="k">Latency</div>
+                  <div class="v green"><span data-live="age">0.9</span> + <span data-live="lag">2.2</span> ms</div>
+                </div>
+              </div>
+              <div class="app-card saved">
+                <div class="section-row" style="margin-bottom: 6px">
+                  <span class="m-label">Saved profiles</span>
+                  <span class="tiny muted">Engine configuration · 1 / 12</span>
+                </div>
+                <div class="saved-row">
+                  <span>Profile 1</span>
+                  <span class="links"><span>Apply</span><span>Delete</span></span>
+                </div>
+              </div>
+              <div class="mini-dock" aria-hidden="true">
+                <span class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>Home</span>
+                <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>Stream</span>
+                <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8"/></svg>Video</span>
+                <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15 9a4 4 0 0 1 0 6"/></svg>Audio</span>
+                <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="4"/><path d="M6 12h4M8 10v4"/><circle cx="16" cy="11" r="1"/><circle cx="18.5" cy="13.5" r="1"/></svg>Controller</span>
+                <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="m6 15 4-4 3 3 3-3 2 2"/></svg>Overlay</span>
+                <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>Settings</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="features">
+          <div class="section-head">
+            <div>
+              <div class="section-label">Why Veyla</div>
+              <h2>Built for the latency, not the demo</h2>
+              <p>
+                Every default is the fast one. The AI stages run on the GPU so they do
+                not add frame time, and the shell never renders over the picture.
+              </p>
+            </div>
+          </div>
+          <div class="grid">
+            <article class="card feature">
+              <div class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+              <h3>Lowest latency path</h3>
+              <p>60 fps on the wire, frame buffer 0, present-on-arrival. 30 fps games stay 60 and frame generation keeps the cadence.</p>
+            </article>
+            <article class="card feature">
+              <div class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 16l4-8 4 8"/></svg></div>
+              <h3>DLSS Super Resolution</h3>
+              <p>Clean 1080p upscaled to your display on any RTX card, with the quality preset picked for the machine.</p>
+            </article>
+            <article class="card feature">
+              <div class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h4M8 10v4"/><circle cx="16" cy="11" r="1"/><circle cx="18.5" cy="13.5" r="1"/></svg></div>
+              <h3>Frame generation</h3>
+              <p>DLSS-G at 2x to 6x on every RTX card, plus a neural renderer for motion smoothing when you want it.</p>
+            </article>
+            <article class="card feature">
+              <div class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4z"/><path d="M9 16v3M15 16v3"/><circle cx="9" cy="11" r="1"/><circle cx="15" cy="11" r="1"/></svg></div>
+              <h3>DualSense, fully</h3>
+              <p>Sticks, triggers, touchpad, motion, lightbar, player LEDs, haptics and adaptive triggers where the game uses them.</p>
+            </article>
+            <article class="card feature">
+              <div class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="12.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="13.5" r="2.5"/><path d="M12 22a4.5 4.5 0 0 1 0-9 4.5 4.5 0 0 1 0 9z"/></svg></div>
+              <h3>Six themes</h3>
+              <p>Aurora, Ocean, Emerald, Ember, Rose, Graphite. The accent, the aurora and the control center all follow the choice.</p>
+            </article>
+            <article class="card feature">
+              <div class="icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg></div>
+              <h3>Updates that just land</h3>
+              <p>Checks GitHub at launch, downloads a ~6 MB cumulative patch, verifies every file and reopens itself.</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="themes">
+          <div class="section-head">
+            <div>
+              <div class="section-label">Make it yours</div>
+              <h2>Pick a colour, the whole app follows</h2>
+              <p>
+                Themes change the accent, buttons, sliders, the dock, the aurora behind
+                the window and the in-game control center. Click one to preview it here.
+              </p>
+            </div>
+          </div>
+
+          <div class="app" style="margin-top: 18px" aria-label="Live preview of Veyla Settings">
+            <div class="app-bar">
+              <div class="app-brand"><span class="logo sm">V</span> Veyla</div>
+              <span class="spacer"></span>
+              <span class="status-pill"><span class="dot"></span>Idle</span>
+              <span class="win-btns" aria-hidden="true">– ▢ ✕</span>
+            </div>
+            <div class="app-body">
+              <h3 class="app-h1">Settings</h3>
+              <p class="app-sub">Theme, type and motion</p>
+              <div class="subtabs">
+                <span class="subtab on">Appearance</span>
+                <span class="subtab">Pairing</span>
+                <span class="subtab">Updates</span>
+                <span class="subtab">System</span>
+                <span class="subtab">Diagnostics</span>
+                <span class="subtab">About</span>
+              </div>
+              <div class="app-card">
+                <div class="section-row" style="margin-bottom: 10px">
+                  <span class="m-label">Theme</span>
+                  <span class="tiny muted">Colour scheme for the shell and the control center</span>
+                </div>
+                <div class="theme-strip">
+                  <button class="theme-mini" type="button" data-theme="Aurora" aria-pressed="true"><span class="sws"><i style="background:#8b5cf6"></i><i style="background:#a78bfa"></i><i style="background:#4f46e5"></i><i style="background:#f472b6"></i></span><span class="nm">Aurora</span></button>
+                  <button class="theme-mini" type="button" data-theme="Ocean" aria-pressed="false"><span class="sws"><i style="background:#3b82f6"></i><i style="background:#60a5fa"></i><i style="background:#1d4ed8"></i><i style="background:#38bdf8"></i></span><span class="nm">Ocean</span></button>
+                  <button class="theme-mini" type="button" data-theme="Emerald" aria-pressed="false"><span class="sws"><i style="background:#10b981"></i><i style="background:#34d399"></i><i style="background:#047857"></i><i style="background:#5eead4"></i></span><span class="nm">Emerald</span></button>
+                  <button class="theme-mini" type="button" data-theme="Ember" aria-pressed="false"><span class="sws"><i style="background:#f97316"></i><i style="background:#fb923c"></i><i style="background:#c2410c"></i><i style="background:#f87171"></i></span><span class="nm">Ember</span></button>
+                  <button class="theme-mini" type="button" data-theme="Rose" aria-pressed="false"><span class="sws"><i style="background:#ec4899"></i><i style="background:#f472b6"></i><i style="background:#be185d"></i><i style="background:#f9a8d4"></i></span><span class="nm">Rose</span></button>
+                  <button class="theme-mini" type="button" data-theme="Graphite" aria-pressed="false"><span class="sws"><i style="background:#64748b"></i><i style="background:#cbd5e1"></i><i style="background:#334155"></i><i style="background:#94a3b8"></i></span><span class="nm">Graphite</span></button>
+                </div>
+              </div>
+              <div class="app-card" style="margin-top: 12px">
+                <div class="section-row" style="margin-bottom: 4px">
+                  <span class="m-label">Shell</span>
+                  <span class="tiny muted">Appearance and startup</span>
+                </div>
+                <div class="setting-row">
+                  <div><div class="lbl">Text size</div><div class="hint">Scales every label and value in the shell</div></div>
+                  <div class="seg"><i>90%</i><i>100%</i><i class="on">110%</i><i>125%</i></div>
+                </div>
+                <div class="setting-row">
+                  <div><div class="lbl">Animated background</div><div class="hint">Aurora layer in the shell</div></div>
+                  <span class="toggle"></span>
+                </div>
+                <div class="setting-row">
+                  <div><div class="lbl">Reduce motion</div><div class="hint">Disable the boot animation and drift</div></div>
+                  <span class="toggle off"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="install">
+          <div class="section-head">
+            <div>
+              <div class="section-label">From zero</div>
+              <h2>Three steps and a PIN</h2>
+              <p>No installer, no background service, no console modification.</p>
+            </div>
+          </div>
+          <div class="steps">
+            <article class="card step">
+              <div class="num">01</div>
+              <h3>Download and extract</h3>
+              <p>
+                Grab the standalone zip, unpack it anywhere and run
+                <code>veyla.exe</code>. Allow <code>veyla-engine.exe</code> through the
+                firewall when Windows asks.
+              </p>
+            </article>
+            <article class="card step">
+              <div class="num">02</div>
+              <h3>Enable Remote Play</h3>
+              <p>
+                On the PS5: <code>Settings &gt; System &gt; Remote Play &gt; Enable
+                Remote Play</code>. Wired or 5 GHz Wi-Fi on both ends is the difference
+                between fine and forget everything else.
+              </p>
+            </article>
+            <article class="card step">
+              <div class="num">03</div>
+              <h3>Pair once</h3>
+              <p>
+                Open <code>Settings &gt; Pairing</code>, press Discover, select your
+                console and enter the 8-digit PIN from
+                <code>Link Device</code>. Connecting a PSN account is optional.
+              </p>
+            </article>
+          </div>
+          <div style="display: flex; justify-content: center; margin-top: 22px">
+            <div class="cc" aria-label="Live preview of the in-game control center">
+              <div class="cc-head">
+                <b>Control center</b>
+                <span class="dot live"></span>
+                <span class="cc-meta">1920x1080 · hevc</span>
+                <span class="cc-close">Close</span>
+              </div>
+              <div class="cc-tabs">
+                <span class="cc-tab on">Info</span><span class="cc-tab">SR</span><span class="cc-tab">FG</span><span class="cc-tab">Neural</span><span class="cc-tab">Video</span><span class="cc-tab">Stream</span><span class="cc-tab">Audio</span><span class="cc-tab">Pad</span><span class="cc-tab">Profile</span>
+              </div>
+              <div class="cc-card">
+                <div class="cc-row"><span class="k">Input</span><span class="v">1920x1080 @ 60.0 fps</span></div>
+                <div class="cc-row"><span class="k">Frame age</span><span class="v"><span data-live="age">0.9</span> ms</span></div>
+                <div class="cc-row"><span class="k">Present lag</span><span class="v"><span data-live="lag">2.2</span> ms</span></div>
+                <div class="cc-row"><span class="k">Decode</span><span class="v"><span data-live="decode">2.6</span> ms</span></div>
+                <div class="cc-row"><span class="k">Cadence</span><span class="v"><span data-live="cadence">16.6 / 17.1</span> ms</span></div>
+                <div class="cc-row"><span class="k">Bitrate</span><span class="v">100 Mbps</span></div>
+                <div class="cc-row"><span class="k">GPU</span><span class="v">NVIDIA GeForce RTX 4090</span></div>
+                <div class="cc-row"><span class="k">Super resolution</span><span class="v">DLSS</span></div>
+                <div class="cc-row"><span class="k">Frame generation</span><span class="v">2x</span></div>
+              </div>
+              <div class="cc-foot">
+                <span class="abtn ghost">Leave stream</span>
+                <span class="abtn danger">Disconnect</span>
+                <span class="tiny">F10 / Esc closes</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="faq">
+          <div class="section-head">
+            <div>
+              <div class="section-label">Questions</div>
+              <h2>The honest answers</h2>
+            </div>
+          </div>
+          <div class="faq">
+            <details open>
+              <summary>Is PS4 supported?</summary>
+              <p>
+                Not yet. Discovery, pairing and input work for PS4, but the video path is
+                HEVC and PS4 Remote Play is H.264. It is the next item on the list.
+              </p>
+            </details>
+            <details>
+              <summary>Do I need a PlayStation account?</summary>
+              <p>
+                Not for playing at home. Pairing on the local network is enough. A PSN
+                account is only for the optional remote login flow.
+              </p>
+            </details>
+            <details>
+              <summary>Which controllers work?</summary>
+              <p>
+                DualSense over USB or Bluetooth, with haptics and adaptive triggers where
+                the game uses them. PS4 pads work too, without the PS5 extras.
+              </p>
+            </details>
+            <details>
+              <summary>Is it free?</summary>
+              <p>
+                Yes. The client is free to download and the source is on GitHub. Updates
+                are cumulative patches of a few megabytes, delivered in the app.
+              </p>
+            </details>
+            <details>
+              <summary>Why does SmartScreen complain?</summary>
+              <p>
+                The builds are not code-signed. Windows may warn about an unknown
+                publisher; choose "More info" and "Run anyway", or build it yourself.
+              </p>
+            </details>
+            <details>
+              <summary>What does it change on my console?</summary>
+              <p>
+                Nothing. It talks to the official Remote Play endpoint the same way the
+                console expects, and it ships no Sony code.
+              </p>
+            </details>
+          </div>
+        </section>
+      </div>
+
+      <footer>
+        <div class="wrap">
+          <div class="row">
+            <span>Veyla <span class="mono" data-version>v2.7.2</span> · PS5 Remote Play for Windows</span>
+            <span>
+              <a href="https://github.com/bulinatu/Veyla">GitHub</a> ·
+              <a href="https://github.com/bulinatu/Veyla/releases">Releases</a> ·
+              <a href="https://github.com/bulinatu/Veyla/issues">Issues</a>
+            </span>
+          </div>
+          <p class="legal">
+            Not affiliated with Sony Interactive Entertainment. "PlayStation" and "PS5"
+            are trademarks of Sony Interactive Entertainment Inc. This project ships no
+            Sony code, no console modifications and no game content. BetterRemotePlay is
+            the original name of this project and remains a trademark of its author;
+            built on chiaki-ng, with GPUI by Zed Industries and the Inter and
+            JetBrains Mono typefaces under the SIL Open Font License.
+          </p>
+        </div>
+      </footer>
+    </main>
+
+    <nav class="dock" aria-label="Quick navigation">
+      <a href="#home" data-target="#home" class="active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+        Home
+      </a>
+      <a href="#features" data-target="#features">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        Features
+      </a>
+      <a href="#themes" data-target="#themes">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="9" r="1"/><circle cx="9" cy="15" r="1"/><circle cx="15" cy="15" r="1"/></svg>
+        Themes
+      </a>
+      <a href="#install" data-target="#install">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+        Install
+      </a>
+      <a href="#faq" data-target="#faq">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1 1-1.1 1.8"/><circle cx="12" cy="17" r=".6" fill="currentColor" stroke="none"/></svg>
+        FAQ
+      </a>
+    </nav>
+
+    <script src="site.js"></script>
+  </body>
+</html>
