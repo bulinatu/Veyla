@@ -1332,7 +1332,13 @@ impl Root {
                 ),
                 widgets::kv(
                     "Present misses",
-                    format!("{:.0}/s", self.status.present_misses),
+                    // A refresh that repeats the last picture is expected when the
+                    // source is slower than the display (30 fps on 240 Hz = 210/s).
+                    // Only the repeats beyond that are real misses.
+                    {
+                        let expected = (self.status.scanout_hz - self.status.shown_fps).max(0.0);
+                        format!("{:.0}/s", (self.status.present_misses - expected).max(0.0))
+                    },
                 ),
                 widgets::kv("Shown", format!("{:.0} fps", self.status.shown_fps)),
                 widgets::kv(
