@@ -20,6 +20,10 @@ pub fn config_dir() -> PathBuf {
 
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Where the in-app updater looks for releases. Mirrors
+/// `GeneralSettings::update_repo` in src/next/core/models.h.
+pub const DEFAULT_UPDATE_REPO: &str = "bulinatu/Veyla";
+
 pub fn settings_path() -> PathBuf {
     config_dir().join("next-settings.json")
 }
@@ -114,7 +118,7 @@ impl Settings {
             ("general.notifications", Value::from(true)),
             ("general.check_updates", Value::from(true)),
             ("general.update_channel", Value::from(0)),
-            ("general.update_repo", Value::from("")),
+            ("general.update_repo", Value::from(DEFAULT_UPDATE_REPO)),
             ("general.telemetry", Value::from(false)),
             ("console.name", Value::from("PS5")),
             ("console.address", Value::from("")),
@@ -203,6 +207,19 @@ impl Settings {
         ];
         for (key, value) in defaults {
             self.values.entry((*key).to_string()).or_insert_with(|| value.clone());
+        }
+        // An older build wrote an empty string here, which silently disabled
+        // the update check ("Set a GitHub repository first"). An empty value is
+        // never a meaningful choice, so fall back to the default.
+        if self
+            .values
+            .get("general.update_repo")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+        {
+            self.set("general.update_repo", Value::from(DEFAULT_UPDATE_REPO));
         }
     }
 

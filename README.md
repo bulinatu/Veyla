@@ -98,6 +98,28 @@ for the icon generator. `vendor/chiaki-ng` is a submodule - clone with
   client-side upscale, not a stream resolution.
 - HDR is not implemented.
 
+## Roadmap
+
+Not promises, just the direction - roughly in order:
+
+- **PS4 video** - the H.264 path. Discovery, pairing and input already work; only
+  the decoder choice is missing.
+- **Controller overlay, built for streaming** - press a button, see it on
+  screen: sticks, triggers and buttons live, with position, scale and opacity
+  settings and a separate always-on-top window you can add in OBS. Off by
+  default, opened from the in-game control centre.
+- **Themes** - beyond the dark aurora: a light theme and a custom accent colour.
+- **Adaptive bitrate** - raise and lower from packet loss instead of a fixed
+  number you have to tune yourself.
+- **Haptics tuning** - rumble intensity and adaptive-trigger strength sliders.
+- **Latency graph** - frame-time chart next to the numbers, plus one-click
+  export of a diagnostics report.
+- **Screenshots and clips** - a hotkey that saves a screenshot, and later the
+  last few seconds of the stream.
+- **Localisation** - English first, Romanian next.
+
+Ideas and bug reports are welcome in [Issues](../../issues).
+
 ## Credits
 
 - [chiaki-ng](https://github.com/streetpea/chiaki-ng) - the Remote Play protocol

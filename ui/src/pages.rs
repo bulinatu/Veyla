@@ -1444,6 +1444,13 @@ impl Root {
                 if checking { "Checking..." } else { "Check now" },
                 Tone::Ghost,
                 cx.listener(|this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                    // One check at a time: spamming the button used to queue a
+                    // burst of requests whose results raced each other.
+                    if this.status.update_state == "checking"
+                        || this.status.update_state == "downloading"
+                    {
+                        return;
+                    }
                     if let Some(engine) = &this.engine {
                         engine.send("check-update");
                     }

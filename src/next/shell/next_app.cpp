@@ -368,9 +368,11 @@ int NextApp::Run() {
     } else {
         window_->Show();
     }
-    if (settings_.general.check_updates && !settings_.general.update_repo.empty()) {
-        update_.Check(settings_.general.update_repo,
-                      settings_.general.update_channel == 1, AppVersion());
+    if (settings_.general.check_updates) {
+        const std::string repo = settings_.general.update_repo.empty()
+                                     ? std::string("bulinatu/Veyla")
+                                     : settings_.general.update_repo;
+        update_.Check(repo, settings_.general.update_channel == 1, AppVersion());
     }
     while (!quit_ && window_->Pump()) {
         if (!watching_ && window_->ConsumeResize()) {
@@ -4349,8 +4351,15 @@ void NextApp::HandleBridgeCommand(const std::string& command) {
     } else if (command == "apply") {
         ReloadSettingsFromDisk();
     } else if (command == "check-update") {
-        update_.Check(settings_.general.update_repo,
-                      settings_.general.update_channel == 1, AppVersion());
+        // The repository can be blank in an old settings file; that used to
+        // make the check fail with a confusing message. Fall back to the
+        // shipped default instead.
+        ReloadSettingsFromDisk();
+        std::string repo = settings_.general.update_repo;
+        if (repo.empty()) {
+            repo = "bulinatu/Veyla";
+        }
+        update_.Check(repo, settings_.general.update_channel == 1, AppVersion());
     } else if (command == "download-update") {
         update_.Download();
     } else if (command == "install-update") {
