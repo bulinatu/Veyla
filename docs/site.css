@@ -1419,3 +1419,41 @@ footer a:hover {
 .support .btn:hover {
   color: var(--text);
 }
+
+/* support chip next to the wordmark */
+
+.support-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  margin-left: 4px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--dim);
+  font-size: 12px;
+  font-weight: 500;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.support-chip svg {
+  width: 14px;
+  height: 14px;
+}
+
+.support-chip:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+@media (max-width: 720px) {
+  .support-chip span {
+    display: none;
+  }
+  .support-chip {
+    padding: 0 9px;
+  }
+}
