@@ -31,7 +31,7 @@ $notesPath = Join-Path $dist "release-$Version.md"
 
 if (-not $SkipPackage) {
     Write-Host "Packaging dist\BetterRemotePlay ..."
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "package_release.ps1")
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "package_release.ps1") -Version $Version
     if ($LASTEXITCODE -ne 0) { throw "package_release.ps1 failed" }
 }
 

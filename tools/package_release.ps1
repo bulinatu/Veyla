@@ -2,7 +2,8 @@
 # The user profile is never copied: session.json lives in %APPDATA%, not here.
 
 param(
-    [switch]$NoZip
+    [switch]$NoZip,
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,7 +12,14 @@ $root = Split-Path -Parent $PSScriptRoot
 $release = Join-Path $root "build\Release"
 $distRoot = Join-Path $root "dist"
 $dest = Join-Path $distRoot "BetterRemotePlay"
-$version = "2.5.0"
+$version = $Version
+if ([string]::IsNullOrWhiteSpace($version)) {
+    $cmakeText = Get-Content -LiteralPath (Join-Path $root "CMakeLists.txt") -Raw
+    if ($cmakeText -match "project\s*\(\s*BetterRemotePlay\s+VERSION\s+([0-9.]+)") {
+        $version = $Matches[1]
+    }
+}
+if ([string]::IsNullOrWhiteSpace($version)) { $version = "0.0.0" }
 
 function Require-File([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
