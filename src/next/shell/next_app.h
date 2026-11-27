@@ -12,6 +12,7 @@
 #include "shell/ui_bridge.h"
 #include "ui/theme.h"
 #include "ui/widgets.h"
+#include "update/update_service.h"
 
 #include <atomic>
 #include <array>
@@ -182,6 +183,7 @@ private:
     int content_unique_ = 0;
     double content_window_ = -1.0;
     bool watching_ = false;
+    bool quit_ = false;
     bool watch_on_connect_ = false;
     bool watch_fullscreen_ = false;
     double esc_at_ = -1.0;
@@ -220,6 +222,8 @@ private:
     bool engine_mode_ = false;
     unsigned short bridge_port_ = 0;
     UiBridge bridge_;
+    UpdateService update_;
+    UpdatePhase last_update_phase_ = UpdatePhase::Idle;
     double bridge_status_at_ = -1.0;
     bool publish_devices_ = false;
     bool overlay_pause_fg_ = false;

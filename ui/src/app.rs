@@ -27,15 +27,16 @@ pub enum Tab {
 }
 
 impl Tab {
-    /// Top-level header entries. The video pages and Advanced are reachable
-    /// through the sub-navigation under their parent.
-    pub const ALL: [Tab; 6] = [
+    /// Top-level header entries. The video pages live under Video; Advanced is
+    /// its own header entry so settings are one click away.
+    pub const ALL: [Tab; 7] = [
         Tab::Home,
         Tab::Stream,
         Tab::Video,
         Tab::Audio,
         Tab::Pad,
         Tab::Overlay,
+        Tab::Advanced,
     ];
 
     pub fn label(self) -> &'static str {
@@ -56,7 +57,6 @@ impl Tab {
     pub fn top_level(self) -> Tab {
         match self {
             Tab::Upscaling | Tab::FrameGen | Tab::Neural => Tab::Video,
-            Tab::Advanced => Tab::Home,
             other => other,
         }
     }
@@ -69,7 +69,6 @@ impl Tab {
                 (Tab::FrameGen, "Frame Gen"),
                 (Tab::Neural, "Neural"),
             ],
-            Tab::Home => &[(Tab::Home, "Overview"), (Tab::Advanced, "Advanced")],
             _ => &[],
         }
     }
@@ -237,6 +236,14 @@ impl Root {
                         }
                     }
                     if rev != this.last_rev || online != this.engine_online {
+                        if status.update_state != this.status.update_state {
+                            crate::model::log_line(&format!(
+                                "update {}->{} {}",
+                                this.status.update_state,
+                                status.update_state,
+                                status.update_version
+                            ));
+                        }
                         this.last_rev = rev;
                         this.status = status;
                         this.engine_online = online;
@@ -265,6 +272,19 @@ impl Root {
                     break;
                 }
             }
+        })
+        .detach();
+
+        // Start the stream engine with the shell, not only on the first
+        // connect: Home reads GPU/console/update status from it, and the update
+        // check must run even if the user only opens the app.
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(250))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.ensure_engine(cx);
+            });
         })
         .detach();
 

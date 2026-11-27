@@ -1688,3 +1688,31 @@ PATH before `cargo build`, e.g.
   Takion layer, then the control/Bang protobuf fails, so v20 also needs the
   control and feedback layouts. Full notes in `docs/40-takion-v20.md`; v12
   remains the default and was re-verified at 60 fps (age 0.0 ms, 0 drops).
+
+## 2.5.0 - in-app updates through GitHub Releases
+
+- The shell now starts the engine at launch (not only on the first connect), so
+  Home has GPU/console status and the update check runs even if the user never
+  opens Watch.
+- New `UpdateService` (WinHTTP + a small JSON reader): reads
+  `api.github.com/repos/<repo>/releases`, compares semver tags with the running
+  version (stable skips prereleases; Beta includes them), prefers a release
+  asset ending in `.exe` with `update` in the name, downloads it to `%TEMP%`
+  with progress and validates the size.
+- Settings: `general.update_repo` (owner/name), `general.update_channel`
+  (0 stable, 1 beta), `general.check_updates`; UI under **Advanced > Updates**
+  plus a Home banner when a release is available/downloading/ready.
+- Themed animation: an aurora orbit (satellite + pulsing core) tinted by phase,
+  and a gradient progress bar with a moving shimmer. Home and the settings card
+  share the same element.
+- The updater gained `--silent`, `--wait-pid=`, `--auto` (wait, stop
+  `brpnext.exe`/`brpnext-engine.exe`, apply, relaunch) and refuses a file with
+  no payload. `AppVersion()` now comes from the CMake project version; the UI
+  uses `CARGO_PKG_VERSION`.
+- Publishing: `tools/publish_release.ps1 -Version <ver> -Repo <owner/name>`
+  builds a full update against an empty baseline (any older install can update),
+  a standalone zip and release notes, then prints or runs `gh release create`.
+- Docs: `docs/41-updates.md`.
+- Live check verified against a real public repo (GitHub API parsed, version
+  compared, asset selected); the full update was applied to a sandbox install
+  and wrote version.txt correctly.

@@ -19,6 +19,7 @@ struct GeneralSettings {
     bool notifications = true;
     bool check_updates = true;
     int update_channel = 0;  // 0 stable, 1 beta
+    std::string update_repo;  // GitHub owner/name for releases
     bool telemetry = false;  // always local-only in this product
 };
 

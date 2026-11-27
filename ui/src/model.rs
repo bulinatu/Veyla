@@ -18,6 +18,8 @@ pub fn config_dir() -> PathBuf {
     base.join("BetterRemotePlayNext")
 }
 
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub fn settings_path() -> PathBuf {
     config_dir().join("next-settings.json")
 }
@@ -112,6 +114,7 @@ impl Settings {
             ("general.notifications", Value::from(true)),
             ("general.check_updates", Value::from(true)),
             ("general.update_channel", Value::from(0)),
+            ("general.update_repo", Value::from("")),
             ("general.telemetry", Value::from(false)),
             ("console.name", Value::from("PS5")),
             ("console.address", Value::from("")),
@@ -412,6 +415,11 @@ pub struct Status {
     pub present_lag_ms: f64,
     pub input_ms: f64,
     pub input_avg_ms: f64,
+    pub update_state: String,
+    pub update_version: String,
+    pub update_notes: String,
+    pub update_error: String,
+    pub update_progress: f64,
     pub restart_pending: bool,
     pub sr_ms: f64,
     pub fg_ms: f64,
@@ -464,6 +472,11 @@ impl Status {
             present_lag_ms: f("present_lag_ms"),
             input_ms: f("input_ms"),
             input_avg_ms: f("input_avg_ms"),
+            update_state: s("update_state"),
+            update_version: s("update_version"),
+            update_notes: s("update_notes"),
+            update_error: s("update_error"),
+            update_progress: f("update_progress"),
             restart_pending: b("restart_pending"),
             sr_ms: f("sr_ms"),
             fg_ms: f("fg_ms"),

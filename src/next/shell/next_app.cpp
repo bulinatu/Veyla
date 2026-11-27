@@ -365,7 +365,11 @@ int NextApp::Run() {
     } else {
         window_->Show();
     }
-    while (window_->Pump()) {
+    if (settings_.general.check_updates && !settings_.general.update_repo.empty()) {
+        update_.Check(settings_.general.update_repo,
+                      settings_.general.update_channel == 1, AppVersion());
+    }
+    while (!quit_ && window_->Pump()) {
         if (!watching_ && window_->ConsumeResize()) {
             Resize();
         }
@@ -4341,6 +4345,17 @@ void NextApp::HandleBridgeCommand(const std::string& command) {
         DisconnectStream();
     } else if (command == "apply") {
         ReloadSettingsFromDisk();
+    } else if (command == "check-update") {
+        update_.Check(settings_.general.update_repo,
+                      settings_.general.update_channel == 1, AppVersion());
+    } else if (command == "download-update") {
+        update_.Download();
+    } else if (command == "install-update") {
+        std::string update_error;
+        if (!update_.Install(std::filesystem::path(system_.exe_dir),
+                             ::GetCurrentProcessId(), update_error)) {
+            Toast(L"Update: " + Widen(update_error), true);
+        }
     } else if (command == "devices") {
         publish_devices_ = true;
     } else if (command == "profiles") {
@@ -4456,6 +4471,21 @@ void NextApp::PublishBridgeStatus() {
              ? settings_.console.address
              : (streaming_ ? streaming_->Profile().host : std::string()), true);
     text("codec", stream.codec, true);
+    {
+        const UpdateStatus update = update_.Snapshot();
+        text("update_state", UpdateStateName(update.phase), true);
+        text("update_version", update.version, true);
+        text("update_notes", update.notes, true);
+        text("update_error", update.error, true);
+        text("update_asset", update.asset_path, true);
+        number("update_progress", update.progress, true);
+        if (update.phase != last_update_phase_) {
+            last_update_phase_ = update.phase;
+            std::fprintf(stderr, "[update] %s version=%s error=%s\n",
+                         UpdateStateName(update.phase).c_str(),
+                         update.version.c_str(), update.error.c_str());
+        }
+    }
     integer("width", stream.source_width, true);
     integer("height", stream.source_height, true);
     number("fps", stream.source_fps, true);

@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -24,6 +25,25 @@
 namespace fs = std::filesystem;
 
 namespace {
+
+void KillProcessImage(const wchar_t* image) {
+    wchar_t system_dir[MAX_PATH] = {};
+    ::GetSystemDirectoryW(system_dir, MAX_PATH);
+    const fs::path taskkill = fs::path(system_dir) / "taskkill.exe";
+    std::wstring command = L"\"" + taskkill.wstring() + L"\" /IM " + image + L" /F /T";
+    std::vector<wchar_t> mutable_command(command.begin(), command.end());
+    mutable_command.push_back(L'\0');
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (::CreateProcessW(taskkill.wstring().c_str(), mutable_command.data(), nullptr,
+                         nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup,
+                         &process)) {
+        ::WaitForSingleObject(process.hProcess, 5000);
+        ::CloseHandle(process.hThread);
+        ::CloseHandle(process.hProcess);
+    }
+}
 
 void PruneEmptyParents(const fs::path& root, const fs::path& file) {
     // A delete list often leaves the folder behind (the optional rife\ tree is
@@ -59,8 +79,16 @@ fs::path ExeDir() {
     return fs::path(path).parent_path();
 }
 
+fs::path AppExe(const fs::path& dir) {
+    const fs::path next = dir / "brpnext.exe";
+    if (fs::exists(next)) {
+        return next;
+    }
+    return dir / "brp.exe";
+}
+
 bool AppRunning(const fs::path& dir) {
-    const fs::path exe = dir / "brp.exe";
+    const fs::path exe = AppExe(dir);
     if (!fs::exists(exe)) {
         return false;
     }
@@ -102,27 +130,63 @@ bool CopyTree(const fs::path& from, const fs::path& to, int& copied) {
 
 int wmain(int argc, wchar_t** argv) {
     bool launch = true;
+    bool silent = false;
+    bool auto_update = false;
+    DWORD wait_pid = 0;
     fs::path dir = ExeDir();
     for (int i = 1; i < argc; ++i) {
         const std::wstring arg = argv[i];
         if (arg == L"--no-launch") {
             launch = false;
+        } else if (arg == L"--silent") {
+            silent = true;
+        } else if (arg == L"--auto") {
+            auto_update = true;
+            silent = true;
         } else if (arg.rfind(L"--dir=", 0) == 0) {
             dir = arg.substr(6);
+        } else if (arg.rfind(L"--wait-pid=", 0) == 0) {
+            wait_pid = static_cast<DWORD>(std::wcstoul(arg.c_str() + 11, nullptr, 10));
         }
     }
 
-    std::printf("BetterRemotePlay update\nTarget: %s\n\n", Utf8(dir.wstring()).c_str());
-    if (!fs::exists(dir / "brp.exe")) {
-        std::printf("brp.exe is not in this folder. Put update.exe next to it.\n");
-        std::printf("Press Enter to close.");
-        std::getchar();
+    // Auto-update path: the app starts this with its own PID and exits. Wait
+    // for it so no file is replaced while the process still has it mapped.
+    if (wait_pid != 0) {
+        HANDLE process = ::OpenProcess(SYNCHRONIZE, FALSE, wait_pid);
+        if (process) {
+            ::WaitForSingleObject(process, 30000);
+            ::CloseHandle(process);
+        }
+        ::Sleep(600);
+    }
+
+    bool embedded_payload = false;
+    if (auto_update) {
+        // The in-app updater starts this file while the shell still runs. Stop
+        // both images before touching files; taskkill also waits for them.
+        KillProcessImage(L"brpnext.exe");
+        KillProcessImage(L"brpnext-engine.exe");
+        ::Sleep(800);
+    }
+
+    if (!silent) {
+        std::printf("BetterRemotePlay update\nTarget: %s\n\n", Utf8(dir.wstring()).c_str());
+    }
+    if (!fs::exists(AppExe(dir))) {
+        std::printf("brpnext.exe/brp.exe is not in this folder.\n");
+        if (!silent) {
+            std::printf("Press Enter to close.");
+            std::getchar();
+        }
         return 1;
     }
     if (AppRunning(dir)) {
         std::printf("Close BetterRemotePlay first, then run update.exe again.\n");
-        std::printf("Press Enter to close.");
-        std::getchar();
+        if (!silent) {
+            std::printf("Press Enter to close.");
+            std::getchar();
+        }
         return 1;
     }
 
@@ -194,12 +258,21 @@ int wmain(int argc, wchar_t** argv) {
                         return 1;
                     }
                     std::printf("Applied embedded payload.\n");
+                    embedded_payload = true;
                 }
             }
         }
     }
 
     if (!fs::exists(dir / "payload")) {
+        if (!embedded_payload) {
+            std::printf("No update payload found in this file.\n");
+            if (!silent) {
+                std::printf("Press Enter to close.");
+                std::getchar();
+            }
+            return 1;
+        }
         // Single-file updates unpack straight into the folder, so there is no
         // payload\ to copy. Only the delete list and version remain.
         const fs::path deletes = dir / "_delete.txt";
@@ -243,7 +316,7 @@ int wmain(int argc, wchar_t** argv) {
         std::printf("\nUpdate complete%s%s.\n", version.empty() ? "" : ": version ",
                     version.c_str());
         if (launch) {
-            const fs::path exe = dir / "brp.exe";
+            const fs::path exe = AppExe(dir);
             ::ShellExecuteW(nullptr, L"open", exe.wstring().c_str(), nullptr,
                             dir.wstring().c_str(), SW_SHOWNORMAL);
         }
@@ -253,16 +326,20 @@ int wmain(int argc, wchar_t** argv) {
     const fs::path payload = dir / "payload";
     if (!fs::exists(payload)) {
         std::printf("payload\\ is missing. Extract the whole update zip here.\n");
-        std::printf("Press Enter to close.");
-        std::getchar();
+        if (!silent) {
+            std::printf("Press Enter to close.");
+            std::getchar();
+        }
         return 1;
     }
 
     int copied = 0;
     if (!CopyTree(payload, dir, copied)) {
         std::printf("\nUpdate failed. The app may be partially updated; run it again.\n");
-        std::printf("Press Enter to close.");
-        std::getchar();
+        if (!silent) {
+            std::printf("Press Enter to close.");
+            std::getchar();
+        }
         return 1;
     }
     std::printf("Copied %d file(s).\n", copied);
@@ -303,7 +380,7 @@ int wmain(int argc, wchar_t** argv) {
                 version.c_str());
 
     if (launch) {
-        const fs::path exe = dir / "brp.exe";
+        const fs::path exe = AppExe(dir);
         ::ShellExecuteW(nullptr, L"open", exe.wstring().c_str(), nullptr,
                         dir.wstring().c_str(), SW_SHOWNORMAL);
     }

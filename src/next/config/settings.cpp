@@ -183,6 +183,7 @@ FlatMap SettingsToFlat(const AppSettings& s) {
     FlatJson::PutBool(f, "general.notifications", s.general.notifications);
     FlatJson::PutBool(f, "general.check_updates", s.general.check_updates);
     FlatJson::PutInt(f, "general.update_channel", s.general.update_channel);
+    FlatJson::PutString(f, "general.update_repo", s.general.update_repo);
     FlatJson::PutBool(f, "general.telemetry", s.general.telemetry);
 
     FlatJson::PutString(f, "console.name", s.console.name);
@@ -293,6 +294,8 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
         FlatJson::GetBool(f, "general.check_updates", s.general.check_updates);
     s.general.update_channel = ClampInt(
         FlatJson::GetInt(f, "general.update_channel", s.general.update_channel), 0, 1);
+    s.general.update_repo =
+        FlatJson::GetString(f, "general.update_repo", s.general.update_repo);
     s.general.telemetry =
         FlatJson::GetBool(f, "general.telemetry", s.general.telemetry);
 

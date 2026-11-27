@@ -1,9 +1,11 @@
 //! Settings pages. Every control writes the same flat settings keys the engine
 //! already reads, so the new shell is a drop-in front-end.
 
+use std::time::Duration;
+
 use gpui::{
-    div, prelude::*, px, rgba, rgb, AnyElement, Context, FontWeight, IntoElement,
-    SharedString, Window,
+    div, prelude::*, px, relative, rgba, rgb, Animation, AnimationExt as _, AnyElement,
+    Context, FontWeight, IntoElement, SharedString, Window,
 };
 
 use crate::app::Root;
@@ -443,6 +445,129 @@ impl Root {
                     }),
             );
 
+        let update_banner = {
+            let state = self.status.update_state.as_str();
+            if !matches!(state, "available" | "downloading" | "ready") {
+                div().into_any_element()
+            } else {
+                let progress = self.status.update_progress.clamp(0.0, 1.0) as f32;
+                let (accent, headline, detail) = match state {
+                    "ready" => (
+                        theme::GREEN,
+                        format!("v{} is ready to install", self.status.update_version),
+                        "Install and restart to apply it".to_string(),
+                    ),
+                    "downloading" => (
+                        theme::ACCENT_BRIGHT,
+                        format!("Downloading v{}", self.status.update_version),
+                        format!("{:.0}%", progress * 100.0),
+                    ),
+                    _ => (
+                        theme::AMBER,
+                        format!("v{} is available", self.status.update_version),
+                        if self.status.update_notes.is_empty() {
+                            "Download the updater when you are ready".to_string()
+                        } else {
+                            self.status.update_notes.clone()
+                        },
+                    ),
+                };
+                let mut action = div().flex().items_center().gap(px(8.0));
+                if state == "available" {
+                    action = action.child(widgets::button(
+                        "Download",
+                        Tone::Primary,
+                        cx.listener(
+                            |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                                if let Some(engine) = &this.engine {
+                                    engine.send("download-update");
+                                }
+                                cx.notify();
+                            },
+                        ),
+                    ));
+                }
+                if state == "ready" {
+                    action = action.child(widgets::button(
+                        "Install & restart",
+                        Tone::Primary,
+                        cx.listener(
+                            |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                                if let Some(engine) = &this.engine {
+                                    engine.send("install-update");
+                                }
+                                cx.quit();
+                            },
+                        ),
+                    ));
+                }
+                let mut card = widgets::card()
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.0))
+                    .p(px(16.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(14.0))
+                            .child(update_orb(accent, false, 2))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(3.0))
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .text_size(theme::body())
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(theme::text())
+                                            .overflow_hidden()
+                                            .child(SharedString::from(headline)),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(theme::small())
+                                            .text_color(theme::dim())
+                                            .overflow_hidden()
+                                            .child(SharedString::from(detail)),
+                                    ),
+                            )
+                            .child(action),
+                    );
+                if state == "downloading" {
+                    card = card.child(
+                        div()
+                            .w_full()
+                            .h(px(5.0))
+                            .rounded(px(3.0))
+                            .bg(rgba(0xFFFFFF14))
+                            .child(
+                                div()
+                                    .h_full()
+                                    .w(relative(progress))
+                                    .rounded(px(3.0))
+                                    .bg(gpui::linear_gradient(
+                                        90.0,
+                                        gpui::linear_color_stop(
+                                            rgba((theme::ACCENT << 8) | 0xFF),
+                                            0.0,
+                                        ),
+                                        gpui::linear_color_stop(
+                                            rgba((theme::PINK << 8) | 0xFF),
+                                            1.0,
+                                        ),
+                                    )),
+                            ),
+                    );
+                }
+                card.into_any_element()
+            }
+        };
+
         div()
             .flex()
             .flex_col()
@@ -466,6 +591,7 @@ impl Root {
                     ),
             )
             .child(stats)
+            .child(update_banner)
             .child(profiles_group)
             .child(live_group)
             .child(footer)
@@ -1189,7 +1315,200 @@ impl Root {
             .into_any_element()
     }
 
+    fn update_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let state = self.status.update_state.as_str();
+        let progress = self.status.update_progress.clamp(0.0, 1.0) as f32;
+        let (accent, headline, detail) = match state {
+            "checking" => (
+                theme::ACCENT_BRIGHT,
+                "Checking GitHub releases".to_string(),
+                "Reading the latest tag and its assets".to_string(),
+            ),
+            "available" => (
+                theme::AMBER,
+                format!("v{} is available", self.status.update_version),
+                if self.status.update_notes.is_empty() {
+                    "Download the updater when you are ready".to_string()
+                } else {
+                    self.status.update_notes.clone()
+                },
+            ),
+            "downloading" => (
+                theme::ACCENT_BRIGHT,
+                format!("Downloading v{}", self.status.update_version),
+                format!("{:.0}% of the updater", progress * 100.0),
+            ),
+            "ready" => (
+                theme::GREEN,
+                format!("v{} is ready", self.status.update_version),
+                "Install and restart to apply it".to_string(),
+            ),
+            "up-to-date" => (
+                theme::GREEN,
+                "You are on the latest release".to_string(),
+                format!("Installed version {}", crate::model::APP_VERSION),
+            ),
+            "error" => (
+                theme::RED,
+                "Update check failed".to_string(),
+                if self.status.update_error.is_empty() {
+                    "Try again in a moment".to_string()
+                } else {
+                    self.status.update_error.clone()
+                },
+            ),
+            _ => (
+                theme::TEXT_MUTED,
+                "Updates".to_string(),
+                "Check GitHub for a newer release".to_string(),
+            ),
+        };
+
+        let checking = state == "checking";
+        let downloading = state == "downloading";
+        let available = state == "available";
+        let ready = state == "ready";
+
+        // Aurora orbit: a small satellite loops around a soft core, tinted by
+        // the update phase. The same vocabulary as the shell background, at
+        // 52 px, so it reads as part of the app rather than a spinner.
+        let orb = update_orb(accent, checking, 1);
+        let mut actions = div().flex().items_center().gap(px(8.0));
+        if available {
+            actions = actions.child(widgets::button(
+                "Download",
+                Tone::Primary,
+                cx.listener(|this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                    if let Some(engine) = &this.engine {
+                        engine.send("download-update");
+                    }
+                    cx.notify();
+                }),
+            ));
+        }
+        if ready {
+            actions = actions.child(widgets::button(
+                "Install & restart",
+                Tone::Primary,
+                cx.listener(|this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                    if let Some(engine) = &this.engine {
+                        engine.send("install-update");
+                    }
+                    // The updater waits for this process, then restarts the app.
+                    cx.quit();
+                }),
+            ));
+        }
+        if !downloading {
+            actions = actions.child(widgets::button(
+                if checking { "Checking..." } else { "Check now" },
+                Tone::Ghost,
+                cx.listener(|this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                    if let Some(engine) = &this.engine {
+                        engine.send("check-update");
+                    }
+                    cx.notify();
+                }),
+            ));
+        }
+
+        let mut column = div()
+            .flex()
+            .items_center()
+            .gap(px(14.0))
+            .child(orb)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.0))
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .text_size(theme::body())
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme::text())
+                            .child(SharedString::from(headline)),
+                    )
+                    .child(
+                        div()
+                            .text_size(theme::small())
+                            .text_color(theme::dim())
+                            .child(SharedString::from(detail)),
+                    ),
+            )
+            .child(actions);
+
+        if downloading {
+            let shimmer = div()
+                .absolute()
+                .top(px(0.0))
+                .left(px(0.0))
+                .h(px(6.0))
+                .w(px(46.0))
+                .bg(gpui::linear_gradient(
+                    90.0,
+                    gpui::linear_color_stop(rgba(0xFFFFFF00), 0.0),
+                    gpui::linear_color_stop(rgba(0xFFFFFF66), 1.0),
+                ))
+                .with_animation(
+                    "update-shimmer",
+                    Animation::new(Duration::from_millis(1600)).repeat(),
+                    |el, t| el.left(px(-46.0 + t * 320.0)),
+                );
+            column = column.child(
+                div().flex().flex_col().gap(px(8.0)).child(div().h(px(2.0))).child(
+                    div()
+                        .relative()
+                        .w_full()
+                        .h(px(6.0))
+                        .rounded(px(3.0))
+                        .overflow_hidden()
+                        .bg(rgba(0xFFFFFF14))
+                        .child(
+                            div()
+                                .h_full()
+                                .w(relative(progress))
+                                .rounded(px(3.0))
+                                .bg(gpui::linear_gradient(
+                                    90.0,
+                                    gpui::linear_color_stop(rgba((theme::ACCENT << 8) | 0xFF), 0.0),
+                                    gpui::linear_color_stop(rgba((theme::PINK << 8) | 0xFF), 1.0),
+                                )),
+                        )
+                        .child(shimmer),
+                ),
+            );
+        }
+
+        widgets::card_pad().child(column).into_any_element()
+    }
+
     pub(crate) fn page_advanced(&self, cx: &mut Context<Self>) -> AnyElement {
+        let updates = group(
+            "Updates",
+            "GitHub releases",
+            vec![
+                self.text_row(
+                    "general.update_repo",
+                    "Repository",
+                    "owner/name; releases carry a single-file update exe",
+                    "owner/repo",
+                    220.0,
+                    cx,
+                ),
+                self.seg_int_row(
+                    "general.update_channel",
+                    "Channel",
+                    "Stable skips prereleases",
+                    &[(0, "Stable"), (1, "Beta")],
+                    cx,
+                ),
+                self.update_panel(cx),
+            ],
+        );
         let shell = group(
             "Shell",
             "Appearance and startup",
@@ -1376,6 +1695,7 @@ impl Root {
                 "Advanced",
                 "System, shell, measurements, diagnostics and reset",
             ))
+            .child(updates)
             .child(system)
             .child(shell)
             .child(pacing)
@@ -1383,6 +1703,64 @@ impl Root {
             .child(widgets::card_pad().child(reset))
             .into_any_element()
     }
+}
+
+fn update_orb(accent: u32, fast: bool, seed: u32) -> AnyElement {
+    div()
+        .relative()
+        .flex_none()
+        .w(px(52.0))
+        .h(px(52.0))
+        .child(
+            div()
+                .absolute()
+                .left(px(3.0))
+                .top(px(3.0))
+                .w(px(46.0))
+                .h(px(46.0))
+                .rounded(px(23.0))
+                .bg(rgba((accent << 8) | 0x1E)),
+        )
+        .child(
+            div()
+                .absolute()
+                .left(px(22.0))
+                .top(px(22.0))
+                .w(px(8.0))
+                .h(px(8.0))
+                .rounded(px(4.0))
+                .bg(rgba((accent << 8) | 0xF0))
+                .with_animation(
+                    SharedString::from(format!("update-orbit-{seed}-{accent}")),
+                    Animation::new(Duration::from_millis(if fast { 1100 } else { 2400 }))
+                        .repeat(),
+                    move |el, t| {
+                        let angle = t * std::f32::consts::TAU;
+                        el.left(px(22.0 + angle.cos() * 18.0))
+                            .top(px(22.0 + angle.sin() * 18.0))
+                    },
+                ),
+        )
+        .child(
+            div()
+                .absolute()
+                .left(px(19.0))
+                .top(px(19.0))
+                .w(px(14.0))
+                .h(px(14.0))
+                .rounded(px(7.0))
+                .bg(rgba((accent << 8) | 0xCC))
+                .with_animation(
+                    SharedString::from(format!("update-core-{seed}-{accent}")),
+                    Animation::new(Duration::from_millis(if fast { 800 } else { 3000 }))
+                        .repeat(),
+                    |el, t| {
+                        let pulse = 0.5 + 0.5 * (t * std::f32::consts::TAU).sin();
+                        el.opacity(0.55 + 0.45 * pulse)
+                    },
+                ),
+        )
+        .into_any_element()
 }
 
 fn address_for(settings: &crate::model::Settings) -> String {

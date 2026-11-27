@@ -300,9 +300,11 @@ add_library(brp_next_core STATIC
     src/next/app/navigation.cpp
     src/next/app/app_host.cpp
     src/next/app/runtime_settings.cpp
+    src/next/update/update_service.cpp
     src/next/ui/theme.cpp
 )
 target_include_directories(brp_next_core PUBLIC src/next)
+    target_compile_definitions(brp_next_core PRIVATE BRP_APP_VERSION="${PROJECT_VERSION}")
 target_compile_definitions(brp_next_core PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
 if (MSVC)
     target_compile_options(brp_next_core PRIVATE /W4 /permissive- /utf-8)
