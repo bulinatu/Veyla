@@ -128,13 +128,26 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
     }
 }
 
-}
 # --- readme -----------------------------------------------------------------
 $readme = @"
 Veyla 2.6 - standalone build
 =======================================
 
 Run veyla.exe. No installer, no console window, no background service.
+
+What changed in 2.6
+-------------------
+- The product is now Veyla. Window titles, the shell header, About, the updater
+  and the executables use the new name; settings and pairings are untouched
+  because they still live in %APPDATA%\BetterRemotePlayNext.
+- New icon and logo: a violet-to-indigo tile with a bold V, identical in the
+  taskbar and in the shell header.
+- Updates come from GitHub Releases. The shell checks at launch and Advanced >
+  Updates shows the same card; the update installs silently and reopens Veyla.
+- Saved profiles are capped at 12, can be deleted (Delete then Confirm), and
+  the Home card shows "n / 12" and scrolls instead of growing forever.
+- PS4 is detected and paired, but video is PS5-only for now: the stream is
+  HEVC, and PS4 Remote Play is H.264.
 
 What changed in 2.5
 -------------------
