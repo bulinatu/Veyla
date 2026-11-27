@@ -3473,10 +3473,9 @@ bool NextApp::PullFrameRaw(media::DecodedFrame& out) {
     const int frame_buffer = std::clamp(settings_.streaming.frame_buffer, 0, 3);
     if (frame_buffer <= 0) {
         // Lowest latency without skipping: every decoded frame is delivered in
-        // order. TakeNewestFrame used to throw away the whole queue on each
-        // tick, which is what read as frames being deleted. Only a backlog past
-        // four frames is trimmed, so latency stays bounded.
-        return streaming_->TakeFrameOrdered(out, 4);
+        // order. Only a backlog past two frames is trimmed, so even a decode
+        // burst cannot leave more than ~one frame of age in the queue.
+        return streaming_->TakeFrameOrdered(out, 2);
     }
     // Phase-locked pull: one source frame per source interval, on the display's
     // own tick grid. The decoded queue is primed and keeps one spare, so a
@@ -4673,6 +4672,8 @@ void NextApp::WriteSessionReport() {
     file << "  \"bitrate_kbps\": " << stream.bitrate_kbps << ",\n";
     file << "  \"loss_percent\": " << stream.loss_percent << ",\n";
     file << "  \"displayed_per_s\": " << display_rate_ << ",\n";
+    file << "  \"input_loop_ms\": " << (streaming_ ? streaming_->InputResponseAvgMs() : 0.0)
+         << ",\n";
     file << "  \"dlss_sr\": " << (dlss_ready_ ? "true" : "false") << ",\n";
     file << "  \"dlss_fg\": " << ((dlss_fg_ && dlss_fg_->ready()) ? "true" : "false")
          << ",\n";

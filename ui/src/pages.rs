@@ -1307,6 +1307,14 @@ impl Root {
                 widgets::kv("Frame age", format!("{:.1} ms", self.status.age_ms)),
                 widgets::kv("Present lag", format!("{:.1} ms", self.status.present_lag_ms)),
                 widgets::kv(
+                    "Input loop",
+                    if self.status.input_avg_ms > 0.0 {
+                        format!("{:.0} ms", self.status.input_avg_ms)
+                    } else {
+                        "\u{2014}".to_string()
+                    },
+                ),
+                widgets::kv(
                     "Decode avg / max",
                     format!("{:.1} / {:.1} ms", self.status.decode_ms, self.status.decode_max),
                 ),

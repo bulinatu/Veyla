@@ -969,16 +969,20 @@ void Streaming::SendController(const PadState& pad) {
         chiaki_orientation_tracker_apply_to_controller_state(&tracker_, &next);
     }
 
+    const bool buttons_changed = next.buttons != controller_state_.buttons;
     if (chiaki_controller_state_equals(&next, &controller_state_)) {
         return;
     }
     controller_state_ = next;
     chiaki_session_set_controller_state(&session_, &controller_state_);
-    // Stamp the change for the input-to-first-frame probe.
-    input_change_us_.store(
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-            .count());
+    // Stamp deliberate button changes for the input-to-first-frame probe. Stick
+    // noise changes constantly and would always measure the next frame interval.
+    if (buttons_changed) {
+        input_change_us_.store(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count());
+    }
 }
 
 }  // namespace brp::session

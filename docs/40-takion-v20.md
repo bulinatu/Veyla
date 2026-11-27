@@ -1,4 +1,4 @@
-﻿# Takion 20 - research notes and the gated experiment
+# Takion 20 - research notes and the gated experiment
 
 The reference client negotiates Takion protocol **20** on PS5; the vendored
 chiaki-ng core speaks 7/9/12. This note records what was learned and what is
@@ -47,3 +47,11 @@ rumble must be ported as well or the session is unusable.
 
 Until then, keep the env var off: the default path is v12 and was verified at
 60 fps (age 0.0 ms, zero drops) with the v20 code compiled in.
+
+## Related invisible changes
+
+- The input probe stamps only deliberate button changes now (stick noise would
+  always measure the next frame interval); diagnostics shows the average as
+  Input loop and the session report carries input_loop_ms.
+- With frame buffer 0 the decoded queue keeps at most two frames, so even a
+  decode burst cannot leave more than about one frame of age.
