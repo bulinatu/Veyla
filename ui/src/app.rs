@@ -112,7 +112,7 @@ fn take_update_failure() -> Option<String> {
         None
     } else {
         Some(format!(
-            "Update failed: {line}  (details in %TEMP%\\veyla-update.log)"
+            "Update failed: {line}. If it happens again, download the full zip from Releases  (details in %TEMP%\\veyla-update.log)"
         ))
     }
 }

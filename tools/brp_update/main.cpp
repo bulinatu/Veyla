@@ -21,6 +21,7 @@
 //   --wait-pid=N  wait for process N to exit before touching files
 
 #include <windows.h>
+#include <bcrypt.h>
 #include <shellapi.h>
 
 #include <algorithm>
@@ -195,8 +196,121 @@ bool ExtractZip(const fs::path& zip, const fs::path& dir) {
     return code == 0;
 }
 
-void Relaunch(const fs::path& dir) {
-    for (int attempt = 0; attempt < 3; ++attempt) {
+std::string HexLower(const unsigned char* data, size_t length) {
+    static const char kDigits[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(length * 2);
+    for (size_t i = 0; i < length; ++i) {
+        out.push_back(kDigits[data[i] >> 4]);
+        out.push_back(kDigits[data[i] & 0x0F]);
+    }
+    return out;
+}
+
+std::string Sha256File(const fs::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        return {};
+    }
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    DWORD object_size = 0;
+    DWORD produced = 0;
+    std::string out;
+    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0) {
+        return {};
+    }
+    if (BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH,
+                          reinterpret_cast<PUCHAR>(&object_size), sizeof(object_size),
+                          &produced, 0) == 0) {
+        std::vector<unsigned char> object(object_size);
+        if (BCryptCreateHash(algorithm, &hash, object.data(), object_size, nullptr, 0, 0) ==
+            0) {
+            std::vector<char> buffer(1024 * 1024);
+            while (file) {
+                file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+                const std::streamsize got = file.gcount();
+                if (got > 0) {
+                    BCryptHashData(hash, reinterpret_cast<PUCHAR>(buffer.data()),
+                                   static_cast<ULONG>(got), 0);
+                }
+            }
+            unsigned char digest[32] = {};
+            if (BCryptFinishHash(hash, digest, sizeof(digest), 0) == 0) {
+                out = HexLower(digest, sizeof(digest));
+            }
+            BCryptDestroyHash(hash);
+        }
+    }
+    BCryptCloseAlgorithmProvider(algorithm, 0);
+    return out;
+}
+
+bool EqualsIgnoreCase(const std::string& left, const std::string& right) {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < left.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(left[i])) !=
+            std::tolower(static_cast<unsigned char>(right[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Copies the staged payload into the install only after every file matches the
+// hash in _manifest.txt. A truncated download or a half-written file can never
+// reach the app folder this way.
+bool ApplyStaged(const fs::path& stage, const fs::path& dir, std::string& error) {
+    std::ifstream in(stage / "_manifest.txt");
+    if (!in) {
+        error = "Update package has no manifest.";
+        return false;
+    }
+    int copied = 0;
+    std::string line;
+    while (std::getline(in, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
+            line.pop_back();
+        }
+        if (line.size() < 67) {
+            continue;  // 64 hex chars, two spaces, then the relative path
+        }
+        const std::string expected = line.substr(0, 64);
+        const std::string relative = line.substr(66);
+        const fs::path source = stage / fs::path(relative);
+        if (!fs::exists(source)) {
+            error = "Update package is incomplete: " + relative;
+            return false;
+        }
+        const std::string actual = Sha256File(source);
+        if (actual.empty() || !EqualsIgnoreCase(actual, expected)) {
+            error = "Update package is damaged: " + relative;
+            return false;
+        }
+        const fs::path target = dir / fs::path(relative);
+        std::error_code ec;
+        fs::create_directories(target.parent_path(), ec);
+        bool done = false;
+        for (int retry = 0; retry < 40 && !done; ++retry) {
+            done = ::CopyFileW(source.wstring().c_str(), target.wstring().c_str(), FALSE) !=
+                   FALSE;
+            if (!done) {
+                ::Sleep(250);
+            }
+        }
+        if (!done) {
+            error = "Could not write " + relative;
+            return false;
+        }
+        ++copied;
+    }
+    Log("verified and copied " + std::to_string(copied) + " file(s)");
+    return true;
+}
+
+void Relaunch(const fs::path& dir) {    for (int attempt = 0; attempt < 3; ++attempt) {
         const fs::path exe = AppExe(dir);
         const HINSTANCE result =
             ::ShellExecuteW(nullptr, L"open", exe.wstring().c_str(), nullptr,
@@ -294,6 +408,7 @@ int wmain(int argc, wchar_t** argv) {
 
     // Single-file form: the patch zip is appended to this exe.
     bool embedded_payload = false;
+    fs::path metadata_dir = dir;
     {
         wchar_t self_path[MAX_PATH] = {};
         ::GetModuleFileNameW(nullptr, self_path, MAX_PATH);
@@ -332,10 +447,15 @@ int wmain(int argc, wchar_t** argv) {
                         return 1;
                     }
                     // Extraction writes over the app; retry once if a file is
-                    // still locked by a lingering process.
+                    // still locked by a lingering process. Unpack into a stage
+                    // folder first so a damaged package cannot touch the app.
+                    const fs::path stage = dir / "_update_stage";
+                    std::error_code ec;
+                    fs::remove_all(stage, ec);
+                    fs::create_directories(stage, ec);
                     bool extracted = false;
                     for (int attempt = 0; attempt < 3 && !extracted; ++attempt) {
-                        extracted = ExtractZip(temp_zip, dir);
+                        extracted = ExtractZip(temp_zip, stage);
                         if (!extracted) {
                             Log("extract attempt " + std::to_string(attempt + 1) + " failed");
                             ::Sleep(1500);
@@ -343,12 +463,19 @@ int wmain(int argc, wchar_t** argv) {
                             KillProcessImage(L"veyla-engine.exe");
                         }
                     }
-                    std::error_code ec;
                     fs::remove(temp_zip, ec);
                     if (!extracted) {
+                        fs::remove_all(stage, ec);
                         ReportFailure(dir, "Could not unpack the update payload.");
                         return 1;
                     }
+                    std::string verify_error;
+                    if (!ApplyStaged(stage, dir, verify_error)) {
+                        fs::remove_all(stage, ec);
+                        ReportFailure(dir, verify_error);
+                        return 1;
+                    }
+                    metadata_dir = stage;
                     embedded_payload = true;
                 }
             }
@@ -360,7 +487,7 @@ int wmain(int argc, wchar_t** argv) {
             ReportFailure(dir, "No update payload found in this file.");
             return 1;
         }
-        const fs::path deletes = dir / "_delete.txt";
+        const fs::path deletes = metadata_dir / "_delete.txt";
         if (fs::exists(deletes)) {
             std::ifstream list(deletes);
             std::string line;
@@ -385,7 +512,7 @@ int wmain(int argc, wchar_t** argv) {
             Log("removed " + std::to_string(removed) + " obsolete file(s)");
         }
         std::string version;
-        const fs::path version_marker = dir / "_version.txt";
+        const fs::path version_marker = metadata_dir / "_version.txt";
         if (fs::exists(version_marker)) {
             {
                 std::ifstream in(version_marker);
@@ -395,6 +522,10 @@ int wmain(int argc, wchar_t** argv) {
             fs::remove(version_marker, ec);
             std::ofstream out(dir / "version.txt", std::ios::trunc);
             out << version << "\n";
+        }
+        if (embedded_payload) {
+            std::error_code stage_ec;
+            fs::remove_all(metadata_dir, stage_ec);
         }
         Log("update complete" + (version.empty() ? std::string() : ": version " + version));
         if (launch) {

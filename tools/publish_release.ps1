@@ -18,6 +18,7 @@ param(
     [string]$Repo = "",
     [string]$Title = "",
     [string]$Notes = "",
+    [string]$FloorFolder = "dist\_floor-2.7.0",
     [switch]$SkipPackage,
     [switch]$DryRun
 )
@@ -42,16 +43,17 @@ if (-not (Test-Path -LiteralPath (Join-Path $release "veyla.exe"))) {
 # Stamp the version the updater writes into version.txt.
 Set-Content -LiteralPath (Join-Path $release "version.txt") -Value $Version -Encoding ASCII
 
-$empty = Join-Path $env:TEMP ("brp_empty_" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $empty -Force | Out-Null
-try {
-    Write-Host "Building the full update payload ..."
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "make_update.ps1") `
-        -BaselineFolder $empty -NewFolder $release -Version $Version -Out $updateOut
-    if ($LASTEXITCODE -ne 0) { throw "make_update.ps1 failed" }
-} finally {
-    Remove-Item -LiteralPath $empty -Recurse -Force -ErrorAction SilentlyContinue
+# Every update is cumulative from a fixed floor, so a patch works from any
+# installed version at or above that floor, no matter how many releases were
+# skipped. The floor folder lives in dist and is never overwritten.
+$floor = Join-Path $root $FloorFolder
+if (-not (Test-Path -LiteralPath $floor)) {
+    throw "Floor folder missing: $floor. Keep a packaged copy of the oldest supported version there."
 }
+Write-Host "Building the cumulative update payload (floor: $FloorFolder) ..."
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "make_update.ps1") `
+    -BaselineFolder $floor -NewFolder $release -Version $Version -Out $updateOut
+if ($LASTEXITCODE -ne 0) { throw "make_update.ps1 failed" }
 
 $zip = Join-Path $dist "Veyla-$Version-standalone.zip"
 if (-not (Test-Path -LiteralPath $zip)) {

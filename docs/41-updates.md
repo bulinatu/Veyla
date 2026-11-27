@@ -60,3 +60,33 @@ No token is used, so GitHub's anonymous limit applies (60 requests/hour per
 IP); one startup check plus manual checks stay well inside it. Only HTTPS asset
 URLs from the release are used. The binaries are not code-signed; signing is a
 separate release step.
+
+## Patch format: cumulative from a fixed floor
+
+Every `Veyla-<version>-update.exe` is built as a **diff from a fixed floor
+release**, not from the previous version. The floor lives in
+`dist\_floor-<version>` and must never be overwritten.
+
+- Anyone on a version at or above the floor gets a complete, correct result,
+  even if they skipped five releases.
+- Files that were added since the floor are included; files that were removed
+  are listed in `_delete.txt`.
+- The payload stays small: a file changed ten times appears once, in its final
+  form.
+
+Current floor: **2.7.0** (`dist\_floor-2.7.0`). Older installs must use the
+standalone zip; the release notes say so.
+
+`tools\publish_release.ps1` takes `-FloorFolder` and defaults to that path.
+
+## Why a patch cannot half-apply
+
+1. The updater extracts the payload into `_update_stage` inside the app folder.
+2. It verifies every file against `_manifest.txt` (SHA-256, written by
+   `tools\make_update.ps1`).
+3. Only then does it copy the files over the install, with retries for locked
+   files.
+4. If anything fails, it writes `update-failed.txt`, relaunches the existing
+   build and the shell shows the reason plus a pointer to the standalone zip.
+
+Everything the updater does is appended to `%TEMP%\veyla-update.log`.

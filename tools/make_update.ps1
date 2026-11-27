@@ -104,6 +104,18 @@ try {
     }
     Set-Content -LiteralPath (Join-Path $stage "_version.txt") -Value $Version -Encoding ASCII
 
+    # The updater verifies every file against this manifest before copying it
+    # into the install, so a truncated download cannot half-apply.
+    $manifest = New-Object System.Collections.Generic.List[string]
+    $stageRoot = (Resolve-Path -LiteralPath $stage).Path
+    Get-ChildItem -LiteralPath $stage -Recurse -File | ForEach-Object {
+        $rel = $_.FullName.Substring($stageRoot.Length).TrimStart('\')
+        if ($rel -eq "_manifest.txt") { return }
+        $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower()
+        $manifest.Add("$hash  $rel")
+    }
+    Set-Content -LiteralPath (Join-Path $stage "_manifest.txt") -Value $manifest -Encoding ASCII
+
     $payloadZip = Join-Path $temp "payload.zip"
     Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $payloadZip -CompressionLevel Optimal
 
