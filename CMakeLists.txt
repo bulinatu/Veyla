@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(BetterRemotePlay VERSION 2.6.0 LANGUAGES CXX)
+project(BetterRemotePlay VERSION 2.6.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -350,7 +350,7 @@ set(BRP_NEXT_SHELL_SOURCES
     "${CMAKE_CURRENT_BINARY_DIR}/app.rc"
 )
 add_executable(brpnext ${BRP_NEXT_SHELL_SOURCES})
-target_link_libraries(brpnext PRIVATE brp_next_core brp_next_streaming brp_ui brp_media comdlg32 shell32 winmm ws2_32)
+target_link_libraries(brpnext PRIVATE brp_next_core brp_next_streaming brp_ui brp_media comdlg32 shell32 winmm ws2_32 iphlpapi)
 set_target_properties(brpnext PROPERTIES OUTPUT_NAME "veyla-classic" WIN32_EXECUTABLE TRUE)
 if (MSVC)
     target_compile_options(brpnext PRIVATE /W4 /permissive- /utf-8)
@@ -358,7 +358,7 @@ endif()
 
 # Headless stream engine driven by the Rust/GPUI shell over the UI bridge.
 add_executable(brpnext-engine ${BRP_NEXT_SHELL_SOURCES})
-target_link_libraries(brpnext-engine PRIVATE brp_next_core brp_next_streaming brp_ui brp_media comdlg32 shell32 winmm ws2_32)
+target_link_libraries(brpnext-engine PRIVATE brp_next_core brp_next_streaming brp_ui brp_media comdlg32 shell32 winmm ws2_32 iphlpapi)
 set_target_properties(brpnext-engine PROPERTIES OUTPUT_NAME "veyla-engine" WIN32_EXECUTABLE TRUE)
 if (MSVC)
     target_compile_options(brpnext-engine PRIVATE /W4 /permissive- /utf-8)

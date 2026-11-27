@@ -17,6 +17,8 @@
 #include <commdlg.h>
 #include <d3d11.h>
 #include <d3d11_4.h>
+#include <iphlpapi.h>
+#include <netioapi.h>
 #include <mmsystem.h>
 #include <shellapi.h>
 #include <avrt.h>
@@ -73,10 +75,34 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"2.6.0";
+constexpr wchar_t kVersion[] = L"2.6.1";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
+
+// Type of the adapter that carries the default route. Wi-Fi and Ethernet need
+// different bitrates: 100 Mbps over the air queues up in the access point and
+// shows up as input delay, which is the one thing this app must not add.
+std::string NetworkLinkName() {
+    IN_ADDR dest{};
+    dest.S_un.S_addr = 0x08080808;  // 8.8.8.8; used for routing only, no packet
+    DWORD index = 0;
+    if (::GetBestInterface(dest.S_un.S_addr, &index) != NO_ERROR || index == 0) {
+        return "unknown";
+    }
+    MIB_IF_ROW2 row{};
+    row.InterfaceIndex = static_cast<NET_IFINDEX>(index);
+    if (::GetIfEntry2(&row) != NO_ERROR) {
+        return "unknown";
+    }
+    if (row.Type == IF_TYPE_IEEE80211) {
+        return "wifi";
+    }
+    if (row.Type == IF_TYPE_ETHERNET_CSMACD) {
+        return "ethernet";
+    }
+    return "other";
+}
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -1132,7 +1158,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"Veyla", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  2.6.0", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  2.6.1", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -1246,7 +1272,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"Veyla 2.6.0",
+        renderer_->Text(L"Veyla 2.6.1",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -2375,7 +2401,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"Veyla 2.6.0  |  stable release", L"STABLE", true);
+               L"Veyla 2.6.1  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -2384,7 +2410,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"Veyla", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 2.6.0  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 2.6.1  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -4419,6 +4445,14 @@ void NextApp::ReloadSettingsFromDisk() {
 }
 
 void NextApp::PublishBridgeStatus() {
+    if (++link_ticks_ >= 40) {
+        link_ticks_ = 0;
+        const std::string link = NetworkLinkName();
+        if (link != link_type_) {
+            link_type_ = link;
+            std::fprintf(stderr, "[net] default route link=%s\n", link_type_.c_str());
+        }
+    }
     const StreamSnapshot stream = streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
     const bool streaming_now = watching_ && stream.connected;
     std::string json;
@@ -4533,6 +4567,7 @@ void NextApp::PublishBridgeStatus() {
     number("nr_ms", nr_ms_, true);
     text("gpu", system_.gpu.name, true);
     text("driver", system_.gpu.driver, true);
+    text("link", link_type_, true);
     integer("vram_mb", static_cast<long long>(system_.gpu.vram_mb), false);
     json += '}';
     bridge_.Publish(std::move(json));

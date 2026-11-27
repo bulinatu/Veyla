@@ -176,6 +176,10 @@ private:
     std::mutex video_mutex_;
     std::condition_variable video_cv_;
     std::deque<EncodedUnit> video_queue_;
+    // Drop oldest encoded units once this many are queued. Six frames is a
+    // 100 ms backlog at 60 fps, fine for a primed buffer, too much for the
+    // zero-buffer path where the point is to present the newest frame.
+    std::size_t max_video_queue_ = 6;
     bool video_run_ = false;
     std::atomic<bool> session_live_{false};
     std::atomic<int> video_queue_drops_{0};

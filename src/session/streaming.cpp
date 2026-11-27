@@ -159,6 +159,8 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
     info_.auto_regist = false;
     info_.packet_loss_max = 0.05;
     info_.enable_idr_on_fec_failure = true;
+    // Buffer 0 presents the newest frame, so a deep queue only adds delay.
+    max_video_queue_ = profile.frame_buffer > 0 ? 6 : 2;
 
     std::vector<uint8_t> account(8, 0);
     size_t account_size = account.size();
@@ -362,7 +364,7 @@ void Streaming::OnVideo(uint8_t* buf, size_t size, int32_t frames_lost) {
         // Bound latency: if the decoder falls behind, drop the oldest encoded
         // unit instead of building an ever-growing backlog. Dropping compressed
         // data breaks the reference chain, so ask the console for a fresh IDR.
-        if (video_queue_.size() >= 6) {
+        if (video_queue_.size() >= max_video_queue_) {
             video_queue_.pop_front();
             video_queue_drops_.fetch_add(1);
             if (session_live_.load()) {

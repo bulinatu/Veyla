@@ -220,20 +220,40 @@ impl Root {
                     this.profiles_rev = profiles_rev;
                     if this.pending_optimize {
                         this.optimize_ticks = this.optimize_ticks.saturating_add(1);
-                        // Wait for the engine's first status snapshot: the DLSS
-                        // capability flags live there, and optimizing before they
-                        // arrive would disable AI on a capable machine.
-                        let hardware_known = online && rev > 0 && devices_rev > 0;
-                        if hardware_known && (devices_changed || this.optimize_ticks >= 12) {
+                        // The launch request for devices can race engine startup,
+                        // and one lost message used to leave the optimizer
+                        // waiting with nothing to work with. Ask again about once
+                        // a second while we wait.
+                        if this.optimize_ticks % 8 == 0 {
+                            this.send("devices");
+                        }
+                        // The DLSS capability flags live in the status snapshot;
+                        // the monitor list decides the output.
+                        let status_ready = online && rev > 0;
+                        let devices_ready = devices_rev > 0;
+                        if status_ready
+                            && devices_ready
+                            && (devices_changed || this.optimize_ticks >= 12)
+                        {
                             this.pending_optimize = false;
-                            // The capability flags live in this snapshot; the
-                            // status assignment below happens later in the loop.
                             this.status = status.clone();
                             this.engine_online = online;
                             this.optimize_for_pc(cx);
-                        } else if this.optimize_ticks >= 60 {
+                        } else if status_ready && this.optimize_ticks >= 60 {
+                            // No device list, but the status snapshot is here. A
+                            // 1080p guess beats an error message.
                             this.pending_optimize = false;
-                            this.toast("Optimize: the engine did not report hardware", true, cx);
+                            this.status = status.clone();
+                            this.engine_online = online;
+                            this.optimize_for_pc(cx);
+                            this.toast("Optimized without monitor detection", false, cx);
+                        } else if this.optimize_ticks >= 90 {
+                            this.pending_optimize = false;
+                            this.toast(
+                                "Optimize: the engine is not responding yet. Try again in a moment.",
+                                true,
+                                cx,
+                            );
                         }
                     }
                     if devices_changed || profiles_changed {
@@ -483,6 +503,7 @@ impl Root {
         let fg_ok = nvidia && self.status.dlss_fg_ready;
         let nr_ok = self.status.nr_runtime;
         let hd_plus = height >= 1300;
+        let wifi = self.status.link == "wifi";
 
         let settings = &mut self.settings;
         // The console caps at 1080p; 60 fps halves the input interval.
@@ -490,7 +511,19 @@ impl Root {
         settings.set_int("streaming.fps", 60);
         // Buffer 0 measured 58 ms less frame age than the primed queue.
         settings.set_int("streaming.frame_buffer", 0);
-        settings.set_int("streaming.bitrate_kbps", if hd_plus { 100000 } else { 60000 });
+        // Wi-Fi queues in the access point long before its nominal link rate:
+        // 100 Mbps over the air turns into exactly the input delay this app
+        // exists to avoid. 30 Mbps keeps 1080p60 HEVC clean.
+        settings.set_int(
+            "streaming.bitrate_kbps",
+            if wifi {
+                30000
+            } else if hd_plus {
+                100000
+            } else {
+                60000
+            },
+        );
         settings.set_str("streaming.decoder", "auto");
         settings.set_str("streaming.codec", "hevc");
         settings.set_bool("streaming.hdr", false);
@@ -511,7 +544,10 @@ impl Root {
         settings.set_int("controller.poll_hz", 1000);
         settings.set_int("audio.buffer_ms", 10);
 
-        if fg_ok {
+        // Frame generation costs one generated frame of input latency. On
+        // Wi-Fi that is the difference the user feels, so Optimize keeps it off
+        // there and leaves the toggle to whoever prefers smoothness.
+        if fg_ok && !wifi {
             settings.set_bool("ai.frame_generation", true);
             settings.set_str("ai.fg_backend", "dlss-fg");
             // 2x is the only cadence that stays clean at 60 fps on 240 Hz.
@@ -561,17 +597,18 @@ impl Root {
         self.send("apply");
 
         let label = if gpu.is_empty() { "auto".to_string() } else { gpu };
-        let ai = if fg_ok {
+        let ai = if fg_ok && !wifi {
             "DLSS-G 2x"
         } else if sr_ok {
             "DLSS SR"
         } else {
             "no AI"
         };
+        let link = if wifi { " | Wi-Fi 30 Mbps" } else { "" };
         self.toast(
             format!(
-                "Optimized: {} | {}x{} @ {} Hz | {}",
-                label, width, height, hz, ai
+                "Optimized: {} | {}x{} @ {} Hz | {}{}",
+                label, width, height, hz, ai, link
             ),
             false,
             cx,

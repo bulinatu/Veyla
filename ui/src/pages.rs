@@ -454,7 +454,7 @@ impl Root {
                 div()
                     .text_size(theme::tiny())
                     .text_color(theme::muted())
-                    .child("Veyla 2.6.0  -  original project: BetterRemotePlay"),
+                    .child("Veyla 2.6.1  -  original project: BetterRemotePlay"),
             )
             .child(
                 div()
@@ -1736,7 +1736,7 @@ impl Root {
 
         let brand = group(
             "About",
-            "Veyla 2.6.0",
+            "Veyla 2.6.1",
             vec![
                 widgets::kv("Product", "Veyla"),
                 widgets::kv(

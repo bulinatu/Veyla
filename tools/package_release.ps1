@@ -130,10 +130,21 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 2.6 - standalone build
+Veyla 2.6.1 - standalone build
 =======================================
 
 Run veyla.exe. No installer, no console window, no background service.
+
+What changed in 2.6.1
+---------------------
+- Wi-Fi: Optimize detects the link and uses 30 Mbps instead of 100 Mbps, and
+  keeps frame generation off there, so the access point stops queueing.
+- Decode queue is capped at 2 frames with frame buffer 0 (was 6); a slow decode
+  can no longer add up to 100 ms of backlog.
+- Optimize retries the device list and falls back to the status snapshot, so it
+  no longer fails with "the engine did not report hardware".
+- The update repository is no longer written empty, which used to make
+  "Check now" fail with "Set a GitHub repository first".
 
 What changed in 2.6
 -------------------

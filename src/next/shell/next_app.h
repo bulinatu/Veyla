@@ -224,6 +224,10 @@ private:
     UiBridge bridge_;
     UpdateService update_;
     UpdatePhase last_update_phase_ = UpdatePhase::Idle;
+    // Link type of the default route, refreshed every few seconds: Wi-Fi needs
+    // a much lower bitrate than Ethernet before it starts queuing packets.
+    std::string link_type_ = "unknown";
+    int link_ticks_ = 39;  // compute on the first status publish
     double bridge_status_at_ = -1.0;
     bool publish_devices_ = false;
     bool overlay_pause_fg_ = false;

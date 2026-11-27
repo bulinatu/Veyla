@@ -449,6 +449,9 @@ pub struct Status {
     pub nr_ms: f64,
     pub gpu: String,
     pub driver: String,
+    /// "wifi", "ethernet", "other" or "unknown": the adapter carrying the
+    /// default route, published by the engine.
+    pub link: String,
     pub vram_mb: i64,
 }
 
@@ -506,6 +509,7 @@ impl Status {
             nr_ms: f("nr_ms"),
             gpu: s("gpu"),
             driver: s("driver"),
+            link: s("link"),
             vram_mb: i("vram_mb"),
         }
     }
