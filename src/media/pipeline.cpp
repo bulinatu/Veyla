@@ -808,6 +808,52 @@ void Presenter::PresentNow(bool vsync) {
         }
         last_present_stats_ = stats;
         last_present_refresh_ = stats.PresentRefreshCount;
+
+        // Learn the real refresh period from consecutive vblanks, then place
+        // this frame on the scanout timeline: SyncQPCTime is the last vblank,
+        // and PresentRefreshCount tells how many refreshes the newest present
+        // is ahead of it.
+        LARGE_INTEGER frequency{};
+        LARGE_INTEGER now{};
+        ::QueryPerformanceFrequency(&frequency);
+        ::QueryPerformanceCounter(&now);
+        const double qpc_ms = 1000.0 / static_cast<double>(frequency.QuadPart);
+        if (frequency.QuadPart > 0) {
+            if (have_sync_ && stats.SyncRefreshCount > last_sync_refresh_ &&
+                stats.SyncQPCTime.QuadPart > last_sync_qpc_.QuadPart) {
+                const double vblanks =
+                    static_cast<double>(stats.SyncRefreshCount - last_sync_refresh_);
+                refresh_period_ms_ =
+                    static_cast<double>(stats.SyncQPCTime.QuadPart -
+                                        last_sync_qpc_.QuadPart) *
+                    qpc_ms / vblanks;
+            }
+            if (stats.SyncQPCTime.QuadPart > 0) {
+                last_sync_refresh_ = stats.SyncRefreshCount;
+                last_sync_qpc_ = stats.SyncQPCTime;
+                have_sync_ = true;
+            }
+            if (have_present_qpc_ && refresh_period_ms_ > 0.5 &&
+                stats.SyncQPCTime.QuadPart > 0) {
+                const long long ahead =
+                    static_cast<long long>(stats.PresentRefreshCount) -
+                    static_cast<long long>(stats.SyncRefreshCount);
+                const double sync_ms =
+                    static_cast<double>(stats.SyncQPCTime.QuadPart) * qpc_ms;
+                double display_ms =
+                    sync_ms + static_cast<double>(ahead) * refresh_period_ms_;
+                // PresentRefreshCount can point at the vblank that was already
+                // in flight when Present() was called: the frame then lands on
+                // the following one.
+                if (display_ms < present_qpc_ms_) {
+                    display_ms += refresh_period_ms_;
+                }
+                present_lag_ms_ = display_ms - present_qpc_ms_;
+                present_queue_ = static_cast<int>(ahead > 0 ? ahead : 0);
+            }
+            present_qpc_ms_ = static_cast<double>(now.QuadPart) * qpc_ms;
+            have_present_qpc_ = true;
+        }
     } else if (!present_stats_logged_) {
         present_stats_logged_ = true;
         std::fprintf(stderr, "[presenter] frame statistics unavailable (0x%08lX)\n",

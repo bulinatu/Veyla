@@ -97,6 +97,14 @@ public:
     // on screen.
     UINT present_refresh_count() const { return last_present_refresh_; }
 
+    // How many refreshes the last submitted frame is still away from scanout
+    // (0 = it was already on screen at the last vblank) and the estimated
+    // Present -> scanout time. Measured from DXGI frame statistics using the
+    // refresh period learned from consecutive vblanks, so it is ground truth
+    // for "is the flip queue eating a frame".
+    int present_queue() const { return present_queue_; }
+    double present_lag_ms() const { return present_lag_ms_; }
+
     void SetUpscaleMode(int mode);
 
     void SetEnhance(const EnhanceParams& params) { enh_ = params; }
@@ -204,6 +212,14 @@ private:
     bool present_stats_logged_ = false;
     unsigned long long present_misses_ = 0;
     UINT last_present_refresh_ = 0;
+    UINT last_sync_refresh_ = 0;
+    LARGE_INTEGER last_sync_qpc_{};
+    bool have_sync_ = false;
+    double refresh_period_ms_ = 0.0;
+    double present_qpc_ms_ = 0.0;
+    bool have_present_qpc_ = false;
+    int present_queue_ = 0;
+    double present_lag_ms_ = 0.0;
     bool device_lost_ = false;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> backbuffer_;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv_;

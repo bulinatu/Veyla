@@ -299,6 +299,12 @@ private:
     std::array<unsigned, 32> hold_seen_{};
     unsigned hold_total_ = 0;
     bool content_changed_ = false;
+    // Set when a frame (or a fresh background after a resize) was drawn into
+    // the stream backbuffer. Present() is skipped otherwise: with the vblank
+    // gate gone, presenting an untouched backbuffer with a flip chain would
+    // show the frame from two presents ago.
+    bool present_frame_ = false;
+    bool redraw_needed_ = false;
     double stats_at_ = -1.0;
     double sr_cpu_ms_ = 0.0;
     int display_shown_last_ = 0;

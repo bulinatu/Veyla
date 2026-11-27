@@ -1599,3 +1599,41 @@ stopped presenting them as if they did something.
   frames are marked `duplicate`: NR and SR are skipped, DLSS-G is not fed the
   repeat, and `content fps` is published to the UI/probe. Home shows
   `60 fps (30 content)` and Frame Gen shows the expected 2x/4x output.
+
+## 2.5.0 hotfix 3 - reference-client comparison, 60 fps stream, present on arrival
+
+A shipping Java/Vulkan client on the same console and LAN logged its own stream
+settings, which made the remaining difference obvious: it requests **60 fps** and
+**25 Mbps**, while our profile was on **30 fps** and **100 Mbps**. At 30 fps the
+console holds a frame before encoding and the client can only show a new picture
+every 33 ms, so the client-side queue work from round 5 was not enough.
+
+- 60 fps is now the recommended stream rate (the UI says 30 makes the console
+  hold a frame). A 30 fps game should keep 60 on the wire: repeated frames are
+  detected and skipped, and frame generation supplies the cadence.
+- The render loop no longer waits on the swapchain frame-latency object before
+  pulling a decoded frame. It wakes on the frame, draws it, and presents;
+  `Present()` throttles when the flip queue is full. Frames are only presented
+  when something was drawn, so an idle decoder or a repeated frame no longer
+  flips a stale backbuffer.
+- Probe: `present q N lag X ms` from `DXGI_FRAME_STATISTICS`; the refresh period
+  is learned from consecutive vblanks. Live runs: 60 fps -> cadence 16.6 ms,
+  age 0.0 ms, 240 Hz scanout, present lag 3.6 ms; 30 fps -> cadence 33.2 ms with
+  8-refresh holds.
+- Home now has a **Lowest latency** button: 60 fps, 50 Mbps, buffer 0, vsync
+  off, AI off, for a direct comparison with a plain client. A live vsync change
+  recreates the swapchain so `ALLOW_TEARING` takes effect immediately.
+- Profile migrated to 60 fps / 50 Mbps / buffer 0 / vsync off (backup
+  `next-settings.json.bak-before-latency-fix2`).
+- Investigated but not changed: the reference client speaks Takion protocol 20
+  (slice descriptors) while the vendored chiaki-ng only implements 7/9/12. That
+  is a larger protocol port with unclear latency payoff, and the measured
+  client path (age 0.0 ms, present on arrival) no longer has headroom to win.
+- New artifacts:
+  - `dist/BetterRemotePlay-2.5.0-standalone-norife.zip` SHA256
+    `382582EAB572B592D0DEC68A26347C8B9D525E173188C26B8B00093F48AAA61D`
+  - `dist/BetterRemotePlay-2.5.0-hotfix-update.exe` (48.85 MB) SHA256
+    `CE8934F48C1692D996A0566EB508985C4E64700BA01875322366947C2167F3BE`
+- `brpnext.exe` `BE42C2BAC637993F9433604F960FFCB939CC398B0E6405599F1FDFF93F28EAFB`
+- `brpnext-engine.exe` `64C022E514880ABF63C705605E1B4441566FD37DF11478646E399E1706E7554E`
+- Patch verified on a copy of the earlier 2.5.0: `hash-diff=update.exe` only.

@@ -401,6 +401,15 @@ int NextApp::Run() {
                 } else {
                     std::this_thread::sleep_for(std::chrono::milliseconds(4));
                 }
+            } else if (streaming_ && !settings_.video.vsync) {
+                // Lowest-latency path: wake on the decoded frame itself and
+                // present it right away. Waiting for the swapchain's
+                // frame-latency object first made the pull happen on the vblank
+                // grid, so a frame that arrived mid-interval waited up to a
+                // full refresh before it was even picked up. Present() still
+                // throttles when the flip queue is full, and Render() only
+                // presents when something was actually drawn.
+                streaming_->WaitForFrame(2);
             } else if (ActivePresenter() && ActivePresenter()->frame_waitable()) {
                 // One iteration per vblank. A short timeout (the previous 8 ms)
                 // made the loop run twice per refresh: the second pass presented
@@ -639,6 +648,7 @@ void NextApp::ResizeStream() {
     stream_presenter_->Resize(width, height);
     ApplyTargetTo(stream_presenter_.get());
     ApplyEnhance();
+    redraw_needed_ = true;
     std::fprintf(stderr, "[next] stream window %dx%d\n", width, height);
 }
 
@@ -921,6 +931,7 @@ void NextApp::Frame() {
                 std::fprintf(stderr,
                              "[next] loop p50 %.2f p99 %.2f max %.2f  |  cadence p50 %.1f "
                              "p99 %.1f  |  scanout %.1f Hz  |  present misses %llu  |  "
+                             "present q %d lag %.1f ms  |  "
                              "shown %d  |  content %.0f fps  |  holds 7:%u 8:%u 9:%u 10:%u 16:%u  |  sr submit %.2f ms  |  "
                              "sr cpu %.2f ms  |  dec %.2f/%.2f ms  |  "
                              "net jitter %.2f ms loss %.2f%% drops %d  |  queue %d  trim %+.3f%%  |  "
@@ -928,9 +939,11 @@ void NextApp::Frame() {
                              "nr %.1f ms  |  fg %.1f ms %dx drops %llu out %.0f fps\n",
                              loop_intervals_.Percentile(0.50), loop_p99_,
                              loop_intervals_.Max(), cadence_p50_, cadence_p99_,
-                             present_refresh_hz_, present_misses_rate_, display_rate_,
-                             content_fps_,
-                             h7, h8, h9, h10, h16,
+                             present_refresh_hz_, present_misses_rate_,
+                             stats_presenter ? stats_presenter->present_queue() : 0,
+                             stats_presenter ? stats_presenter->present_lag_ms() : 0.0,
+                             display_rate_,
+                             content_fps_, h7, h8, h9, h10, h16,
                              dlss_sr_ ? dlss_sr_->last_ms() : 0.0, sr_cpu_ms_,
                              probe.decode_ms, probe.decode_ms_max,
                              probe.jitter_ms, probe.loss_percent, probe.decoder_drops,
@@ -965,6 +978,7 @@ void NextApp::Frame() {
 }
 
 void NextApp::Render() {
+    present_frame_ = false;
     const ThemeTokens& theme = ThemeFor(settings_.general.theme);
     if (watching_) {
         brp::Presenter* video = ActivePresenter();
@@ -988,6 +1002,12 @@ void NextApp::Render() {
             // stream window here would cost a full-size DWM composition per
             // vblank.
             ActiveWindow()->set_hand_cursor(false);
+            return;
+        }
+        if (!present_frame_) {
+            // Nothing was drawn this tick (a repeated frame or an idle
+            // decoder). Leave the last presented image on screen: presenting an
+            // untouched backbuffer would flip in a stale frame.
             return;
         }
         // Video-only surface: no Direct2D pass, no UI composition.
@@ -2505,6 +2525,14 @@ bool NextApp::Apply() {
     pad_rate_hz_.store(std::clamp(settings_.controller.poll_hz, 60, 1000));
     ApplyPresenterTarget();
     ApplyEnhance();
+    if (before.video.vsync != settings_.video.vsync && watching_ && stream_presenter_) {
+        // ALLOW_TEARING is a swapchain creation flag. Recreate the surface so a
+        // live vsync change (or the Lowest latency preset) takes effect now
+        // instead of on the next session.
+        stream_presenter_.reset();
+        EnsureStreamSurface();
+        redraw_needed_ = true;
+    }
     if (auto* logger = dynamic_cast<Logger*>(host_->Log())) {
         logger->SetLevel(settings_.advanced.log_level);
     }
@@ -3499,6 +3527,7 @@ void NextApp::PresentVideo() {
     if (!streaming_) {
         return;
     }
+    present_frame_ = false;
     brp::Presenter* video = ActivePresenter();
 
     const double content =
@@ -3532,8 +3561,10 @@ void NextApp::PresentVideo() {
                                           video_frame_.height, video_frame_.pq);
                     video->SetSourceFinal(false);
                     video->Render(now_);
+                    present_frame_ = true;
                 } else {
                     video->Clear(background);
+                    present_frame_ = true;
                 }
                 return;
             }
@@ -3584,6 +3615,7 @@ void NextApp::PresentVideo() {
             } else {
                 video->Clear(background);
             }
+            present_frame_ = true;
         };
 
         if (new_frame && have_frame_ && !video_frame_.rgba.empty() &&
@@ -3718,16 +3750,22 @@ void NextApp::PresentVideo() {
             video->SetSourceFinal(false);
             RecordVideoShown();
         }
+        if (!have_shown && !redraw_needed_) {
+            return;
+        }
+        redraw_needed_ = false;
         if (rife_have_shown_ && !rife_last_shown_.rgba.empty()) {
-            // Redraw the standing frame on every swapchain tick. Skipping the
-            // redraw made the flip chain alternate between the new frame and
-            // the backbuffer contents from earlier in the queue, which reads
-            // as a backwards skip even though the decode cadence was perfect.
+            // Redraw the standing frame when a frame is due on the swapchain.
+            // Skipping the redraw made the flip chain alternate between the new
+            // frame and the backbuffer contents from earlier in the queue, which
+            // reads as a backwards skip even though the decode cadence was
+            // perfect.
             video->Render(now_);
         } else {
             const float background[4] = {0.015f, 0.017f, 0.022f, 1.0f};
             video->Clear(background);
         }
+        present_frame_ = true;
         return;
     }
 
@@ -3739,9 +3777,17 @@ void NextApp::PresentVideo() {
         new_frame = true;
         EnhanceNeural(video_frame_);
     }
+    // A repeated 30 fps frame or an idle decoder is not new content: leave the
+    // last presented image on screen instead of pushing an untouched backbuffer
+    // through the flip chain.
+    if (!new_frame && !redraw_needed_) {
+        return;
+    }
+    redraw_needed_ = false;
     if (!have_frame_ || (video_frame_.rgba.empty() && !video_frame_.gpu_view)) {
         const float background[4] = {0.015f, 0.017f, 0.022f, 1.0f};
         video->Clear(background);
+        present_frame_ = true;
         return;
     }
 
@@ -3792,13 +3838,11 @@ void NextApp::PresentVideo() {
                          .count();
         RecordVideoShown();
     }
-    // Present the standing frame on every swapchain tick, even when the
-    // decoder had nothing new this interval. Presenting a backbuffer that was
-    // never drawn is not a repeat of the last frame: with a flip chain it is
-    // the frame from two presents ago, so a single missed decode tick visibly
-    // jumps backwards. This redraw is one full-screen pass and keeps both
-    // swapchain buffers on the newest image.
+    // Redraw the standing frame only when a present is actually due: a new
+    // unique frame, or a resize that left the backbuffer blank. Skipping the
+    // idle presents keeps the flip queue from holding a frame nobody asked for.
     video->Render(now_);
+    present_frame_ = true;
 }
 
 bool NextApp::EnsureNr(int width, int height) {
@@ -4155,6 +4199,7 @@ void NextApp::ToggleWatch(bool watching) {
         watching_ = true;
         disconnect_armed_ = false;
         have_frame_ = false;
+        redraw_needed_ = true;
         video_phase_ = 0.0;
         last_source_refresh_ = 0;
         hold_counts_.fill(0);

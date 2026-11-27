@@ -273,3 +273,47 @@ content rate (`content 60 fps`). Effects:
 
 The signature is a sample (64 rows x 64 columns), not a full-frame hash; it
 costs a few microseconds and does not touch the 8 MB RGBA buffer again.
+
+## Round 7: compared against a reference Java/Vulkan client
+
+The reference client runs the same console protocol but decodes VVC/HEVC on a
+Vulkan device and presents through libplacebo on the same device, with frame
+pacing set to its lowest-latency mode (no wait before the decoded frame is
+submitted). Its logged stream settings are the interesting part:
+
+| Setting | Reference client | Ours before this round |
+|---|---|---|
+| Source fps | 60 | **30** |
+| Bitrate | 25 Mbps | **100 Mbps** |
+| Frame buffer | reorder window, in-order frames pass through | 0 |
+| Present pacing | submit on decode, no vblank gate | waited on the swapchain first |
+
+Two of those were ours to lose. At 30 fps the console itself holds a frame
+before it encodes (and the client can only display a new picture every 33 ms);
+requesting 100 Mbps makes the VBV/link queues larger than a 25 Mbps stream.
+Round 5's queue fix removed the client-side frame age, but the 30 fps request
+kept roughly two source intervals on the console side, which is exactly the
+"playing in the past" difference against a 60 fps client.
+
+Changes:
+
+- The stream defaults to and recommends 60 fps. The setting stays available for
+  compatibility, but the UI now states that 30 makes the console hold a frame.
+  30 fps games should keep 60 on the wire (repeated frames are detected and
+  skipped) and use frame generation for cadence.
+- The profile was migrated to 60 fps / 50 Mbps / buffer 0 / vsync off.
+- The render loop no longer waits on the swapchain's frame-latency object
+  before pulling a decoded frame. It wakes on the frame itself, draws it, and
+  presents; `Present()` still throttles when the flip queue is full. A frame that
+  arrived mid-refresh no longer waits for the next vblank to even be picked up.
+- Only drawn frames are presented. A repeated frame or an idle decoder leaves
+  the last image on screen instead of flipping in an untouched backbuffer.
+- The probe now prints `present q N lag X ms`, derived from
+  `DXGI_FRAME_STATISTICS` (`PresentRefreshCount`, `SyncRefreshCount`,
+  `SyncQPCTime`) with the refresh period learned from consecutive vblanks. That
+  is ground truth for how many refreshes the flip queue adds.
+
+What we deliberately did not copy: the reference client's Vulkan/libplacebo
+renderer and its per-frame Java object churn. Our D3D11 video-processor path is
+already zero-copy when AI is off; the latency was in pacing and in the stream
+request, not in the GPU API.

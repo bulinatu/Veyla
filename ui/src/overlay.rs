@@ -682,7 +682,7 @@ impl OverlayView {
                 rows.push(self.seg_row(
                     "streaming.fps",
                     "Source fps",
-                    "Stream restart required",
+                    "60 is lowest latency; 30 adds a console frame. Restart required",
                     &[(30, "30"), (60, "60"), (120, "120")],
                     cx,
                 ));

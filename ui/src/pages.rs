@@ -122,6 +122,24 @@ impl Root {
             }),
         );
 
+        // One click for an apples-to-apples comparison with a plain low-latency
+        // client: 60 fps on the wire, no frame buffer, no vblank sync, no AI.
+        let latency = widgets::button(
+            "Lowest latency",
+            Tone::Ghost,
+            cx.listener(|this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                this.settings.set_int("streaming.fps", 60);
+                this.settings.set_int("streaming.bitrate_kbps", 50000);
+                this.settings.set_int("streaming.frame_buffer", 0);
+                this.settings.set_bool("video.vsync", false);
+                this.settings.set_bool("ai.frame_generation", false);
+                this.settings.set_bool("ai.super_resolution", false);
+                this.settings.set_bool("ai.neural_render", false);
+                this.persist();
+                cx.notify();
+            }),
+        );
+
         let hero = widgets::card()
             .flex()
             .flex_col()
@@ -168,7 +186,14 @@ impl Root {
                     .gap(px(10.0))
                     .mt(px(4.0))
                     .child(connect)
-                    .child(disconnect),
+                    .child(disconnect)
+                    .child(latency),
+            )
+            .child(
+                div()
+                    .text_size(theme::tiny())
+                    .text_color(theme::muted())
+                    .child("Lowest latency: 60 fps, 50 Mbps, buffer 0, vsync off, AI off"),
             )
             .child(
                 div()
@@ -474,14 +499,14 @@ impl Root {
                 self.seg_int_row(
                     "streaming.fps",
                     "Frame rate",
-                    "30 locks to a cinematic cadence; 60 halves latency",
+                    "60 is the low-latency stream; 30 makes the console hold a frame",
                     &[(30, "30"), (60, "60"), (120, "120")],
                     cx,
                 ),
                 self.stepper_row(
                     "streaming.bitrate_kbps",
                     "Bitrate",
-                    "Higher is sharper, needs headroom",
+                    "Sharper, but above ~50 Mbps the link queues more",
                     10000,
                     200000,
                     5000,
