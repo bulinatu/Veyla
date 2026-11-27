@@ -16,7 +16,7 @@
   <img alt="Version" src="https://img.shields.io/badge/version-2.6.0-6D28D9">
 </p>
 
-![Veyla home screen](docs/images/home.png)
+![Veyla home screen](docs/images/home-2.6.5.png)
 
 ---
 
