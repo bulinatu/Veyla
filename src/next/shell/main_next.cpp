@@ -5,6 +5,17 @@
 #include <string_view>
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR command_line, int) {
+    // This is a latency-sensitive client, not an idle desktop app: keep it out
+    // of Windows' background execution throttling and give its threads a fair
+    // share against the shell, browser and recording tools.
+    PROCESS_POWER_THROTTLING_STATE power{};
+    power.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    power.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+    power.StateMask = 0;
+    ::SetProcessInformation(::GetCurrentProcess(), ProcessPowerThrottling, &power,
+                            sizeof(power));
+    ::SetPriorityClass(::GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
+
     // `--engine` starts the headless core controlled by the Rust/GPUI shell.
     // `--bridge-port N` is the loopback port the shell already picked; without
     // it the engine keeps its own window and the legacy C++ shell.

@@ -923,6 +923,7 @@ void NextApp::Frame() {
                              "sr cpu %.2f ms  |  dec %.2f/%.2f ms  |  "
                              "net jitter %.2f ms loss %.2f%% drops %d  |  queue %d  trim %+.3f%%  |  "
                              "wait max %.1f ms  frame max %.1f ms  |  age avg %.1f max %.1f ms  |  "
+                             "input %.1f/%.1f ms  |  "
                              "nr %.1f ms  |  fg %.1f ms %dx drops %llu out %.0f fps\n",
                              loop_intervals_.Percentile(0.50), loop_p99_,
                              loop_intervals_.Max(), cadence_p50_, cadence_p99_,
@@ -937,6 +938,8 @@ void NextApp::Frame() {
                              playout_depth_, playout_trim_ * 100.0, probe_wait_ms_,
                              probe_frame_ms_, probe_age_n_ > 0 ? probe_age_sum_ / probe_age_n_ : 0.0,
                              probe_age_max_, nr_ms_,
+                             streaming_ ? streaming_->InputResponseMs() : 0.0,
+                             streaming_ ? streaming_->InputResponseAvgMs() : 0.0,
                              dlss_fg_ ? dlss_fg_->process_ms() : 0.0,
                              dlss_fg_ ? dlss_fg_->actual_multiplier() : 0,
                              dlss_fg_ ? dlss_fg_->dropped() : 0,
@@ -4473,6 +4476,9 @@ void NextApp::PublishBridgeStatus() {
     number("age_ms", last_age_ms_, true);
     number("present_lag_ms",
            ActivePresenter() ? ActivePresenter()->present_lag_ms() : 0.0, true);
+    number("input_ms", streaming_ ? streaming_->InputResponseMs() : 0.0, true);
+    number("input_avg_ms",
+           streaming_ ? streaming_->InputResponseAvgMs() : 0.0, true);
     flag("restart_pending", stream_restart_pending_, true);
     number("sr_ms", dlss_sr_ ? dlss_sr_->last_ms() : 0.0, true);
     number("fg_ms", 0.0, true);

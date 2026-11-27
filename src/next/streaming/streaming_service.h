@@ -72,6 +72,10 @@ public:
     brp::PadConsoleFeedback Feedback() const;
     bool TakeHaptics(std::uint16_t& left, std::uint16_t& right);
     bool Connected() const;
+    // Console + encode + network + decode loop measured from a controller change
+    // to the first decoded frame (0 until a change has been seen).
+    double InputResponseMs() const { return streaming_.input_response_ms(); }
+    double InputResponseAvgMs() const { return streaming_.input_response_avg_ms(); }
 
 private:
     void JoinConnect();

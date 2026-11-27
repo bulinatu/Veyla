@@ -1672,3 +1672,19 @@ ALL PASS + a live PS5 stream):
 Build note: GPUI's build script needs `fxc.exe`. Put the Windows SDK bin on
 PATH before `cargo build`, e.g.
 `C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64`.
+
+## 2.5.0 invisible pass - scheduling, input loop probe, Takion v20 research
+
+- The engine process opts out of Windows execution-speed throttling and runs at
+  ABOVE_NORMAL priority; the decode thread takes MMCSS "Games" and HIGHEST.
+  Invisible, but it removes hitches when the shell/browser is busy.
+- New input probe (kept internal for now): the moment the pad state changes is
+  stamped in `SendController`, and the first decoded frame after it closes the
+  loop (`input last/avg ms` in the frame probe, `input_ms`/`input_avg_ms` in the
+  bridge). This measures console + encode + network + decode, not just the
+  client queue.
+- Takion v20: an experimental A/V parser and an env-gated version handshake
+  (`BRP_TAKION20=1`) are in the tree. Live test: the console accepts v20 at the
+  Takion layer, then the control/Bang protobuf fails, so v20 also needs the
+  control and feedback layouts. Full notes in `docs/40-takion-v20.md`; v12
+  remains the default and was re-verified at 60 fps (age 0.0 ms, 0 drops).

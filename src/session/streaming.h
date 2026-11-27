@@ -105,6 +105,20 @@ public:
     void SendController(const PadState& pad);
     void SetMotionEnabled(bool enabled) { motion_enabled_ = enabled; }
 
+    // Diagnostic: time from a controller state change to the first decoded
+    // frame after it. That is the console + encode + network + decode loop the
+    // player actually feels (the client-side age is measured separately).
+    double input_response_ms() const {
+        const long long us = input_response_last_us_.load();
+        return us >= 0 ? static_cast<double>(us) / 1000.0 : 0.0;
+    }
+    double input_response_avg_ms() const {
+        const int n = input_response_count_.load();
+        return n > 0 ? static_cast<double>(input_response_sum_us_.load()) / n / 1000.0
+                     : 0.0;
+    }
+    int input_response_count() const { return input_response_count_.load(); }
+
     // Latest state pushed by the console (rumble, trigger effects, LEDs).
     // version() changes only when the console actually sent something.
     PadConsoleFeedback feedback() const;
@@ -184,6 +198,11 @@ private:
     std::atomic<long long> stats_arrival_us_{0};
     std::atomic<int> stats_arrival_count_{0};
     std::atomic<int> stats_arrival_outliers_{0};
+    // Input-to-first-decoded-frame probe (see SendController / DecodeThreadMain).
+    std::atomic<long long> input_change_us_{-1};
+    std::atomic<long long> input_response_last_us_{-1};
+    std::atomic<long long> input_response_sum_us_{0};
+    std::atomic<int> input_response_count_{0};
     std::chrono::steady_clock::time_point last_decoded_at_{};
     bool have_last_decoded_ = false;
     std::chrono::steady_clock::time_point stats_started_{};

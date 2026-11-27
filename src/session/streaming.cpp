@@ -16,6 +16,11 @@ extern "C" {
 #include <cstring>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <avrt.h>
+#endif
+
 namespace brp::session {
 namespace {
 
@@ -372,10 +377,12 @@ void Streaming::OnVideo(uint8_t* buf, size_t size, int32_t frames_lost) {
 }
 
 void Streaming::DecodeThreadMain() {
-    // Keep the producer one step ahead of presentation. A default-priority
-    // decode thread loses its slice to ordinary background work exactly when a
-    // hitch would be visible as a held frame.
-    ::SetThreadPriority(::GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+    // Keep the producer one step ahead of presentation. MMCSS + HIGHEST keeps
+    // the decode thread scheduled even when the shell, browser or a background
+    // task is busy; it is the thread that turns network packets into frames.
+    DWORD mmcss_index = 0;
+    HANDLE mmcss = ::AvSetMmThreadCharacteristicsW(L"Games", &mmcss_index);
+    ::SetThreadPriority(::GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     for (;;) {
         EncodedUnit unit;
         {
@@ -428,6 +435,21 @@ void Streaming::DecodeThreadMain() {
                 }
             }
             frame_cv_.notify_one();
+            // Input probe: the first decoded frame after a controller change
+            // closes the console + encode + network + decode loop.
+            const long long change_us = input_change_us_.exchange(-1);
+            if (change_us >= 0) {
+                const long long now_us =
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+                const long long delta = now_us - change_us;
+                if (delta > 0 && delta < 2000000) {
+                    input_response_last_us_.store(delta);
+                    input_response_sum_us_.fetch_add(delta);
+                    input_response_count_.fetch_add(1);
+                }
+            }
             ++decoded;
         }
 
@@ -449,6 +471,9 @@ void Streaming::DecodeThreadMain() {
                 message_ = "Streaming 1080p60";
             }
         }
+    }
+    if (mmcss) {
+        ::AvRevertMmThreadCharacteristics(mmcss);
     }
 }
 
@@ -949,6 +974,11 @@ void Streaming::SendController(const PadState& pad) {
     }
     controller_state_ = next;
     chiaki_session_set_controller_state(&session_, &controller_state_);
+    // Stamp the change for the input-to-first-frame probe.
+    input_change_us_.store(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
 }
 
 }  // namespace brp::session
