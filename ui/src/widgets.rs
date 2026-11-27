@@ -165,7 +165,9 @@ pub fn page_title(title: &'static str, subtitle: &'static str) -> AnyElement {
         .into_any_element()
 }
 
-pub fn section(title: &'static str, hint: &'static str) -> AnyElement {
+pub fn section(title: impl Into<SharedString>, hint: impl Into<SharedString>) -> AnyElement {
+    let title: SharedString = title.into();
+    let hint: SharedString = hint.into();
     div()
         .flex()
         .items_center()
@@ -242,6 +244,20 @@ pub fn button(
 ) -> AnyElement {
     let label: SharedString = label.into();
     let element_id = SharedString::from(format!("btn-{label}"));
+    button_with_id(element_id, label, tone, on_click)
+}
+
+/// Same button, but with an explicit element id. Lists that repeat a label
+/// ("Apply" once per row) must not share one id: GPUI keeps hover and press
+/// state per id, so shared ids make every copy react at once.
+pub fn button_with_id(
+    id: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    tone: Tone,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let label: SharedString = label.into();
+    let element_id: SharedString = id.into();
     let (bg, fg, border) = match tone {
         Tone::Primary => (0x8B5CF6FF, 0xFFFFFFFF, 0x00000000),
         Tone::Ghost => (0xFFFFFF0F, theme::TEXT, theme::BORDER),
@@ -401,7 +417,12 @@ pub fn logo_mark(size: f32) -> AnyElement {
                 .text_size(px(size * 0.46))
                 .font_weight(FontWeight::BOLD)
                 .text_color(rgba(0xFFFFFFFF))
-                .child("B"),
+                // Same 0.6% optical nudge as tools/make_logo_icon.py: a V's
+                // mass sits in the upper strokes, so a text-centred glyph reads
+                // high. Keep the window icon and this mark identical.
+                .relative()
+                .top(px(size * 0.006))
+                .child("V"),
         )
         .into_any_element()
 }

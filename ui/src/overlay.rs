@@ -42,6 +42,10 @@ pub struct OverlayView {
     num_text: String,
     num_fresh: bool,
     dirty_at: Option<std::time::Instant>,
+    /// (profile id, when armed) for the two-step delete in the Profiles tab.
+    confirm_profile: Option<(String, std::time::Instant)>,
+    /// One delete per gesture: queued clicks after a stall must not cascade.
+    profile_delete_cooldown: Option<std::time::Instant>,
     pub(crate) focus: FocusHandle,
     last_rev: u64,
     last_devices_rev: u64,
@@ -74,6 +78,8 @@ impl OverlayView {
             num_text: String::new(),
             num_fresh: false,
             dirty_at: None,
+            confirm_profile: None,
+            profile_delete_cooldown: None,
             focus,
             last_rev: 0,
             last_devices_rev: devices_rev,
@@ -772,30 +778,76 @@ impl OverlayView {
                 }
                 for profile in &self.profiles {
                     let id = profile.id.clone();
-                    rows.push(widgets::row(
-                        profile.name.clone(),
-                        if profile.is_default { "Default" } else { "Saved configuration" },
-                        widgets::button(
+                    let armed = self
+                        .confirm_profile
+                        .as_ref()
+                        .is_some_and(|(current, at)| current == &id && at.elapsed() < Duration::from_secs(4));
+                    let apply_id = id.clone();
+                    let delete_click = id.clone();
+                    let controls = div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(widgets::button_with_id(
+                            format!("overlay-profile-apply-{id}"),
                             "Apply",
                             widgets::Tone::Subtle,
                             cx.listener(
                                 move |this, _: &gpui::ClickEvent, _: &mut Window, _: &mut Context<Self>| {
-                                    this.engine.send(&format!("profile_apply {id}"));
+                                    this.engine.send(&format!("profile_apply {apply_id}"));
                                 },
                             ),
-                        ),
+                        ))
+                        .child(widgets::button_with_id(
+                            format!("overlay-profile-delete-{id}"),
+                            if armed { "Confirm" } else { "Delete" },
+                            if armed { widgets::Tone::Danger } else { widgets::Tone::Subtle },
+                            cx.listener(
+                                move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                                    let now = std::time::Instant::now();
+                                    if this.profile_delete_cooldown.is_some_and(|at| {
+                                        now.duration_since(at) < Duration::from_millis(1500)
+                                    }) {
+                                        this.confirm_profile = None;
+                                        cx.notify();
+                                        return;
+                                    }
+                                    let armed = this.confirm_profile.as_ref().is_some_and(
+                                        |(current, at)| current == &delete_click
+                                            && now.duration_since(*at) < Duration::from_secs(4),
+                                    );
+                                    if armed {
+                                        this.confirm_profile = None;
+                                        this.profile_delete_cooldown = Some(now);
+                                        this.engine.send(&format!("profile_delete {delete_click}"));
+                                    } else {
+                                        this.confirm_profile = Some((delete_click.clone(), now));
+                                    }
+                                    cx.notify();
+                                },
+                            ),
+                        ));
+                    rows.push(widgets::row(
+                        profile.name.clone(),
+                        if profile.is_default { "Default" } else { "Saved configuration" },
+                        controls.into_any_element(),
                     ));
                 }
-                let name = format!("Profile {}", self.profiles.len() + 1);
+                let at_limit = self.profiles.len() >= 12;
                 rows.push(widgets::row(
                     "Current settings",
-                    "Save as a named profile",
-                    widgets::button(
-                        "Save current",
-                        widgets::Tone::Ghost,
+                    if at_limit {
+                        "Limit reached - delete one to make room"
+                    } else {
+                        "Save as a named profile"
+                    },
+                    widgets::button_with_id(
+                        "overlay-profile-save",
+                        if at_limit { "Limit reached" } else { "Save current" },
+                        if at_limit { widgets::Tone::Subtle } else { widgets::Tone::Ghost },
                         cx.listener(
                             move |this, _: &gpui::ClickEvent, _: &mut Window, _: &mut Context<Self>| {
-                                this.engine.send(&format!("profile_save {name}"));
+                                this.engine.send("profile_save");
                             },
                         ),
                     ),
@@ -1101,8 +1153,8 @@ pub(crate) fn restore_focus_after<T: 'static>(cx: &mut Context<T>) {
 }
 
 pub(crate) fn restore_focus_now() {
-    let stream = wide("BetterRemotePlay Stream");
-    let shell = wide("BetterRemotePlay");
+    let stream = wide("Veyla Stream");
+    let shell = wide("Veyla");
     unsafe {
         let mut hwnd = FindWindowW(std::ptr::null(), stream.as_ptr());
         if hwnd == 0 {

@@ -111,7 +111,7 @@ add_executable(brp
     src/session/streaming.cpp
 )
 # GUI subsystem: no console window on launch. main() is still the entry point.
-set_target_properties(brp PROPERTIES WIN32_EXECUTABLE TRUE)
+set_target_properties(brp PROPERTIES OUTPUT_NAME "veyla-legacy" WIN32_EXECUTABLE TRUE)
 if (MSVC)
     target_link_options(brp PRIVATE /ENTRY:mainCRTStartup)
 endif()
@@ -351,7 +351,7 @@ set(BRP_NEXT_SHELL_SOURCES
 )
 add_executable(brpnext ${BRP_NEXT_SHELL_SOURCES})
 target_link_libraries(brpnext PRIVATE brp_next_core brp_next_streaming brp_ui brp_media comdlg32 shell32 winmm ws2_32)
-set_target_properties(brpnext PROPERTIES WIN32_EXECUTABLE TRUE)
+set_target_properties(brpnext PROPERTIES OUTPUT_NAME "veyla-classic" WIN32_EXECUTABLE TRUE)
 if (MSVC)
     target_compile_options(brpnext PRIVATE /W4 /permissive- /utf-8)
 endif()
@@ -359,7 +359,7 @@ endif()
 # Headless stream engine driven by the Rust/GPUI shell over the UI bridge.
 add_executable(brpnext-engine ${BRP_NEXT_SHELL_SOURCES})
 target_link_libraries(brpnext-engine PRIVATE brp_next_core brp_next_streaming brp_ui brp_media comdlg32 shell32 winmm ws2_32)
-set_target_properties(brpnext-engine PROPERTIES WIN32_EXECUTABLE TRUE)
+set_target_properties(brpnext-engine PROPERTIES OUTPUT_NAME "veyla-engine" WIN32_EXECUTABLE TRUE)
 if (MSVC)
     target_compile_options(brpnext-engine PRIVATE /W4 /permissive- /utf-8)
 endif()

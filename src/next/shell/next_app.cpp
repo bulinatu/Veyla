@@ -74,6 +74,9 @@ void HideNvidiaOverlay() {
     }
 }
 constexpr wchar_t kVersion[] = L"2.5.0";
+// Saved profiles are a convenience, not a library. Twelve keeps the list one
+// glance long; the shell and the control centre both show "n / 12".
+constexpr std::size_t kMaxProfiles = 12;
 
 std::wstring Widen(const std::string& text) {
     if (text.empty()) {
@@ -532,7 +535,7 @@ bool NextApp::ShouldCaptureEsc() const {
 }
 bool NextApp::Init() {
     window_ = std::make_unique<brp::Win32Window>();
-    if (!window_->Create(L"BetterRemotePlay Next", 1600, 900)) {
+    if (!window_->Create(L"Veyla", 1600, 900)) {
         return false;
     }
     presenter_ = std::make_unique<brp::Presenter>();
@@ -562,7 +565,7 @@ bool NextApp::Init() {
     const Status status = host_->Initialize(report);
     if (!status.ok()) {
         MessageBoxW(window_->hwnd(), Widen(status.message()).c_str(),
-                    L"BetterRemotePlay Next", MB_OK | MB_ICONERROR);
+                    L"Veyla", MB_OK | MB_ICONERROR);
         return false;
     }
     settings_ = host_->Settings();
@@ -701,7 +704,7 @@ bool NextApp::EnsureStreamSurface() {
     }
     if (!stream_window_) {
         stream_window_ = std::make_unique<brp::Win32Window>();
-        if (!stream_window_->Create(L"BetterRemotePlay Stream", 1600, 900)) {
+        if (!stream_window_->Create(L"Veyla Stream", 1600, 900)) {
             stream_window_.reset();
             Toast(L"Cannot create the stream window", true);
             return false;
@@ -1125,7 +1128,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
     renderer_->FillRounded(Rect(12, 8, 36, 32), 7.0f, ToD2D(theme.accent));
     renderer_->Text(L"B", Rect(12, 8, 36, 32), 12.0f, ToD2D(theme.text),
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
-    renderer_->Text(L"BetterRemotePlay", Rect(46, 2, 220, 21), 12.5f,
+    renderer_->Text(L"Veyla", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
     renderer_->Text(L"NEXT  ·  2.5.0", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
@@ -1241,7 +1244,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"BetterRemotePlay Next 2.5.0",
+        renderer_->Text(L"Veyla 2.5.0",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -2370,14 +2373,14 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"BetterRemotePlay Next 2.5.0  |  stable release", L"STABLE", true);
+               L"Veyla 2.5.0  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
                            ToD2D(theme.accent));
     renderer_->Text(L"B", Rect(x + 18, 154, x + 66, 202), 24.0f, ToD2D(theme.text),
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
-    renderer_->Text(L"BetterRemotePlay Next", Rect(x + 80, 152, x + w - 20, 182),
+    renderer_->Text(L"Veyla", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
     renderer_->Text(L"Version 2.5.0  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
@@ -4362,6 +4365,8 @@ void NextApp::HandleBridgeCommand(const std::string& command) {
         publish_profiles_ = true;
     } else if (command.rfind("profile_apply ", 0) == 0) {
         ApplyProfileById(command.substr(14));
+    } else if (command == "profile_save") {
+        SaveProfileByName({});
     } else if (command.rfind("profile_save ", 0) == 0) {
         SaveProfileByName(command.substr(13));
     } else if (command.rfind("profile_delete ", 0) == 0) {
@@ -4637,9 +4642,33 @@ void NextApp::ApplyProfileById(const std::string& id) {
     }
 }
 
-void NextApp::SaveProfileByName(const std::string& name) {
-    if (!host_->Profiles() || name.empty()) {
+void NextApp::SaveProfileByName(const std::string& requested) {
+    if (!host_->Profiles()) {
         return;
+    }
+    std::vector<Profile> existing;
+    host_->Profiles()->List(existing);
+    if (existing.size() >= kMaxProfiles) {
+        overlay_status_ = L"Profile limit reached (" + std::to_wstring(kMaxProfiles) +
+                          L"). Delete one first.";
+        overlay_status_error_ = true;
+        last_overlay_update_ = -1.0;
+        Toast(L"Profile limit reached. Delete one first.", true);
+        return;
+    }
+    // The shell sends a bare `profile_save`: the engine owns uniqueness so two
+    // clicks can never overwrite the same "Profile 2" file.
+    std::string name = requested;
+    if (name.empty()) {
+        for (std::size_t index = 1; name.empty(); ++index) {
+            const std::string candidate = "Profile " + std::to_string(index);
+            const bool taken = std::any_of(
+                existing.begin(), existing.end(),
+                [&candidate](const Profile& profile) { return profile.name == candidate; });
+            if (!taken) {
+                name = candidate;
+            }
+        }
     }
     Profile profile;
     profile.id = MakeProfileId(name);
@@ -4654,14 +4683,36 @@ void NextApp::SaveProfileByName(const std::string& name) {
         publish_profiles_ = true;
         overlay_status_ = L"Profile saved: " + Widen(name);
         overlay_status_error_ = false;
+        last_overlay_update_ = -1.0;
     }
 }
 
 void NextApp::DeleteProfileById(const std::string& id) {
-    if (host_->Profiles() && !id.empty()) {
-        host_->Profiles()->Delete(id);
-        publish_profiles_ = true;
+    if (!host_->Profiles() || id.empty()) {
+        return;
     }
+    std::vector<Profile> existing;
+    host_->Profiles()->List(existing);
+    std::string name;
+    for (const Profile& profile : existing) {
+        if (profile.id == id) {
+            name = profile.name;
+            break;
+        }
+    }
+    const Status status = host_->Profiles()->Delete(id);
+    if (!status.ok()) {
+        overlay_status_ = L"Delete failed: " + Widen(status.message());
+        overlay_status_error_ = true;
+        last_overlay_update_ = -1.0;
+        Toast(L"Could not delete the profile", true);
+        return;
+    }
+    publish_profiles_ = true;
+    overlay_status_ = name.empty() ? L"Profile deleted" : L"Profile deleted: " + Widen(name);
+    overlay_status_error_ = false;
+    last_overlay_update_ = -1.0;
+    Toast(L"Profile deleted");
 }
 
 void NextApp::ToggleBorderlessFullscreen() {
@@ -4692,7 +4743,7 @@ void NextApp::WriteSessionReport() {
     const StreamSnapshot stream = streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
     const DiagnosticsSnapshot diagnostics = host_->Diagnostics()->Snapshot();
     file << "{\n";
-    file << "  \"app\": \"BetterRemotePlayNext\",\n";
+    file << "  \"app\": \"Veyla\",\n";
     file << "  \"version\": \"" << Narrow(kVersion).c_str() << "\",\n";
     file << "  \"source\": \"" << stream.console_address << "\",\n";
     file << "  \"state\": \"" << stream.state << "\",\n";
@@ -4862,7 +4913,7 @@ void NextApp::WriteBenchReport() {
         return;
     }
     file << "{\n";
-    file << "  \"app\": \"BetterRemotePlayNext\",\n";
+    file << "  \"app\": \"Veyla\",\n";
     file << "  \"gpu\": \"" << system_.gpu.name << "\",\n";
     file << "  \"driver\": \"" << system_.gpu.driver << "\",\n";
     if (!system_.displays.empty()) {

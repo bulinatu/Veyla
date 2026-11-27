@@ -70,7 +70,7 @@ bool OverlayWindow::Create() {
 
     hwnd_ = ::CreateWindowExW(
         WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-        kClass, L"BetterRemotePlay control center", WS_POPUP, 0, 0, kCompactW,
+        kClass, L"Veyla control center", WS_POPUP, 0, 0, kCompactW,
         kCompactH, nullptr, nullptr, wc.hInstance, this);
     if (!hwnd_) {
         std::fprintf(stderr, "[overlay] CreateWindowEx failed %lu\n",
@@ -413,7 +413,7 @@ void OverlayWindow::PaintCompact(HDC dc, const RECT& client) {
     FillRound(dc, panel, 16, ToColor(p.panel), ToColor(p.border));
 
     const int s = static_cast<int>(scale_ * 10.0f);
-    DrawTextLine(dc, view_.compact_title.empty() ? L"BetterRemotePlay"
+    DrawTextLine(dc, view_.compact_title.empty() ? L"Veyla"
                                                         : view_.compact_title.c_str(),
                  RECT{16, 8, 300, 32}, std::max(10, 13 * s / 10), FW_SEMIBOLD,
                  ToColor(p.text));

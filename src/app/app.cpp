@@ -860,7 +860,7 @@ void App::DrawBootLogo(float cx, float cy, float reveal, float t, float alpha) {
 
     // Wordmark, with a light glint that crosses it once the mark has settled.
     const float word_y = cy + 116.0f;
-    ui_.Text(L"BetterRemotePlay", {cx - 320.0f, word_y, cx + 320.0f, word_y + 40.0f}, 30.0f,
+    ui_.Text(L"Veyla", {cx - 320.0f, word_y, cx + 320.0f, word_y + 40.0f}, 30.0f,
              th::Rgba(th::kInk, 0.98f * k), DWRITE_FONT_WEIGHT_SEMI_BOLD,
              DWRITE_TEXT_ALIGNMENT_CENTER);
     if (r >= 0.95f) {
@@ -1960,7 +1960,7 @@ void App::OpenTestingLog() {
     }
     SYSTEMTIME st{};
     ::GetLocalTime(&st);
-    testing_ << "=== BetterRemotePlay testing log ===\n";
+    testing_ << "=== Veyla testing log ===\n";
     testing_ << "local=" << st.wYear << '-' << st.wMonth << '-' << st.wDay << ' ' << st.wHour
              << ':' << st.wMinute << ':' << st.wSecond << "\n";
 
@@ -2142,7 +2142,7 @@ void App::RecoverFromDeviceLoss() {
         }
     }
 
-    stream_note_ = "The graphics device was lost. Restart BetterRemotePlay.";
+    stream_note_ = "The graphics device was lost. Restart Veyla.";
     quit_ = true;
 }
 
@@ -4982,7 +4982,7 @@ void App::RenderTopBar() {
 
     // In fullscreen there is no custom title bar, so the brand stays here.
     if (borderless_) {
-        ui_.Text(L"BETTERREMOTEPLAY", {48.0f, 24.0f, 480.0f, 54.0f}, 14.0f,
+        ui_.Text(L"VEYLA", {48.0f, 24.0f, 480.0f, 54.0f}, 14.0f,
                  th::Rgba(th::kInk, 0.92f), DWRITE_FONT_WEIGHT_SEMI_BOLD);
     }
 
@@ -5020,7 +5020,7 @@ void App::RenderWindowChrome() {
     // needs; it stays crisp at every UI scale because it is drawn by D2D.
     ui_.FillRounded({18.0f, h * 0.5f - 7.0f, 32.0f, h * 0.5f + 7.0f}, 4.0f,
                     th::Rgba(th::kAccent, 0.95f));
-    ui_.Text(L"BETTERREMOTEPLAY", {44.0f, 0.0f, 420.0f, h}, 12.5f,
+    ui_.Text(L"VEYLA", {44.0f, 0.0f, 420.0f, h}, 12.5f,
              th::Rgba(th::kInk, 0.90f), DWRITE_FONT_WEIGHT_SEMI_BOLD);
 
     const float bw = kTitleBarButtonW;
@@ -6144,7 +6144,7 @@ void App::RenderSettings(double t) {
             break;
         }
         case Tab::About: {
-            ui_.Text(L"BetterRemotePlay 0.5.0", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
+            ui_.Text(L"Veyla 0.5.0", {kContentX, y, w - 64.0f, y + 40.0f}, 20.0f,
                      th::Rgba(th::kInk), DWRITE_FONT_WEIGHT_SEMI_BOLD);
             y += 48.0f;
             ui_.Text(L"A PS5 to PC Remote Play client with a real post-process pipeline: "

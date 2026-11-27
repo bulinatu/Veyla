@@ -186,7 +186,12 @@ Status ProfileStore::List(std::vector<Profile>& out) {
             out.push_back(std::move(profile));
         }
     }
+    // Creation order, not alphabetical: "Profile 10" must not sort before
+    // "Profile 2", and a renamed profile should keep its place in the list.
     std::sort(out.begin(), out.end(), [](const Profile& a, const Profile& b) {
+        if (a.created_at != b.created_at) {
+            return a.created_at < b.created_at;
+        }
         return a.name < b.name;
     });
     return Status::Ok();

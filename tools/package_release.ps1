@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $release = Join-Path $root "build\Release"
 $distRoot = Join-Path $root "dist"
-$dest = Join-Path $distRoot "BetterRemotePlay"
+$dest = Join-Path $distRoot "Veyla"
 $version = $Version
 if ([string]::IsNullOrWhiteSpace($version)) {
     $cmakeText = Get-Content -LiteralPath (Join-Path $root "CMakeLists.txt") -Raw
@@ -32,14 +32,14 @@ function Copy-Required([string]$source, [string]$destination) {
     Copy-Item -LiteralPath $source -Destination $destination -Force
 }
 
-if (-not (Test-Path (Join-Path $release "brp.exe"))) {
-    throw "build\Release\brp.exe not found. Build the Release target first."
+if (-not (Test-Path (Join-Path $release "veyla-legacy.exe"))) {
+    throw "build\Release\veyla-legacy.exe not found. Build the Release target first."
 }
 
-$running = Get-Process brp -ErrorAction SilentlyContinue |
+$running = Get-Process veyla,veyla-engine,veyla-classic,veyla-legacy,brp,brpnext,brpnext-engine -ErrorAction SilentlyContinue |
     Where-Object { $_.Path -and $_.Path.StartsWith($dest, [System.StringComparison]::OrdinalIgnoreCase) }
 if ($running) {
-    throw "brp.exe is running from $dest. Close it before packaging."
+    throw "Veyla is running from $dest. Close it before packaging."
 }
 if (Test-Path $dest) {
     Remove-Item -LiteralPath $dest -Recurse -Force
@@ -48,12 +48,12 @@ New-Item -ItemType Directory -Path $dest -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $dest "fonts") -Force | Out-Null
 
 # --- core executable and FFmpeg runtime ------------------------------------
-Copy-Required (Join-Path $release "brp.exe") $dest
+Copy-Required (Join-Path $release "veyla-legacy.exe") (Join-Path $dest "veyla-legacy.exe")
 # 2.0 shell (Rust/GPUI) plus the headless engine it starts.
-$uiRelease = Join-Path $root "ui\target\release\brpnext-ui.exe"
-Copy-Required $uiRelease (Join-Path $dest "brpnext.exe")
-Copy-Required (Join-Path $release "brpnext-engine.exe") $dest
-Copy-Required (Join-Path $release "brpnext.exe") (Join-Path $dest "brpnext-classic.exe")
+$uiRelease = Join-Path $root "ui\target\release\veyla.exe"
+Copy-Required $uiRelease (Join-Path $dest "veyla.exe")
+Copy-Required (Join-Path $release "veyla-engine.exe") $dest
+Copy-Required (Join-Path $release "veyla-classic.exe") (Join-Path $dest "veyla-classic.exe")
 
 # Updater: lets a small patch zip replace only the files that changed.
 $updater = Join-Path $release "brp_update.exe"
@@ -131,10 +131,10 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 }
 # --- readme -----------------------------------------------------------------
 $readme = @"
-BetterRemotePlay 2.5 - standalone build
+Veyla 2.5 - standalone build
 =======================================
 
-Run brpnext.exe. No installer, no console window, no background service.
+Run veyla.exe. No installer, no console window, no background service.
 
 What changed in 2.5
 -------------------
@@ -181,15 +181,15 @@ What changed in 2.0
 
 Executables
 -----------
-- brpnext.exe: the 2.0 shell (Rust/GPUI). Start here.
-- brpnext-engine.exe: headless stream engine, started by the shell with
+- veyla.exe: the shell (Rust/GPUI). Start here.
+- veyla-engine.exe: headless stream engine, started by the shell with
   --engine --bridge-port. Do not run it by hand.
-- brpnext-classic.exe: the previous 1.2 C++ shell, kept as a fallback.
-- brp.exe: the reference product, unchanged.
+- veyla-classic.exe: the previous C++ shell, kept as a fallback.
+- veyla-legacy.exe: the original 0.5 reference shell.
 
 First run
 ---------
-1. Windows may ask to allow brpnext-engine.exe on the network. Click Allow:
+1. Windows may ask to allow veyla-engine.exe on the network. Click Allow:
    the console discovery and the video/control streams need it. The shell
    itself only talks to the engine over 127.0.0.1.
 2. Home shows the configured console. Connect & Play signs in to the PS5 and
@@ -257,6 +257,13 @@ Runtimes
 - nvngx_dlss.dll for DLSS Super Resolution.
 - The app is not affiliated with Sony Interactive Entertainment.
 
+Brand
+-----
+Veyla is the product name. BetterRemotePlay is the original project name and
+remains a trademark of its author; it is kept in compatibility paths such as
+%APPDATA%\BetterRemotePlayNext. All code and branding in this package are
+original work.
+
 Credits
 -------
 GPUI by Zed Industries (Apache-2.0). Inter and JetBrains Mono under the SIL
@@ -265,14 +272,14 @@ Open Font License.
 Set-Content -LiteralPath (Join-Path $dest "README.txt") -Value $readme -Encoding UTF8
 # --- zip --------------------------------------------------------------------
 $suffix = ""
-$zip = Join-Path $distRoot "BetterRemotePlay-$version-standalone$suffix.zip"
+$zip = Join-Path $distRoot "Veyla-$version-standalone$suffix.zip"
 if (-not $NoZip) {
     if (Test-Path $zip) {
         Remove-Item -LiteralPath $zip -Force
     }
     Push-Location $distRoot
     try {
-        & tar.exe -a -c -f $zip "BetterRemotePlay"
+        & tar.exe -a -c -f $zip "Veyla"
         if ($LASTEXITCODE -ne 0) {
             throw "tar failed while creating $zip"
         }

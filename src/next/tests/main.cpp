@@ -337,7 +337,7 @@ void TestHost(const std::filesystem::path& root) {
 
 int main() {
     const auto root = TempRoot();
-    std::cout << "BetterRemotePlay Next foundation tests\n";
+    std::cout << "Veyla foundation tests\n";
     TestFlatJson();
     TestSettings();
     TestSettingsStore(root);

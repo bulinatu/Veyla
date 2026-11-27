@@ -97,7 +97,7 @@ Status DiagnosticsCollector::WriteReport(const std::string& path) const {
     }
     const DiagnosticsSnapshot s = Snapshot();
     file << std::fixed << std::setprecision(3);
-    file << "BetterRemotePlay Next diagnostics\n";
+    file << "Veyla diagnostics\n";
     file << "uptime_seconds=" << uptime_seconds_ << "\n";
     file << "samples=" << frames_.Count() << "\n";
     file << "decode_ms=" << s.decode_ms << "\n";

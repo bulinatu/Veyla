@@ -295,7 +295,18 @@ impl Root {
         let profile_group = group("Profiles", "One click", vec![presets.into_any_element()]);
 
         let saved_profiles = self.profiles();
-        let mut saved_rows = div().flex().flex_col().gap(px(6.0));
+        let saved_count = saved_profiles.len();
+        let at_limit = saved_count >= Root::PROFILE_LIMIT;
+        let mut saved_rows = div()
+            .id("saved-profiles")
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .when(saved_count > 5, |el| {
+                // Cap the card: twelve rows would otherwise push Live and the
+                // console card off the page.
+                el.max_h(px(232.0)).overflow_y_scroll()
+            });
         if saved_profiles.is_empty() {
             saved_rows = saved_rows.child(
                 div()
@@ -307,15 +318,21 @@ impl Root {
             for profile in saved_profiles {
                 let id = profile.id.clone();
                 let is_default = profile.is_default;
+                let armed = self.profile_delete_armed(&id);
+                let apply_id = format!("profile-apply-{id}");
+                let delete_id = format!("profile-delete-{id}");
+                let delete_id_click = id.clone();
+                let apply_click = id.clone();
                 saved_rows = saved_rows.child(
                     div()
                         .flex()
                         .items_center()
-                        .justify_between()
                         .gap(px(8.0))
                         .child(
                             div()
                                 .flex()
+                                .flex_1()
+                                .min_w(px(0.0))
                                 .items_center()
                                 .gap(px(6.0))
                                 .child(
@@ -328,12 +345,23 @@ impl Root {
                                     el.child(widgets::chip("Default", theme::ACCENT_BRIGHT))
                                 }),
                         )
-                        .child(widgets::button(
+                        .child(widgets::button_with_id(
+                            apply_id,
                             "Apply",
                             Tone::Subtle,
                             cx.listener(
                                 move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
-                                    this.apply_profile(&id, cx);
+                                    this.apply_profile(&apply_click, cx);
+                                },
+                            ),
+                        ))
+                        .child(widgets::button_with_id(
+                            delete_id,
+                            if armed { "Confirm" } else { "Delete" },
+                            if armed { Tone::Danger } else { Tone::Subtle },
+                            cx.listener(
+                                move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                                    this.request_delete_profile(&delete_id_click, cx);
                                 },
                             ),
                         )),
@@ -354,11 +382,23 @@ impl Root {
                         div()
                             .flex_1()
                             .min_w(px(0.0))
-                            .child(widgets::section("Saved profiles", "Engine configuration")),
+                            .child(widgets::section(
+                                "Saved profiles",
+                                if saved_count == 0 {
+                                    "Engine configuration".to_string()
+                                } else {
+                                    format!(
+                                        "Engine configuration · {} / {}",
+                                        saved_count,
+                                        Root::PROFILE_LIMIT
+                                    )
+                                },
+                            )),
                     )
-                    .child(widgets::button(
-                        "Save current",
-                        Tone::Ghost,
+                    .child(widgets::button_with_id(
+                        "profile-save-current",
+                        if at_limit { "Limit reached" } else { "Save current" },
+                        if at_limit { Tone::Subtle } else { Tone::Ghost },
                         cx.listener(
                             |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
                                 this.save_profile(cx);
@@ -414,7 +454,7 @@ impl Root {
                 div()
                     .text_size(theme::tiny())
                     .text_color(theme::muted())
-                    .child("BetterRemotePlay Next 2.5.0 - GPUI shell"),
+                    .child("Veyla 2.5.0  -  original project: BetterRemotePlay"),
             )
             .child(
                 div()
@@ -1687,6 +1727,19 @@ impl Root {
             ),
         );
 
+        let brand = group(
+            "About",
+            "Veyla 2.5.0",
+            vec![
+                widgets::kv("Product", "Veyla"),
+                widgets::kv(
+                    "Original project",
+                    "BetterRemotePlay (trademark of the author)",
+                ),
+                widgets::kv("Engine", "veyla-engine.exe"),
+            ],
+        );
+
         div()
             .flex()
             .flex_col()
@@ -1700,6 +1753,7 @@ impl Root {
             .child(shell)
             .child(pacing)
             .child(diagnostics)
+            .child(brand)
             .child(widgets::card_pad().child(reset))
             .into_any_element()
     }

@@ -1716,3 +1716,36 @@ PATH before `cargo build`, e.g.
 - Live check verified against a real public repo (GitHub API parsed, version
   compared, asset selected); the full update was applied to a sandbox install
   and wrote version.txt correctly.
+
+## 2.5.0 - visible rebrand to Veyla
+
+- Product name: **Veyla**. The rebrand covers window titles, the shell header,
+  Home/Advanced, the classic shell wordmark, updater messages, diagnostics,
+  package README and release artifact names.
+- Binaries: `veyla.exe` (GPUI shell), `veyla-engine.exe` (engine),
+  `veyla-classic.exe` (C++ shell), `veyla-legacy.exe` (0.5 shell), and
+  `update.exe` (updater). CMake target names and the data folder
+  `%APPDATA%\BetterRemotePlayNext` stay for compatibility, so existing
+  settings, profiles and pairings load without migration.
+- The update service now downloads `Veyla-<version>-update.exe`; the updater
+  launches `veyla.exe` and stops both new and legacy image names.
+- **BetterRemotePlay is the original project name and remains a trademark of
+  the author**; this is stated in Advanced > About, the package README and
+  `docs/42-rebrand.md`.
+- The working title `Veil` was dropped because it is a registered word mark in
+  the UK/EU in classes 9/41/42; `Veyla` keeps the sound but is a distinct mark.
+- No `dist` package was produced in this step; the next release packages as
+  `Veyla-<version>-standalone.zip` / `Veyla-<version>-update.exe`.
+
+## 2.5.0 - saved profiles
+
+- Profiles are capped at 12 per install. The engine generates "Profile N" with
+  the lowest free number, so save/delete never overwrites a survivor.
+- Every saved profile can be deleted from Home and from the control centre:
+  first click arms the row (`Confirm`), second click within 4 s deletes it. A
+  1.5 s cooldown stops a burst of queued clicks from cascading through rows.
+- The Home card shows `n / 12` and scrolls after five rows; at the cap the save
+  button reads `Limit reached`.
+- Profiles are listed in creation order, and deleting the default profile
+  promotes the oldest remaining one.
+- Details: docs/43-profiles.md.

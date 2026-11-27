@@ -26,7 +26,7 @@ int main() {
     ::timeBeginPeriod(1);
 
     brp::Win32Window window;
-    if (!window.Create(L"BetterRemotePlay", 1600, 900)) {
+    if (!window.Create(L"Veyla", 1600, 900)) {
         ::timeEndPeriod(1);
         return 1;
     }

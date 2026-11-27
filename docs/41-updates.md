@@ -33,9 +33,9 @@ channel, animated update card).
 
 2. Create the GitHub release with tag `v2.6.0` and attach:
 
-   - `BetterRemotePlay-2.6.0-update.exe` (required; the app looks for a `.exe`
+   - `Veyla-2.6.0-update.exe` (required; the app looks for a `.exe`
      asset whose name contains `update`)
-   - `BetterRemotePlay-2.6.0-standalone.zip` (fresh installs)
+   - `Veyla-2.6.0-standalone.zip` (fresh installs)
 
 3. Prereleases are only offered on the **Beta** channel.
 
@@ -49,7 +49,7 @@ updater, supports `--dir=`, `--no-launch`, `--silent`, `--auto` and
 - **Check**: `GET https://api.github.com/repos/<repo>/releases?per_page=30`,
   pick the highest non-draft tag above the running version (prereleases only on
   Beta), and prefer an asset ending in `.exe` with `update` in the name.
-- **Download**: the asset goes to `%TEMP%\BetterRemotePlay-<version>-update.exe`
+- **Download**: the asset goes to `%TEMP%\Veyla-<version>-update.exe`
   with progress reported to the UI.
 - **Install**: the updater is started with `--auto --dir=<app dir>
   --wait-pid=<engine pid>`. `--auto` waits for the engine, stops

@@ -1,8 +1,8 @@
 # Builds a single self-contained update.exe between two packaged versions.
 #
 #   powershell -File tools\make_update.ps1 `
-#       -BaselineZip dist\BetterRemotePlay-0.4-standalone.zip `
-#       -NewFolder dist\BetterRemotePlay -Version 0.4.1
+#       -BaselineZip dist\Veyla-0.4-standalone.zip `
+#       -NewFolder dist\Veyla -Version 0.4.1
 #
 # The output is one file: update.exe. The changed files are packed in a zip and
 # appended to the updater, followed by a 24-byte footer (magic, offset, size).
@@ -10,7 +10,7 @@
 
 param(
     [string]$BaselineZip = "",
-    [string]$NewFolder = "dist\BetterRemotePlay",
+    [string]$NewFolder = "dist\Veyla",
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$Out = "",
     # Use an unpacked folder instead of expanding BaselineZip. The files are
@@ -108,7 +108,7 @@ try {
     Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $payloadZip -CompressionLevel Optimal
 
     if ([string]::IsNullOrWhiteSpace($Out)) {
-        $Out = Join-Path $root ("dist\BetterRemotePlay-$Version-update.exe")
+        $Out = Join-Path $root ("dist\Veyla-$Version-update.exe")
     } else {
         $Out = Resolve-UnderRoot $Out
     }

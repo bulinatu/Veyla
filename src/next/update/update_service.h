@@ -30,7 +30,7 @@ struct UpdateStatus {
 
 // GitHub Releases updater. The release is expected to carry a single-file
 // update executable built by tools/make_update.ps1 (for example
-// BetterRemotePlay-2.6.0-update.exe); the shell starts it after quitting.
+// Veyla-2.6.0-update.exe); the shell starts it after quitting.
 class UpdateService {
 public:
     UpdateService();

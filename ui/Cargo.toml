@@ -1,9 +1,9 @@
 [package]
-name = "brpnext-ui"
+name = "veyla"
 version = "2.5.0"
 edition = "2021"
 rust-version = "1.90"
-description = "BetterRemotePlay Next - GPUI shell"
+description = "Veyla - GPUI shell"
 publish = false
 
 [dependencies]

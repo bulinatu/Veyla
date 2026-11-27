@@ -287,9 +287,15 @@ pub fn engine_path() -> Option<PathBuf> {
     }
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?.to_path_buf();
-    let mut candidates = vec![dir.join("brpnext-engine.exe")];
+    let mut candidates = vec![
+        dir.join("veyla-engine.exe"),
+        // Legacy name: lets a rebranded shell run beside an older engine.
+        dir.join("brpnext-engine.exe"),
+    ];
     // ui/target/debug -> repository root
+    candidates.push(dir.join(r"..\..\..\build-perf\Release\veyla-engine.exe"));
     candidates.push(dir.join(r"..\..\..\build-perf\Release\brpnext-engine.exe"));
+    candidates.push(dir.join(r"..\..\..\build\Release\veyla-engine.exe"));
     candidates.push(dir.join(r"..\..\..\build\Release\brpnext-engine.exe"));
     candidates.into_iter().find(|path| path.exists())
 }

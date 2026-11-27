@@ -180,7 +180,7 @@ bool JsonValue(const std::string& json, const char* key, std::string& out) {
 bool HttpRequest(const wchar_t* method, const std::wstring& path,
                  const std::wstring& headers, const std::string& body, std::string& response,
                  std::string& detail) {
-    HINTERNET session = ::WinHttpOpen(L"BetterRemotePlay/0.3",
+    HINTERNET session = ::WinHttpOpen(L"Veyla/0.3",
                                       WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                       WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) {

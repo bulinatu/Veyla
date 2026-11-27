@@ -37,7 +37,7 @@ fn wide(text: &str) -> Vec<u16> {
 /// Returns false when another shell already owns the singleton mutex; the
 /// existing window is brought forward instead of starting a second engine.
 fn claim_single_instance() -> bool {
-    let name = wide("BetterRemotePlayNextShell");
+    let name = wide("VeylaShell");
     unsafe {
         let handle = CreateMutexW(core::ptr::null(), 0, name.as_ptr());
         if handle == 0 {
@@ -45,7 +45,7 @@ fn claim_single_instance() -> bool {
         }
         if GetLastError() == 183 {
             // ERROR_ALREADY_EXISTS
-            let title = wide("BetterRemotePlay");
+            let title = wide("Veyla");
             let hwnd = FindWindowW(core::ptr::null(), title.as_ptr());
             if hwnd != 0 {
                 SetForegroundWindow(hwnd);
@@ -82,12 +82,12 @@ fn main() {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(TitlebarOptions {
-                title: Some("BetterRemotePlay".into()),
+                title: Some("Veyla".into()),
                 appears_transparent: true,
                 traffic_light_position: None,
             }),
             window_min_size: Some(size(px(1040.0), px(700.0))),
-            app_id: Some("BetterRemotePlayNext".to_string()),
+            app_id: Some("Veyla".to_string()),
             focus: true,
             show: true,
             ..Default::default()

@@ -107,6 +107,13 @@ pub struct Root {
     pub(crate) optimize_ticks: u8,
     pub(crate) overlay_handle: Option<AnyWindowHandle>,
     pub(crate) settings_rev: u64,
+    /// Pending "Delete" confirmation for a saved profile: (profile id, when
+    /// it was armed). A second click within a few seconds deletes.
+    pub(crate) confirm_profile: Option<(String, std::time::Instant)>,
+    /// After a delete, ignore further delete clicks for a moment. A stalled
+    /// event loop can deliver a burst of queued clicks to whatever row has
+    /// moved under the pointer; this keeps one gesture to one profile.
+    pub(crate) profile_delete_cooldown: Option<std::time::Instant>,
     applied_rev: u64,
     apply_ticks: u8,
     focus_initialized: bool,
@@ -119,6 +126,10 @@ pub(crate) fn log_panic(message: &str) {
 }
 
 impl Root {
+    /// Mirrors `kMaxProfiles` in `src/next/shell/next_app.cpp`. The engine is
+    /// the hard limit; this one only lets the UI explain it up front.
+    pub(crate) const PROFILE_LIMIT: usize = 12;
+
     pub fn new(cx: &mut Context<Self>) -> Self {
         crate::model::log_line(&format!(
             "root new autoconnect={}",
@@ -364,6 +375,8 @@ impl Root {
             optimize_ticks: 0,
             overlay_handle: None,
             settings_rev: 0,
+            confirm_profile: None,
+            profile_delete_cooldown: None,
             applied_rev: 0,
             apply_ticks: 0,
             focus_initialized: false,
@@ -380,7 +393,7 @@ impl Root {
         let Some(path) = crate::bridge::engine_path() else {
             crate::model::log_line("engine not found");
             self.toast(
-                "Engine not found (brpnext-engine.exe next to the shell)",
+                "Engine not found (veyla-engine.exe next to the shell)",
                 true,
                 cx,
             );
@@ -581,10 +594,10 @@ impl Root {
             // The window closed itself (Esc or deactivation); fall through and
             // open a fresh one instead of swallowing the toggle.
         }
-        let Some(engine) = self.engine.clone() else {
+        if self.engine.is_none() {
             self.toast("Engine is not running", true, cx);
             return;
-        };
+        }
         // Give the engine a moment to hide the DLSS-G worker before the window
         // appears; the worker's topmost presenter would otherwise steal focus.
         self.send("overlay_open");
@@ -643,7 +656,7 @@ impl Root {
         };
         let handle = cx.open_window(options, |window, cx| {
             let view = cx.new(|cx| crate::overlay::OverlayView::new(engine.clone(), cx));
-            window.set_window_title("BetterRemotePlay Overlay");
+            window.set_window_title("Veyla Overlay");
             let focus = view.read(cx).focus.clone();
             window.focus(&focus);
             view
@@ -652,14 +665,14 @@ impl Root {
             Ok(handle) => {
                 crate::model::log_line("overlay opened");
                 self.overlay_handle = Some(handle.into());
-                crate::overlay::make_topmost("BetterRemotePlay Overlay");
+                crate::overlay::make_topmost("Veyla Overlay");
                 let any: AnyWindowHandle = handle.into();
                 cx.spawn(async move |_, cx| {
                     cx.background_executor()
                         .timer(Duration::from_millis(90))
                         .await;
                     let _ = any.update(cx, |_, window, _| window.activate_window());
-                    crate::overlay::activate_by_title("BetterRemotePlay Overlay");
+                    crate::overlay::activate_by_title("Veyla Overlay");
                 })
                 .detach();
             }
@@ -796,22 +809,10 @@ impl Root {
                     .when(!tight, |el| {
                         el.child(
                             div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(1.0))
-                                .child(
-                                    div()
-                                        .text_size(px(14.0))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(theme::text())
-                                        .child("BetterRemotePlay"),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(10.5))
-                                        .text_color(theme::muted())
-                                        .child("Next"),
-                                ),
+                                .text_size(px(17.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(theme::text())
+                                .child("Veyla"),
                         )
                     }),
             )
@@ -959,9 +960,58 @@ impl Root {
             self.toast("Engine is not running", true, cx);
             return;
         }
-        let name = format!("Profile {}", self.profiles().len() + 1);
-        self.send(&format!("profile_save {name}"));
+        if self.profiles().len() >= Self::PROFILE_LIMIT {
+            self.toast(
+                &format!(
+                    "Profile limit reached ({}). Delete one first.",
+                    Self::PROFILE_LIMIT
+                ),
+                true,
+                cx,
+            );
+            return;
+        }
+        // No name on the wire: the engine picks the lowest free "Profile N",
+        // so deleting one and saving again cannot overwrite a survivor.
+        self.send("profile_save");
         self.toast("Profile saved", false, cx);
+    }
+
+    /// Two-step delete: the first click arms the row, a second click within
+    /// four seconds removes it. No modal, and a stray click cannot delete.
+    pub(crate) fn request_delete_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        const ARM_WINDOW: Duration = Duration::from_secs(4);
+        const COOLDOWN: Duration = Duration::from_millis(1500);
+        let now = std::time::Instant::now();
+        if self
+            .profile_delete_cooldown
+            .is_some_and(|at| now.duration_since(at) < COOLDOWN)
+        {
+            self.confirm_profile = None;
+            cx.notify();
+            return;
+        }
+        let armed = self
+            .confirm_profile
+            .as_ref()
+            .is_some_and(|(current, at)| current == id && now.duration_since(*at) < ARM_WINDOW);
+        if armed {
+            self.confirm_profile = None;
+            self.profile_delete_cooldown = Some(now);
+            self.send(&format!("profile_delete {id}"));
+            self.toast("Profile deleted", false, cx);
+        } else {
+            self.confirm_profile = Some((id.to_string(), now));
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn profile_delete_armed(&self, id: &str) -> bool {
+        self.confirm_profile
+            .as_ref()
+            .is_some_and(|(current, at)| {
+                current == id && at.elapsed() < Duration::from_secs(4)
+            })
     }
 
     pub(crate) fn audio_label(&self) -> String {
@@ -1343,7 +1393,7 @@ impl Root {
                     .text_size(px(26.0))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text())
-                    .child("BetterRemotePlay"),
+                    .child("Veyla"),
             )
             .child(
                 div()
@@ -1425,7 +1475,7 @@ extern "system" {
 /// Restores the shell after a stream ends. The window is minimized while the
 /// stream owns the screen, so GPUI will not render and cannot restore itself.
 pub(crate) fn restore_shell_window() {
-    let title: Vec<u16> = "BetterRemotePlay\0".encode_utf16().collect();
+    let title: Vec<u16> = "Veyla\0".encode_utf16().collect();
     unsafe {
         let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
         if hwnd != 0 {

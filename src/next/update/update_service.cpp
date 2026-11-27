@@ -330,7 +330,7 @@ bool HttpGet(const std::wstring& url, const std::wstring& headers,
         return false;
     }
     HINTERNET session = ::WinHttpOpen(
-        L"BetterRemotePlay/2.5 (Windows)", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+        L"Veyla/2.5 (Windows)", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) {
         error = "WinHTTP session failed";
@@ -737,7 +737,7 @@ void UpdateService::RunDownload(const std::string& url, const std::string& versi
         }
     }
     const std::filesystem::path target =
-        dir / ("BetterRemotePlay-" + safe + "-update.exe");
+        dir / ("Veyla-" + safe + "-update.exe");
 
     // A previous session may already have the exact asset; reuse it.
     std::error_code ec;

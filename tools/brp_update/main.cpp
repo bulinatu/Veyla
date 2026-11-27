@@ -80,9 +80,13 @@ fs::path ExeDir() {
 }
 
 fs::path AppExe(const fs::path& dir) {
-    const fs::path next = dir / "brpnext.exe";
+    const fs::path next = dir / "veyla.exe";
     if (fs::exists(next)) {
         return next;
+    }
+    const fs::path shell = dir / "brpnext.exe";
+    if (fs::exists(shell)) {
+        return shell;
     }
     return dir / "brp.exe";
 }
@@ -165,16 +169,18 @@ int wmain(int argc, wchar_t** argv) {
     if (auto_update) {
         // The in-app updater starts this file while the shell still runs. Stop
         // both images before touching files; taskkill also waits for them.
+        KillProcessImage(L"veyla.exe");
+        KillProcessImage(L"veyla-engine.exe");
         KillProcessImage(L"brpnext.exe");
         KillProcessImage(L"brpnext-engine.exe");
         ::Sleep(800);
     }
 
     if (!silent) {
-        std::printf("BetterRemotePlay update\nTarget: %s\n\n", Utf8(dir.wstring()).c_str());
+        std::printf("Veyla update\nTarget: %s\n\n", Utf8(dir.wstring()).c_str());
     }
     if (!fs::exists(AppExe(dir))) {
-        std::printf("brpnext.exe/brp.exe is not in this folder.\n");
+        std::printf("veyla.exe/brpnext.exe is not in this folder.\n");
         if (!silent) {
             std::printf("Press Enter to close.");
             std::getchar();

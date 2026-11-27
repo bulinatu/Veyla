@@ -3,8 +3,8 @@
 #   powershell -File tools\publish_release.ps1 -Version 2.6.0 -Repo owner/name
 #
 # Produces:
-#   dist\BetterRemotePlay-<version>-update.exe     (full update, any older install)
-#   dist\BetterRemotePlay-<version>-standalone.zip (fresh install)
+#   dist\Veyla-<version>-update.exe     (full update, any older install)
+#   dist\Veyla-<version>-standalone.zip (fresh install)
 #   dist\release-<version>.md                      (release notes template)
 #
 # The in-app updater reads https://api.github.com/repos/<repo>/releases and
@@ -25,18 +25,18 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $dist = Join-Path $root "dist"
-$release = Join-Path $dist "BetterRemotePlay"
-$updateOut = Join-Path $dist "BetterRemotePlay-$Version-update.exe"
+$release = Join-Path $dist "Veyla"
+$updateOut = Join-Path $dist "Veyla-$Version-update.exe"
 $notesPath = Join-Path $dist "release-$Version.md"
 
 if (-not $SkipPackage) {
-    Write-Host "Packaging dist\BetterRemotePlay ..."
+    Write-Host "Packaging dist\Veyla ..."
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "package_release.ps1") -Version $Version
     if ($LASTEXITCODE -ne 0) { throw "package_release.ps1 failed" }
 }
 
-if (-not (Test-Path -LiteralPath (Join-Path $release "brpnext.exe"))) {
-    throw "dist\BetterRemotePlay\brpnext.exe is missing. Package first."
+if (-not (Test-Path -LiteralPath (Join-Path $release "veyla.exe"))) {
+    throw "dist\Veyla\veyla.exe is missing. Package first."
 }
 
 # Stamp the version the updater writes into version.txt.
@@ -53,7 +53,7 @@ try {
     Remove-Item -LiteralPath $empty -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-$zip = Join-Path $dist "BetterRemotePlay-$Version-standalone.zip"
+$zip = Join-Path $dist "Veyla-$Version-standalone.zip"
 if (-not (Test-Path -LiteralPath $zip)) {
     throw "Standalone archive not found: $zip"
 }
