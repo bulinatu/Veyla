@@ -7,6 +7,8 @@ use gpui::{px, rgb, rgba, FontWeight, Pixels};
 
 pub const UI_FONT: &str = "Inter";
 pub const MONO_FONT: &str = "JetBrains Mono";
+/// Windows icon font for the dock glyphs. Shipped with Windows 10 and 11.
+pub const ICON_FONT: &str = "Segoe MDL2 Assets";
 
 // Base surfaces.
 pub const BG: u32 = 0x07070D;

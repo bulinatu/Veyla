@@ -274,6 +274,7 @@ impl OverlayView {
         &self,
         key: &'static str,
         label: &'static str,
+        hint: &'static str,
         suffix: &'static str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -332,13 +333,37 @@ impl OverlayView {
             .items_center()
             .gap(px(8.0))
             .child(slider)
-            .child(number)
-            .into_any_element();
-        widgets::row(
-            label,
-            "Drag, or click the value to type and press Enter",
-            control,
-        )
+            .child(number);
+        // Stacked, not side by side: at the smaller panel scales this row is
+        // read in a 330 px card, and a 168 px slider plus the value box left
+        // the label column about one character wide - text wrapped letter
+        // under letter.
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(7.0))
+            .py(px(11.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.0))
+                    .child(
+                        div()
+                            .text_size(theme::body())
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme::text())
+                            .child(label),
+                    )
+                    .child(
+                        div()
+                            .text_size(theme::small())
+                            .text_color(theme::muted())
+                            .child(hint),
+                    ),
+            )
+            .child(control)
+            .into_any_element()
     }
 
     fn unlock_box(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -634,13 +659,48 @@ impl OverlayView {
                     &[(0, "Default"), (1, "Natural"), (2, "Cinematic")],
                     cx,
                 ));
-                rows.push(self.slider_row("ai.neural_intensity", "Intensity", "%", cx));
-                rows.push(self.slider_row("ai.neural_tone", "Local tone", "%", cx));
-                rows.push(self.slider_row("ai.neural_structure", "Local structure", "%", cx));
-                rows.push(self.slider_row("ai.neural_skin", "Skin structure", "%", cx));
-                rows.push(self.slider_row("ai.neural_passes", "Passes",
-                                  "Above 1 needs Boost (scale < 100%)", cx));
-                rows.push(self.slider_row("ai.neural_scale", "Work scale", "%", cx));
+                rows.push(self.slider_row(
+                    "ai.neural_intensity",
+                    "Intensity",
+                    "Drag, or click the value to type and press Enter",
+                    "%",
+                    cx,
+                ));
+                rows.push(self.slider_row(
+                    "ai.neural_tone",
+                    "Local tone",
+                    "Drag, or click the value to type and press Enter",
+                    "%",
+                    cx,
+                ));
+                rows.push(self.slider_row(
+                    "ai.neural_structure",
+                    "Local structure",
+                    "Drag, or click the value to type and press Enter",
+                    "%",
+                    cx,
+                ));
+                rows.push(self.slider_row(
+                    "ai.neural_skin",
+                    "Skin structure",
+                    "Drag, or click the value to type and press Enter",
+                    "%",
+                    cx,
+                ));
+                rows.push(self.slider_row(
+                    "ai.neural_passes",
+                    "Passes",
+                    "Above 1 needs Boost (scale < 100%)",
+                    "",
+                    cx,
+                ));
+                rows.push(self.slider_row(
+                    "ai.neural_scale",
+                    "Work scale",
+                    "Drag, or click the value to type and press Enter",
+                    "%",
+                    cx,
+                ));
                 rows.push(self.toggle_row(
                     "ai.neural_ui",
                     "UI correction",

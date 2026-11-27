@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use gpui::{
-    div, hsla, point, prelude::*, px, relative, rgba, rgb, size, Animation, AnimationExt as _,
-    AnyElement, AnyWindowHandle, App, Bounds, BoxShadow, Context, FocusHandle, Focusable,
+    div, point, prelude::*, px, relative, rgba, rgb, size, Animation, AnimationExt as _,
+    AnyElement, AnyWindowHandle, App, Bounds, Context, FocusHandle, Focusable,
     FontWeight, InteractiveElement, IntoElement, Render, SharedString, StatefulInteractiveElement,
     Window, WindowBackgroundAppearance, WindowBounds, WindowControlArea, WindowKind, WindowOptions,
 };
@@ -79,6 +79,19 @@ pub enum PickerKind {
     Audio,
     Monitor,
     Gpu,
+}/// Segoe MDL2 Assets glyphs for the dock. Kept in one place so the dock and
+/// the control center can share them later.
+fn dock_icon(tab: Tab) -> &'static str {
+    match tab {
+        Tab::Home => "\u{E80F}",
+        Tab::Stream => "\u{E768}",
+        Tab::Video => "\u{E7F4}",
+        Tab::Audio => "\u{E767}",
+        Tab::Pad => "\u{E7FC}",
+        Tab::Overlay => "\u{E8B9}",
+        Tab::Advanced => "\u{E713}",
+        _ => "\u{E8B9}",
+    }
 }
 
 pub struct Root {
@@ -107,6 +120,11 @@ pub struct Root {
     pub(crate) optimize_ticks: u8,
     pub(crate) overlay_handle: Option<AnyWindowHandle>,
     pub(crate) settings_rev: u64,
+    /// Pending "Delete" confirmation for a saved profile: (profile id, when
+    /// it was armed). A second click within a few seconds deletes.
+    /// Previous top-level tab index, so the dock pill can slide from where it
+    /// was to where it is going.
+    pub(crate) dock_from: usize,
     /// Pending "Delete" confirmation for a saved profile: (profile id, when
     /// it was armed). A second click within a few seconds deletes.
     pub(crate) confirm_profile: Option<(String, std::time::Instant)>,
@@ -275,10 +293,16 @@ impl Root {
                                 status.update_version
                             ));
                         }
+                        let was_streaming = this.status.streaming;
                         this.last_rev = rev;
                         this.status = status;
                         this.engine_online = online;
-                        if this.shell_minimized && !this.status.streaming {
+                        // The stream window owned the foreground; when it goes
+                        // away the shell must come back on its own, whether or
+                        // not it managed to minimise itself first.
+                        if (!this.status.streaming && was_streaming)
+                            || (this.shell_minimized && !this.status.streaming)
+                        {
                             this.shell_minimized = false;
                             crate::model::log_line("shell restore");
                             // The control center belongs to the session that
@@ -396,6 +420,7 @@ impl Root {
             overlay_handle: None,
             settings_rev: 0,
             confirm_profile: None,
+            dock_from: 0,
             profile_delete_cooldown: None,
             applied_rev: 0,
             apply_ticks: 0,
@@ -722,6 +747,14 @@ impl Root {
     }
 
     pub(crate) fn select(&mut self, tab: Tab) {
+        let before = self.tab.top_level();
+        if before != tab.top_level() {
+            // The dock pill animates from the old slot to the new one.
+            self.dock_from = Tab::ALL
+                .iter()
+                .position(|candidate| *candidate == before)
+                .unwrap_or(0);
+        }
         self.tab = tab;
     }
 
@@ -746,50 +779,9 @@ impl Root {
         self.toast(format!("Profile applied: {}", preset.label()), false, cx);
     }
 
-    fn top_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn top_bar(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
         let width = window.viewport_size().width;
         let tight = width < px(1100.0);
-        let mut tabs = div().flex().items_center().gap(px(2.0)).flex_shrink_0();
-        for tab in Tab::ALL {
-            let selected = self.tab.top_level() == tab;
-            let label = tab.label();
-            tabs = tabs.child(
-                div()
-                    .id(("tab", tab as usize))
-                    .flex()
-                    .items_center()
-                    .gap(px(7.0))
-                    .h(px(34.0))
-                    .px(px(if tight { 8.0 } else { 12.0 }))
-                    .rounded(px(9.0))
-                    .bg(if selected {
-                        rgba(0x8B5CF626)
-                    } else {
-                        rgba(0x00000000)
-                    })
-                    .text_size(theme::small())
-                    .font_weight(if selected {
-                        FontWeight::SEMIBOLD
-                    } else {
-                        FontWeight::MEDIUM
-                    })
-                    .text_color(if selected { theme::text() } else { theme::dim() })
-                    .cursor_pointer()
-                    .hover(move |s| {
-                        if selected {
-                            s
-                        } else {
-                            s.bg(rgba(0xFFFFFF0D)).text_color(theme::text())
-                        }
-                    })
-                    .on_click(cx.listener(move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
-                        this.select(tab);
-                        cx.notify();
-                    }))
-                    .child(label),
-            );
-        }
-
         let status_color = if self.status.streaming {
             theme::GREEN
         } else if self.status.connected {
@@ -799,39 +791,16 @@ impl Root {
         };
         let status_text: SharedString = self.status.headline().into();
 
+        // No bar any more: the logo, the status and the window buttons float on
+        // the aurora. Navigation lives in the dock at the bottom.
         div()
-            .h(px(60.0))
+            .h(px(56.0))
             .flex_none()
             .relative()
             .flex()
             .items_center()
-            .gap(px(18.0))
+            .gap(px(14.0))
             .px(px(18.0))
-            .border_b_1()
-            .border_color(rgba(0xFFFFFF0A))
-            .bg(rgba(0x07070DD9))
-            // Full-width grab strips in the top and bottom padding: the whole
-            // bar can move the window without covering the tab hitboxes.
-            .child(
-                div()
-                    .absolute()
-                    .top(px(0.0))
-                    .left(px(0.0))
-                    .right(px(0.0))
-                    .h(px(12.0))
-                    .cursor_move()
-                    .window_control_area(WindowControlArea::Drag),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .bottom(px(0.0))
-                    .left(px(0.0))
-                    .right(px(0.0))
-                    .h(px(12.0))
-                    .cursor_move()
-                    .window_control_area(WindowControlArea::Drag),
-            )
             .child(
                 div()
                     .flex()
@@ -839,8 +808,7 @@ impl Root {
                     .gap(px(11.0))
                     .cursor_move()
                     // HTCAPTION, not start_window_move(): the Windows platform
-                    // layer in gpui 0.2 has no implementation for the latter, so
-                    // the custom title bar could not move the window at all.
+                    // layer in gpui 0.2 has no implementation for the latter.
                     .window_control_area(WindowControlArea::Drag)
                     .child(widgets::logo_mark(30.0))
                     .when(!tight, |el| {
@@ -853,13 +821,12 @@ impl Root {
                         )
                     }),
             )
-            .child(tabs)
-            // The empty middle of the bar is a second grab handle, so the
-            // window can be dragged from anywhere that is not a control.
+            // The empty middle is a grab handle, so the window can be dragged
+            // from anywhere that is not a control.
             .child(
                 div()
                     .flex_1()
-                    .h(px(60.0))
+                    .h_full()
                     .cursor_move()
                     .window_control_area(WindowControlArea::Drag),
             )
@@ -874,7 +841,6 @@ impl Root {
                     .bg(rgba(0xFFFFFF0A))
                     .border_1()
                     .border_color(rgba(0xFFFFFF12))
-                    .window_control_area(WindowControlArea::Drag)
                     .child(widgets::dot(status_color))
                     .when(!tight, |el| {
                         el.child(
@@ -899,6 +865,102 @@ impl Root {
             .into_any_element()
     }
 
+    /// Bottom dock: macOS-style, centred, icon over a small label, with a pill
+    /// that slides between slots when the tab changes.
+    fn dock(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        const ITEM_W: f32 = 78.0;
+        const ITEM_H: f32 = 60.0;
+        const GAP: f32 = 2.0;
+        const PAD: f32 = 8.0;
+
+        let current = Tab::ALL
+            .iter()
+            .position(|tab| *tab == self.tab.top_level())
+            .unwrap_or(0);
+        let from = self.dock_from.min(Tab::ALL.len().saturating_sub(1));
+        let travel = current as f32 - from as f32;
+
+        let pill = div()
+            .absolute()
+            .top(px(0.0))
+            .h(px(ITEM_H))
+            .w(px(ITEM_W))
+            .rounded(px(16.0))
+            .bg(rgba(0x8B5CF62E))
+            .border_1()
+            .border_color(rgba(0x8B5CF63D))
+            .with_animation(
+                ("dock-pill", current),
+                Animation::new(Duration::from_millis(320))
+                    .with_easing(|t| 1.0 - (1.0 - t).powi(3)),
+                move |el, t| {
+                    let slot = from as f32 + travel * t;
+                    el.left(px(slot * (ITEM_W + GAP)))
+                },
+            );
+
+        let mut slots = div().relative().flex().items_end().gap(px(GAP)).child(pill);
+        for tab in Tab::ALL {
+            let active = self.tab.top_level() == tab;
+            slots = slots.child(
+                div()
+                    .id(("dock", tab as usize))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(4.0))
+                    .w(px(ITEM_W))
+                    .h(px(ITEM_H))
+                    .rounded(px(16.0))
+                    .cursor_pointer()
+                    .text_color(if active { theme::text() } else { theme::dim() })
+                    .hover(|style| style.bg(rgba(0xFFFFFF0D)).text_color(theme::text()))
+                    .on_click(cx.listener(
+                        move |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                            this.select(tab);
+                            cx.notify();
+                        },
+                    ))
+                    .child(
+                        div()
+                            .font_family(theme::ICON_FONT)
+                            .text_size(px(18.0))
+                            .child(dock_icon(tab)),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(10.0))
+                            .font_weight(if active {
+                                FontWeight::SEMIBOLD
+                            } else {
+                                FontWeight::MEDIUM
+                            })
+                            .child(tab.label()),
+                    ),
+            );
+        }
+
+        div()
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .flex()
+                    .items_end()
+                    .p(px(PAD))
+                    .rounded(px(22.0))
+                    // Nearly opaque: there is no real blur behind a GPUI
+                    // element, and text showing through the dock looks broken.
+                    .bg(rgba(0x0F0F1AFA))
+                    .border_1()
+                    .border_color(rgba(0xFFFFFF1A))
+                    .shadow_lg()
+                    .child(slots),
+            )
+            .into_any_element()
+    }
+
     /// Secondary navigation for the pages that have sub-categories. Kept out
     /// of the main header so the top bar stays at six entries.
     fn sub_nav(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -914,19 +976,19 @@ impl Root {
                     .id(("subtab", tab as usize))
                     .flex()
                     .items_center()
-                    .h(px(28.0))
-                    .px(px(11.0))
-                    .rounded(px(7.0))
+                    .h(px(30.0))
+                    .px(px(13.0))
+                    .rounded(px(8.0))
                     .bg(if active {
                         rgba(0x8B5CF626)
                     } else {
                         rgba(0x00000000)
                     })
-                    .text_size(theme::tiny())
+                    .text_size(theme::small())
                     .font_weight(if active {
-                        FontWeight::SEMIBOLD
+                        FontWeight::BOLD
                     } else {
-                        FontWeight::MEDIUM
+                        FontWeight::SEMIBOLD
                     })
                     .text_color(if active { theme::text() } else { theme::muted() })
                     .cursor_pointer()
@@ -946,9 +1008,16 @@ impl Root {
             .flex()
             .items_center()
             .px(px(18.0))
-            .border_b_1()
-            .border_color(rgba(0xFFFFFF08))
-            .child(div().w_full().max_w(px(1220.0)).mx_auto().child(row))
+            .child(
+                // Same 40 px inset as the page panel (18 px scroll padding +
+                // 22 px panel padding) so sub-tabs line up with the cards.
+                div()
+                    .w_full()
+                    .max_w(px(1220.0))
+                    .mx_auto()
+                    .px(px(40.0))
+                    .child(row),
+            )
             .into_any_element()
     }
 
@@ -1469,7 +1538,8 @@ impl Root {
         };
         div()
             .absolute()
-            .bottom(px(26.0))
+            // Clear of the dock: a toast under it was unreadable.
+            .bottom(px(112.0))
             .left(px(0.0))
             .right(px(0.0))
             .flex()
@@ -1505,8 +1575,15 @@ impl Root {
 #[link(name = "user32")]
 extern "system" {
     fn FindWindowW(class: *const u16, title: *const u16) -> isize;
+    fn FindWindowExW(parent: isize, after: isize, class: *const u16, title: *const u16) -> isize;
+    fn GetWindowThreadProcessId(hwnd: isize, pid: *mut u32) -> u32;
     fn ShowWindow(hwnd: isize, command: i32) -> i32;
     fn SetForegroundWindow(hwnd: isize) -> i32;
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetCurrentProcessId() -> u32;
 }
 
 /// Restores the shell after a stream ends. The window is minimized while the
@@ -1514,7 +1591,19 @@ extern "system" {
 pub(crate) fn restore_shell_window() {
     let title: Vec<u16> = "Veyla\0".encode_utf16().collect();
     unsafe {
-        let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
+        // The engine owns a hidden window with the same title in its own
+        // process. Restoring that one produced a blank "Veyla" window and left
+        // the real shell unfocused, so only accept our own process.
+        let me = GetCurrentProcessId();
+        let mut hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
+        while hwnd != 0 {
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid == me {
+                break;
+            }
+            hwnd = FindWindowExW(0, hwnd, std::ptr::null(), title.as_ptr());
+        }
         if hwnd != 0 {
             ShowWindow(hwnd, 9); // SW_RESTORE
             SetForegroundWindow(hwnd);
@@ -1604,6 +1693,7 @@ impl Render for Root {
         let top = self.top_bar(window, cx);
         let subnav = self.sub_nav(cx);
         let page = self.page(cx);
+        let dock = self.dock(cx);
         let toast = self.toast_overlay();
         let connecting = self.connect_overlay(cx);
         let picker = self.picker_overlay(cx);
@@ -1627,7 +1717,10 @@ impl Render for Root {
                     .child(subnav)
                     .child(
                         div()
-                            .id("page-scroll")
+                            // One scroll container per tab: switching pages
+                            // starts at the top instead of inheriting the
+                            // previous offset.
+                            .id(("page-scroll", self.tab as usize))
                             .flex_1()
                             .min_h(px(0.0))
                             .overflow_y_scroll()
@@ -1644,37 +1737,63 @@ impl Render for Root {
                                     .mx_auto()
                                     .px(px(18.0))
                                     .pt(px(16.0))
-                                    .pb(px(40.0))
+                                    // Room for the dock: the last card should be
+                                    // able to scroll clear of it.
+                                    .pb(px(132.0))
                                     .child(
-                                        // The page floats directly on the
-                                        // aurora. The old opaque slab cut a hard
-                                        // rectangle out of the animation; what
-                                        // is left is a gaussian rim only — no
-                                        // fill, no border, no seam — so the text
-                                        // keeps its contrast while the circles
-                                        // keep moving underneath.
+                                        // No panel, no rim: the page sits on the
+                                        // aurora. A blurred slab used to darken
+                                        // everything below the header line, which
+                                        // read as a seam once the header was gone.
                                         div()
                                             .relative()
-                                            .rounded(px(26.0))
-                                            .shadow(vec![
-                                                BoxShadow {
-                                                    color: hsla(0.0, 0.0, 0.0, 0.13),
-                                                    offset: point(px(0.0), px(18.0)),
-                                                    blur_radius: px(180.0),
-                                                    spread_radius: px(-34.0),
-                                                },
-                                                BoxShadow {
-                                                    color: hsla(0.72, 0.70, 0.62, 0.04),
-                                                    offset: point(px(0.0), px(0.0)),
-                                                    blur_radius: px(140.0),
-                                                    spread_radius: px(-46.0),
-                                                },
-                                            ])
                                             .p(px(22.0))
-                                            .child(page),
+                                            .child(
+                                                // A short, cheap transition keeps
+                                                // tab changes from snapping.
+                                                div()
+                                                    .relative()
+                                                    .child(page)
+                                                    .with_animation(
+                                                        ("page-in", self.tab as usize),
+                                                        Animation::new(Duration::from_millis(
+                                                            190,
+                                                        ))
+                                                        .with_easing(|t| {
+                                                            1.0 - (1.0 - t).powi(3)
+                                                        }),
+                                                        |el, t| {
+                                                            el.opacity(0.35 + 0.65 * t)
+                                                                .top(px((1.0 - t) * 10.0))
+                                                        },
+                                                    ),
+                                            ),
                                     ),
                             ),
                     ),
+            )
+            .child(
+                // Soft floor under the dock: content scrolls out of sight
+                // instead of running into the pill.
+                div()
+                    .absolute()
+                    .left(px(0.0))
+                    .right(px(0.0))
+                    .bottom(px(0.0))
+                    .h(px(170.0))
+                    .bg(gpui::linear_gradient(
+                        180.0,
+                        gpui::linear_color_stop(rgba(0x07070D00), 0.0),
+                        gpui::linear_color_stop(rgba(0x07070DEE), 1.0),
+                    )),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(px(0.0))
+                    .right(px(0.0))
+                    .bottom(px(18.0))
+                    .child(dock),
             )
             .child(connecting)
             .child(picker)

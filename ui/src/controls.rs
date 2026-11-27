@@ -569,7 +569,9 @@ impl Root {
                     _ => {}
                 }
             }
-            if event.keystroke.key == "f10" && self.status.streaming && self.picker.is_none() {
+            if event.keystroke.key == "f10" && self.engine.is_some() && self.picker.is_none() {
+                // Not tied to a live stream: the control center is also the
+                // place to set things up before pressing play.
                 self.toggle_overlay(cx);
                 return;
             }

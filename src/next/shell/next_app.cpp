@@ -3994,7 +3994,12 @@ void NextApp::ToggleWatch(bool watching) {
         // The app window steps out of the way: the stream window is the only
         // video surface, with no D2D UI, no menu swapchain and no title bar.
         window_->SetCursorHidden(false);
-        window_->Minimize();
+        // In engine mode this window is the hidden legacy surface. Minimizing
+        // it gave it a taskbar button, and after a disconnect that blank window
+        // stayed around and could take the foreground from the shell.
+        if (!engine_mode_) {
+            window_->Minimize();
+        }
     } else {
         watching_ = false;
         have_frame_ = false;
@@ -4014,12 +4019,16 @@ void NextApp::ToggleWatch(bool watching) {
             stream_window_->Hide();
         }
         watch_fullscreen_ = false;
-        // In engine mode the shell owns the UI and this window stays minimized:
+        // In engine mode the shell owns the UI and this window stays hidden:
         // restoring it here left a blank 1600x900 window over the desktop that
         // swallowed clicks after a disconnect.
         if (!engine_mode_) {
             window_->Restore();
             window_->Show();
+        } else if (window_->hwnd()) {
+            // A minimise request from the OS (Alt+Tab, taskbar) can still
+            // surface it; make sure the stream end puts it back out of sight.
+            ::ShowWindow(window_->hwnd(), SW_HIDE);
         }
         Resize();
     }
