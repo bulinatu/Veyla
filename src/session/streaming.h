@@ -61,6 +61,8 @@ public:
     // when the backlog exceeds `max_queue`, so a short network burst is played
     // out instead of skipped. Used by the generator feed and the video path.
     bool TakeFrameOrdered(media::DecodedFrame& out, int max_queue);
+    // Packet loss: buy one frame of slack so a retransmit can still be shown.
+    void NoteLoss();
     bool TakeFrameNow(media::DecodedFrame& out);
     // Blocks until a decoded frame is queued or the timeout expires. Used by
     // the frame generator so it wakes on a frame instead of polling.

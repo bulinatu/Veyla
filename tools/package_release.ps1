@@ -130,10 +130,22 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 2.7.8 - standalone build
+Veyla 2.7.9 - standalone build
 =======================================
 
 Run veyla.exe. No installer, no console window, no background service.
+
+What changed in 2.7.9
+---------------------
+- Packet loss now buys buffer instead of only dropping: a lost second raises the
+  internal queue by one frame (up to 3) so a retransmit can still be shown.
+- The Wi-Fi probe is sampled every 5 s during play and always logs its result.
+  If the WLAN API fails, the log shows the error code, the adapter/link rate and
+  a netsh fallback with SSID/signal/rate.
+- The presentation line now includes ICMP ping to the console next to the input
+  latency, so a drop can be tied to the link or to the console.
+- A disconnect summary reports duration, frames, average/min/max fps, lost
+  frames, drops and average bitrate for the whole session.
 
 What changed in 2.7.8
 ---------------------
