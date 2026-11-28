@@ -258,6 +258,37 @@ impl Settings {
         if self.values.get(key) != Some(&value) {
             self.values.insert(key.to_string(), value);
             self.dirty = true;
+            self.enforce_ai_pairing(key);
+        }
+    }
+
+    /// Frame generation is paired with its own upscaler: DLSS-G only with
+    /// DLSS SR, FSR-G only with FSR SR. Any write that would mix the two
+    /// drops the generator instead of letting it run on the other family.
+    fn enforce_ai_pairing(&mut self, key: &str) {
+        let sr = self.s("ai.sr_model", "auto");
+        let fg = self.s("ai.fg_backend", "none");
+        let fsr = sr == "fsr4" || sr == "fsr3";
+        let dlss = sr == "dlss";
+        if (fsr && fg == "dlss-fg") || (dlss && fg == "fsr-fg") {
+            self.values
+                .insert("ai.fg_backend".to_string(), Value::from("none"));
+            self.values
+                .insert("ai.frame_generation".to_string(), Value::from(false));
+            self.dirty = true;
+            return;
+        }
+        // Switching the generator on with an explicit DLSS SR picks the only
+        // generator that may run with it. FSR stays on "None" until FSR-G is
+        // wired; the page explains that.
+        if key == "ai.frame_generation"
+            && dlss
+            && fg == "none"
+            && self.b("ai.frame_generation", false)
+        {
+            self.values
+                .insert("ai.fg_backend".to_string(), Value::from("dlss-fg"));
+            self.dirty = true;
         }
     }
 

@@ -1296,7 +1296,23 @@ impl Root {
             .into_any_element()
     }
     pub(crate) fn page_frame_gen(&self, cx: &mut Context<Self>) -> AnyElement {
-        let dlss_backend = self.settings.s("ai.fg_backend", "none") == "dlss-fg";
+        let sr = self.settings.s("ai.sr_model", "auto");
+        let nvidia = self.status.gpu.to_lowercase().contains("nvidia");
+        // Auto resolves to a family here; that resolved answer drives both the
+        // upscaler and the generator, so they can never disagree.
+        let sr_is_dlss = sr == "dlss" || (sr == "auto" && nvidia);
+        let sr_is_fsr = !sr_is_dlss;
+        let allowed = |value: &str| match value {
+            "none" => true,
+            "dlss-fg" => sr_is_dlss,
+            "fsr-fg" => sr_is_fsr,
+            _ => false,
+        };
+        let stored = self.settings.s("ai.fg_backend", "none");
+        // A stale generator from the other family is shown as blocked and
+        // displayed as None, never as active.
+        let current = if allowed(&stored) { stored.as_str() } else { "none" };
+        let dlss_backend = current == "dlss-fg";
         let mut fg_rows: Vec<AnyElement> = vec![
             self.toggle_row(
                 "ai.frame_generation",
@@ -1304,14 +1320,27 @@ impl Root {
                 "Off for the lowest possible latency",
                 cx,
             ),
-            self.seg_row(
+            self.seg_blocked_row(
                 "ai.fg_backend",
+                current,
                 "Backend",
-                "DLSS-G runs natively on DX12 and needs an RTX 40/50",
-                &[("None", "none"), ("DLSS-G", "dlss-fg")],
+                "DLSS-G pairs only with DLSS SR; FSR-G pairs only with FSR SR. The other one stays blocked.",
+                &[
+                    ("None", "none", true),
+                    ("DLSS-G", "dlss-fg", sr_is_dlss),
+                    // FSR-G is not wired in this build yet. It stays visible
+                    // so the pair is clear, blocked so it cannot be picked.
+                    ("FSR-G", "fsr-fg", false),
+                ],
                 cx,
             ),
         ];
+        if sr_is_fsr {
+            fg_rows.push(widgets::kv(
+                "FSR-G",
+                "Not wired in this beta yet; frame generation stays off on FSR.",
+            ));
+        }
         if dlss_backend {
             fg_rows.push(widgets::kv(
                 "Beta 3",

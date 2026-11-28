@@ -171,6 +171,13 @@ void AppSettings::Validate(std::vector<std::string>& warnings,
     if (!ai.super_resolution && ai.sr_output != Resolution::Native) {
         warnings.push_back("super resolution output is set while SR is off");
     }
+    if (ai.frame_generation &&
+        ((ai.SrIsFsr() && ai.fg_backend == AiBackend::DlssFg) ||
+         (ai.SrIsDlss() && ai.fg_backend == AiBackend::FsrFg))) {
+        warnings.push_back(
+            "frame generation backend does not match the SR backend; it is "
+            "disabled (DLSS-G pairs with DLSS, FSR-G with FSR)");
+    }
     if (general.telemetry) {
         warnings.push_back("telemetry is disabled in this product; the flag is ignored");
     }
@@ -362,6 +369,14 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
     s.ai.fg_backend = ReadBackend(f, "ai.fg_backend", s.ai.fg_backend);
     s.ai.fg_multiplier =
         ClampInt(FlatJson::GetInt(f, "ai.fg_multiplier", s.ai.fg_multiplier), 2, 6);
+    // Frame generation is paired with its own upscaler. A stale or hand-edited
+    // file cannot make the engine run DLSS-G on FSR SR (or the other way
+    // round): the generator is dropped and the picture stays on SR.
+    if ((s.ai.SrIsFsr() && s.ai.fg_backend == AiBackend::DlssFg) ||
+        (s.ai.SrIsDlss() && s.ai.fg_backend == AiBackend::FsrFg)) {
+        s.ai.fg_backend = AiBackend::None;
+        s.ai.frame_generation = false;
+    }
     s.ai.quality = ClampInt(FlatJson::GetInt(f, "ai.quality", s.ai.quality), 0, 3);
     s.ai.occlusion = FlatJson::GetBool(f, "ai.occlusion", s.ai.occlusion);
     s.ai.adaptive = FlatJson::GetBool(f, "ai.adaptive", s.ai.adaptive);

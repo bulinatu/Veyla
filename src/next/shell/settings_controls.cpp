@@ -302,10 +302,19 @@ float SettingsControls::SuperResolution(float x, float y, float width) {
 }
 
 float SettingsControls::FrameGeneration(float x, float y, float width) {
-    std::vector<AiBackend> backends = {AiBackend::DlssFg};
-    std::vector<std::wstring> labels = {L"DLSS-G (NVIDIA)"};
-    std::vector<bool> item_enabled = {system_.dlss_fg};
-    const bool fg_available = frame_generation_wired_ && item_enabled[0];
+    // Generators are paired with their upscaler: DLSS-G only with DLSS SR,
+    // FSR-G only with FSR SR. The other entry stays visible but cannot be
+    // picked, so a mixed pair can never be selected here.
+    const bool sr_fsr = settings_.ai.SrWantsFsr(system_.gpu.nvidia);
+    const bool dlss_fg_available = !sr_fsr && system_.dlss_fg;
+    // FSR-G is not wired in this build yet; the entry is disabled rather than
+    // hidden so the pairing stays visible.
+    const bool fsr_fg_available = false;
+    std::vector<AiBackend> backends = {AiBackend::DlssFg, AiBackend::FsrFg};
+    std::vector<std::wstring> labels = {L"DLSS-G (NVIDIA)", L"FSR-G (AMD)"};
+    std::vector<bool> item_enabled = {dlss_fg_available, fsr_fg_available};
+    const bool fg_available =
+        frame_generation_wired_ && (dlss_fg_available || fsr_fg_available);
     if (widgets_.Toggle(Next(), Row(x, y, width), L"Frame generation",
                         settings_.ai.frame_generation, fg_available)) {
         Touch();
@@ -315,7 +324,7 @@ float SettingsControls::FrameGeneration(float x, float y, float width) {
     if (fg_available) {
         int backend_index = 0;
         for (std::size_t i = 0; i < backends.size(); ++i) {
-            if (backends[i] == settings_.ai.fg_backend) {
+            if (backends[i] == settings_.ai.fg_backend && item_enabled[i]) {
                 backend_index = static_cast<int>(i);
                 break;
             }
@@ -347,9 +356,12 @@ float SettingsControls::FrameGeneration(float x, float y, float width) {
         }
     } else {
         widgets_.Label(Row(x, y, width),
-                       system_.nr_worker
-                           ? L"FG unavailable: nvngx_dlssg.dll is missing"
-                           : L"FG unavailable: the NVIDIA worker is not installed",
+                       sr_fsr
+                           ? L"FG blocked with FSR SR: DLSS-G needs DLSS SR, and "
+                             L"FSR-G is not wired in this build yet"
+                           : (system_.nr_worker
+                                  ? L"FG unavailable: nvngx_dlssg.dll is missing"
+                                  : L"FG unavailable: the NVIDIA worker is not installed"),
                        widgets_.Tokens().text_faint, 12.0f,
                        DWRITE_FONT_WEIGHT_MEDIUM);
         y += kRow + kGap;

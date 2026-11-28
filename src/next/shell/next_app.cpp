@@ -1339,7 +1339,8 @@ void NextApp::RenderSidebar(Widgets& widgets) {
         wchar_t line[96] = {};
         std::swprintf(line, 96, L"%d fps  |  %s", OutputFps(settings_),
                       settings_.ai.frame_generation &&
-                              settings_.ai.fg_backend == AiBackend::DlssFg
+                              settings_.ai.fg_backend == AiBackend::DlssFg &&
+                              !settings_.ai.SrWantsFsr(system_.gpu.nvidia)
                           ? L"DLSS-G"
                           : L"native");
         renderer_->Text(line, Rect(18, card_top + 54, width - 20, card_top + 74),
@@ -2117,6 +2118,7 @@ void NextApp::RenderProfiles(Widgets& widgets) {
         p.video.output = Resolution::R1440;
         p.video.render_target = 1440;
         p.ai.super_resolution = false;
+        p.ai.sr_model = "dlss";  // the pair: DLSS-G only ever runs with DLSS SR
         p.ai.frame_generation = true;
         p.ai.fg_backend = AiBackend::DlssFg;
         p.ai.fg_multiplier = 2;
@@ -2127,6 +2129,7 @@ void NextApp::RenderProfiles(Widgets& widgets) {
         p.video.output = Resolution::Native;
         p.video.render_target = 0;
         p.ai.super_resolution = false;
+        p.ai.sr_model = "dlss";  // the pair: DLSS-G only ever runs with DLSS SR
         p.ai.frame_generation = true;
         p.ai.fg_backend = AiBackend::DlssFg;
         p.ai.fg_multiplier = 2;
@@ -2580,6 +2583,15 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     Rect(x, 706, x + w, 726), 10.0f, ToD2D(theme.text_faint));
 }
 bool NextApp::Apply() {
+    // A generator only ever runs next to its own upscaler. Profiles and old
+    // config files can still carry a mixed pair; drop the generator here so
+    // every path into the engine follows the same rule. "auto" is resolved
+    // against the adapter at present time and is checked there.
+    if ((settings_.ai.SrIsFsr() && settings_.ai.fg_backend == AiBackend::DlssFg) ||
+        (settings_.ai.SrIsDlss() && settings_.ai.fg_backend == AiBackend::FsrFg)) {
+        settings_.ai.fg_backend = AiBackend::None;
+        settings_.ai.frame_generation = false;
+    }
     const AppSettings before = host_->Settings();
     const ApplyScope scope = ClassifySettingsChange(before, settings_);
     // The "previous" values must come from the settings the engine is actually
@@ -3226,10 +3238,16 @@ void NextApp::HandleOverlayAction(OverlayAction action) {
             changed();
             break;
         case OverlayAction::FgBackendNext:
-            // DLSS-G is the only generator left.
-            settings_.ai.fg_backend =
-                settings_.ai.fg_backend == AiBackend::DlssFg ? AiBackend::None
-                                                             : AiBackend::DlssFg;
+            // Cycle only inside the SR family that is selected. With FSR SR
+            // the only choice today is off; DLSS-G stays blocked.
+            if (settings_.ai.SrWantsFsr(system_.gpu.nvidia)) {
+                settings_.ai.fg_backend = AiBackend::None;
+            } else {
+                settings_.ai.fg_backend =
+                    settings_.ai.fg_backend == AiBackend::DlssFg
+                        ? AiBackend::None
+                        : AiBackend::DlssFg;
+            }
             settings_.ai.frame_generation =
                 settings_.ai.fg_backend == AiBackend::DlssFg;
             changed();
@@ -3676,6 +3694,7 @@ void NextApp::PresentVideo() {
 
     const bool fg_mode = settings_.ai.frame_generation &&
                          settings_.ai.fg_backend == AiBackend::DlssFg &&
+                         !settings_.ai.SrWantsFsr(system_.gpu.nvidia) &&
                          !dlss_fg_failed_;
     if (fg_mode) {
         const float background[4] = {0.01f, 0.008f, 0.016f, 1.0f};
@@ -3959,6 +3978,10 @@ bool NextApp::PresentVideoDx12() {
 
     const int width = video_frame_.width;
     const int height = video_frame_.height;
+    // One upscaler family per frame. Frame generation is checked against the
+    // same answer, so DLSS-G can never run on FSR SR (or the reverse).
+    const bool want_fsr = settings_.ai.SrWantsFsr(system_.gpu.nvidia);
+    const bool want_dlss = !want_fsr;
     bool drawn = false;
     HANDLE sr_handle = nullptr;
     int sr_width = width;
@@ -3967,9 +3990,6 @@ bool NextApp::PresentVideoDx12() {
         if (!settings_.ai.super_resolution || video_frame_.rgba.empty()) {
             return false;
         }
-        const bool want_fsr = settings_.ai.sr_model == "fsr4" ||
-                              settings_.ai.sr_model == "fsr3" ||
-                              (settings_.ai.sr_model == "auto" && !system_.gpu.nvidia);
         if (want_fsr) {
             if (!EnsureFsr(width, height)) {
                 return false;
@@ -4023,7 +4043,7 @@ bool NextApp::PresentVideoDx12() {
 
     const bool want_fg_dx12 =
         settings_.ai.frame_generation && settings_.ai.fg_backend == AiBackend::DlssFg &&
-        !fg_dx12_failed_;
+        want_dlss && !fg_dx12_failed_;
     if (want_fg_dx12 && !video_frame_.duplicate) {
         const bool sr_ok = run_sr();
         const int fg_width = sr_ok ? sr_width : width;
@@ -4205,7 +4225,8 @@ bool NextApp::NeuralInWorkerWanted() const {
         return false;  // diagnostic: force the standalone NR path
     }
     return settings_.ai.neural_render && settings_.ai.frame_generation &&
-           settings_.ai.fg_backend == AiBackend::DlssFg;
+           settings_.ai.fg_backend == AiBackend::DlssFg &&
+           !settings_.ai.SrWantsFsr(system_.gpu.nvidia);
 }
 
 void NextApp::EnhanceNeural(media::DecodedFrame& frame) {
@@ -4579,6 +4600,11 @@ bool NextApp::EnsureDlssFgDx12(int width, int height) {
         settings_.ai.fg_backend != AiBackend::DlssFg) {
         return false;
     }
+    if (settings_.ai.SrWantsFsr(system_.gpu.nvidia)) {
+        // DLSS-G is only valid next to DLSS SR. The UI blocks the pair, but a
+        // config from an older build must not reach the generator either.
+        return false;
+    }
     if (std::getenv("VEYLA_NATIVE_FG") == nullptr) {
         // DLSS-G 310.x does not write its offscreen OutputInterpolated texture
         // without the swapchain path; generated frames are black. Keep the
@@ -4732,6 +4758,9 @@ bool NextApp::EnsureDlssFg(int width, int height) {
     if (!settings_.ai.frame_generation ||
         settings_.ai.fg_backend != AiBackend::DlssFg) {
         return false;
+    }
+    if (settings_.ai.SrWantsFsr(system_.gpu.nvidia)) {
+        return false;  // DLSS-G never pairs with FSR SR
     }
     if (dlss_fg_failed_) {
         return false;

@@ -85,6 +85,23 @@ struct AiSettings {
     bool neural_unlock = false;  // lift every neural limit to 9999 (use at your own risk)
     bool neural_ui = false;
     bool neural_mask = false;
+
+    bool SrIsFsr() const { return sr_model == "fsr4" || sr_model == "fsr3"; }
+    bool SrIsDlss() const { return sr_model == "dlss"; }
+    // Auto follows the adapter: non-NVIDIA is the FSR family.
+    bool SrWantsFsr(bool nvidia) const {
+        return SrIsFsr() || (sr_model == "auto" && !nvidia);
+    }
+    // Frame generation runs only on its own upscaler: DLSS-G with DLSS SR,
+    // FSR-G with FSR SR. The pair is never mixed.
+    bool FgMatchesSr(bool nvidia) const {
+        switch (fg_backend) {
+            case AiBackend::None: return true;
+            case AiBackend::DlssFg: return !SrWantsFsr(nvidia);
+            case AiBackend::FsrFg: return SrWantsFsr(nvidia);
+            default: return false;
+        }
+    }
 };
 
 struct GpuSettings {

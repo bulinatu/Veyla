@@ -147,6 +147,7 @@ impl Root {
         selected: bool,
         key: &'static str,
         value: Value,
+        enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
@@ -159,8 +160,10 @@ impl Root {
             .rounded(px(8.0))
             .bg(if selected {
                 theme::accent_rgba(0xFF)
-            } else {
+            } else if enabled {
                 rgba(0xFFFFFF0A)
+            } else {
+                rgba(0xFFFFFF06)
             })
             .border_1()
             .border_color(if selected {
@@ -174,26 +177,30 @@ impl Root {
             } else {
                 FontWeight::MEDIUM
             })
-            .text_color(if selected {
+            .text_color(if !enabled {
+                rgb(0x4A4A5E)
+            } else if selected {
                 rgb(0xFFFFFF)
             } else {
                 theme::dim()
             })
             .cursor_pointer()
             .hover(move |s| {
-                if selected {
+                if selected || !enabled {
                     s
                 } else {
                     s.bg(rgba(0xFFFFFF16))
                 }
             })
-            .on_click(
-                cx.listener(move |this, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
-                    this.settings.set(key, value.clone());
-                    this.persist();
-                    cx.notify();
-                }),
-            )
+            .when(enabled, |el| {
+                el.on_click(cx.listener(
+                    move |this, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                        this.settings.set(key, value.clone());
+                        this.persist();
+                        cx.notify();
+                    },
+                ))
+            })
             .child(label)
             .into_any_element()
     }
@@ -213,10 +220,37 @@ impl Root {
                 selected,
                 key,
                 Value::from(*value),
+                true,
                 cx,
             ));
         }
         row.into_any_element()
+    }
+
+    /// Like `seg`, but an option can be shown and blocked. Blocked options are
+    /// visible so the rule is obvious, yet they never write a value.
+    pub fn seg_blocked_row(
+        &self,
+        key: &'static str,
+        current: &str,
+        label: &'static str,
+        hint: &'static str,
+        options: &[(&'static str, &'static str, bool)],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut row = div().flex().items_center().gap(px(4.0));
+        for (option, value, enabled) in options {
+            let selected = current == *value;
+            row = row.child(Self::pill(
+                option,
+                selected,
+                key,
+                Value::from(*value),
+                *enabled,
+                cx,
+            ));
+        }
+        widgets::row(label, hint, row.into_any_element())
     }
 
     pub fn seg_int(
@@ -234,6 +268,7 @@ impl Root {
                 selected,
                 key,
                 Value::from(*value),
+                true,
                 cx,
             ));
         }

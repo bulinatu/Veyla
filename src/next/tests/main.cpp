@@ -110,6 +110,34 @@ void TestSettings() {
     brp::next::SettingsFromFlat(mult_flat, mult_restored);
     Expect(mult_restored.ai.fg_multiplier == 6, "DLSS-G multiplier clamps to 6");
 
+    // Frame generation is paired with its own upscaler. A mixed pair is
+    // dropped while loading, not handed to the engine.
+    brp::next::AppSettings mixed;
+    mixed.ai.sr_model = "fsr4";
+    mixed.ai.frame_generation = true;
+    mixed.ai.fg_backend = brp::next::AiBackend::DlssFg;
+    warnings.clear();
+    errors.clear();
+    mixed.Validate(warnings, errors);
+    Expect(!warnings.empty(), "mixed FG/SR pair warns");
+    brp::next::FlatMap mixed_flat = brp::next::SettingsToFlat(mixed);
+    brp::next::AppSettings mixed_restored;
+    brp::next::SettingsFromFlat(mixed_flat, mixed_restored);
+    Expect(mixed_restored.ai.fg_backend == brp::next::AiBackend::None,
+           "DLSS-G is dropped on FSR SR");
+    Expect(!mixed_restored.ai.frame_generation,
+           "frame generation is off after the mixed pair is dropped");
+
+    brp::next::AiSettings pair;
+    pair.sr_model = "fsr4";
+    pair.fg_backend = brp::next::AiBackend::FsrFg;
+    Expect(pair.FgMatchesSr(false), "FSR-G matches FSR SR");
+    pair.fg_backend = brp::next::AiBackend::DlssFg;
+    Expect(!pair.FgMatchesSr(false), "DLSS-G is rejected on FSR SR");
+    pair.sr_model = "auto";
+    Expect(!pair.FgMatchesSr(false), "auto on AMD resolves to FSR and rejects DLSS-G");
+    Expect(pair.FgMatchesSr(true), "auto on NVIDIA resolves to DLSS");
+
     brp::next::AppSettings fs;
     fs.display.fullscreen_on_play = false;
     brp::next::FlatMap fs_flat = brp::next::SettingsToFlat(fs);
