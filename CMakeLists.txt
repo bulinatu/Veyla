@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 project(BetterRemotePlay VERSION 3.0.0 LANGUAGES CXX)
 # The display/update string for the beta. The numeric project version stays
 # 3.0.0 so packaging and the delta keep the usual shape.
-set(BRP_APP_VERSION_STRING "3.0.0-beta4")
+set(BRP_APP_VERSION_STRING "3.0.0-beta5")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

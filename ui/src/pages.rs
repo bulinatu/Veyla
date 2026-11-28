@@ -753,11 +753,12 @@ impl Root {
                     _ => (
                         theme::AMBER,
                         format!("v{} is available", self.status.update_version),
-                        if self.status.update_notes.is_empty() {
-                            "Download the updater when you are ready".to_string()
-                        } else {
-                            self.status.update_notes.clone()
-                        },
+                        self.status
+                            .update_notes
+                            .lines()
+                            .next()
+                            .unwrap_or("Download the updater when you are ready")
+                            .to_string(),
                     ),
                 };
                 let mut action = div().flex().items_center().gap(px(8.0));
@@ -1695,6 +1696,7 @@ impl Root {
     fn update_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let state = self.status.update_state.as_str();
         let progress = self.status.update_progress.clamp(0.0, 1.0) as f32;
+        let notes = self.status.update_notes.clone();
         let (accent, headline, detail) = match state {
             "checking" => (
                 theme::accent_bright_u32(),
@@ -1704,11 +1706,7 @@ impl Root {
             "available" => (
                 theme::AMBER,
                 format!("v{} is available", self.status.update_version),
-                if self.status.update_notes.is_empty() {
-                    "Download the updater when you are ready".to_string()
-                } else {
-                    self.status.update_notes.clone()
-                },
+                "Download it when you are ready; the app restarts into the new version".to_string(),
             ),
             "downloading" => (
                 theme::accent_bright_u32(),
@@ -1803,19 +1801,18 @@ impl Root {
             ));
         }
 
-        let mut column = div()
+        let header = div()
             .flex()
-            .items_center()
+            .items_start()
             .gap(px(14.0))
             .child(orb)
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(3.0))
+                    .gap(px(4.0))
                     .flex_1()
                     .min_w(px(0.0))
-                    .overflow_hidden()
                     .child(
                         div()
                             .text_size(theme::body())
@@ -1829,8 +1826,69 @@ impl Root {
                             .text_color(theme::dim())
                             .child(SharedString::from(detail)),
                     ),
-            )
-            .child(actions);
+            );
+
+        // Lay the note out line by line. The card grows with the text, so the
+        // whole summary is visible instead of a clipped single line.
+        let mut notes_block = div().flex().flex_col().gap(px(5.0));
+        if available && !notes.is_empty() {
+            for raw in notes.lines() {
+                let line = raw.trim();
+                if line.is_empty() {
+                    notes_block = notes_block.child(div().h(px(2.0)));
+                } else if let Some(item) = line
+                    .strip_prefix("- ")
+                    .or_else(|| line.strip_prefix("\u{2022} "))
+                {
+                    notes_block = notes_block.child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .mt(px(7.0))
+                                    .w(px(4.0))
+                                    .h(px(4.0))
+                                    .rounded(px(2.0))
+                                    .bg(theme::accent_rgba(0xFF)),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .text_size(theme::small())
+                                    .text_color(theme::text())
+                                    .child(SharedString::from(item.to_string())),
+                            ),
+                    );
+                } else {
+                    notes_block = notes_block.child(
+                        div()
+                            .text_size(theme::small())
+                            .text_color(theme::text())
+                            .child(SharedString::from(line.to_string())),
+                    );
+                }
+            }
+        }
+
+        let mut column = div().flex().flex_col().gap(px(12.0)).child(header);
+
+        if available && !notes.is_empty() {
+            column = column.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .p(px(12.0))
+                    .rounded(px(10.0))
+                    .bg(rgba(0xFFFFFF08))
+                    .border_1()
+                    .border_color(rgba(0xFFFFFF12))
+                    .child(notes_block),
+            );
+        }
 
         if downloading {
             let shimmer = div()
@@ -1873,6 +1931,37 @@ impl Root {
                 ),
             );
         }
+
+        let link = if !self.status.update_url.is_empty() {
+            widgets::button(
+                "See full patch notes on GitHub",
+                Tone::Ghost,
+                cx.listener(
+                    |this, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                        let url = this.status.update_url.clone();
+                        if !url.is_empty() {
+                            let _ = std::process::Command::new("rundll32")
+                                .args(["url.dll,FileProtocolHandler", &url])
+                                .spawn();
+                            this.toast("Opened the release page in your browser", false, cx);
+                        }
+                    },
+                ),
+            )
+        } else {
+            div().into_any_element()
+        };
+
+        column = column.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(12.0))
+                .flex_wrap()
+                .child(link)
+                .child(actions),
+        );
 
         widgets::card_pad().child(column).into_any_element()
     }

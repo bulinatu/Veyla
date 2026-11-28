@@ -553,40 +553,116 @@ int CompareVersions(const std::string& a, const std::string& b) {
     return ComparePrerelease(left.prerelease, right.prerelease);
 }
 
-std::string TrimNotes(std::string body) {
-    for (char& ch : body) {
-        if (ch == '\r' || ch == '\n' || ch == '\t') {
-            ch = ' ';
-        }
+std::string TrimAscii(std::string value) {
+    std::size_t begin = 0;
+    while (begin < value.size() &&
+           std::isspace(static_cast<unsigned char>(value[begin]))) {
+        ++begin;
     }
-    while (!body.empty() && body.front() == ' ') {
-        body.erase(body.begin());
+    std::size_t end = value.size();
+    while (end > begin &&
+           std::isspace(static_cast<unsigned char>(value[end - 1]))) {
+        --end;
     }
-    while (!body.empty() && body.back() == ' ') {
-        body.pop_back();
-    }
-    // Collapse whitespace runs: GitHub release bodies are markdown with long
-    // indentation runs, which reads as a wall of gaps in a single line.
-    std::string compact;
-    compact.reserve(body.size());
-    bool space = false;
-    for (char ch : body) {
-        if (ch == ' ') {
-            if (!space && !compact.empty()) {
-                compact.push_back(' ');
+    return value.substr(begin, end - begin);
+}
+
+// Drops the markdown that reads as noise in a small native card: heading
+// hashes, emphasis markers, code ticks and quote markers. Links keep their
+// label, so "[notes](https://...)" becomes "notes".
+std::string CleanNotesLine(std::string line) {
+    std::string out;
+    out.reserve(line.size());
+    for (std::size_t i = 0; i < line.size();) {
+        if (line[i] == '[') {
+            const std::size_t close = line.find(']', i + 1);
+            if (close != std::string::npos && close + 1 < line.size() &&
+                line[close + 1] == '(') {
+                const std::size_t end = line.find(')', close + 2);
+                if (end != std::string::npos) {
+                    out += CleanNotesLine(line.substr(i + 1, close - i - 1));
+                    i = end + 1;
+                    continue;
+                }
             }
-            space = true;
-        } else {
-            compact.push_back(ch);
-            space = false;
+        }
+        const char ch = line[i];
+        if (ch == '#' || ch == '*' || ch == '_' || ch == '`' || ch == '>') {
+            ++i;
+            continue;
+        }
+        out.push_back(ch);
+        ++i;
+    }
+    return TrimAscii(std::move(out));
+}
+
+// The app shows a friendly, multi-line summary. Release notes carry it in a
+// hidden HTML comment so the GitHub page keeps its technical body:
+//
+//   <!-- app-notes -->
+//   Frame generation is now locked to its upscaler.
+//   - DLSS-G only with DLSS SR
+//   <!-- /app-notes -->
+//
+// Older releases have no block; their markdown body is stripped down to plain
+// text instead of being shown raw.
+std::string ExtractAppNotes(const std::string& body) {
+    std::string text = body;
+    const std::string open = "<!-- app-notes -->";
+    const std::string close = "<!-- /app-notes -->";
+    const std::size_t start = body.find(open);
+    if (start != std::string::npos) {
+        const std::size_t from = start + open.size();
+        const std::size_t end = body.find(close, from);
+        text = body.substr(from, end == std::string::npos ? std::string::npos : end - from);
+    } else {
+        for (;;) {
+            const std::size_t comment = text.find("<!--");
+            if (comment == std::string::npos) {
+                break;
+            }
+            const std::size_t comment_end = text.find("-->", comment + 4);
+            text.erase(comment, (comment_end == std::string::npos ? text.size()
+                                                                 : comment_end + 3) -
+                                    comment);
         }
     }
-    body = std::move(compact);
-    if (body.size() > 190) {
-        body.resize(187);
-        body += "...";
+
+    std::string out;
+    out.reserve(text.size());
+    bool last_blank = true;
+    std::size_t i = 0;
+    while (i <= text.size()) {
+        const std::size_t nl = text.find('\n', i);
+        std::string line =
+            text.substr(i, nl == std::string::npos ? std::string::npos : nl - i);
+        line = CleanNotesLine(std::move(line));
+        if (line.empty()) {
+            if (!last_blank && !out.empty()) {
+                out.push_back('\n');
+            }
+            last_blank = true;
+        } else {
+            out += line;
+            out.push_back('\n');
+            last_blank = false;
+        }
+        if (nl == std::string::npos) {
+            break;
+        }
+        i = nl + 1;
     }
-    return body;
+    while (!out.empty() && out.back() == '\n') {
+        out.pop_back();
+    }
+    constexpr std::size_t kLimit = 4000;
+    if (out.size() > kLimit) {
+        const std::size_t cut = out.rfind('\n', kLimit);
+        out.resize(cut == std::string::npos ? kLimit : cut);
+        out += "\n...";
+    }
+    return out;
 }
 
 std::string UpdatePhaseName(UpdatePhase phase) {
@@ -775,7 +851,7 @@ void UpdateService::RunCheck(std::string repo, bool include_prerelease,
     std::lock_guard<std::mutex> lock(mutex_);
     status_.phase = UpdatePhase::Available;
     status_.version = version;
-    status_.notes = TrimNotes(best->String("body"));
+    status_.notes = ExtractAppNotes(best->String("body"));
     status_.page_url = best->String("html_url");
     status_.error.clear();
     status_.progress = 0.0;

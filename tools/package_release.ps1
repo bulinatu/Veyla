@@ -153,8 +153,18 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 3.0.0 beta 4 - standalone build
+Veyla 3.0.0 beta 5 - standalone build
 =======================================
+
+What changed in 3.0.0 beta 5
+----------------------------
+- The update panel shows the whole patch note. The card grows with the text
+  instead of clipping it to one line, and Download / Check now stay inside the
+  card at every window size.
+- Release notes are plain, readable text in the app: headings and markdown
+  symbols are stripped, and the friendly summary written for the app is shown.
+- See full patch notes on GitHub opens the release page in the browser.
+- Frame generation stays paired with its upscaler (beta 4 rule).
 
 What changed in 3.0.0 beta 4
 ----------------------------
