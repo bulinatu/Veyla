@@ -221,6 +221,15 @@ impl Settings {
         {
             self.set("general.update_repo", Value::from(DEFAULT_UPDATE_REPO));
         }
+        // Production shell: diagnostic levels are not exposed. A Debug/Trace
+        // left over from a test build falls back to Info so no per-second or
+        // Wi-Fi probing runs during a stream.
+        if matches!(
+            self.s("advanced.log_level", "info").as_str(),
+            "debug" | "trace"
+        ) {
+            self.set_str("advanced.log_level", "info");
+        }
     }
 
     pub fn b(&self, key: &str, fallback: bool) -> bool {

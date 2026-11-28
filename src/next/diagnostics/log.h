@@ -2,6 +2,7 @@
 
 #include "core/interfaces.h"
 
+#include <atomic>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -22,8 +23,8 @@ public:
     void Log(LogLevel level, const std::string& message) override;
     void Flush() override;
 
-    void SetLevel(LogLevel level) { level_ = level; }
-    LogLevel Level() const { return level_; }
+    void SetLevel(LogLevel level) { level_.store(level); }
+    LogLevel Level() const { return level_.load(); }
     void SetSink(Sink sink);
     const std::filesystem::path& Path() const { return path_; }
 
@@ -34,7 +35,7 @@ private:
     std::filesystem::path path_;
     std::ofstream file_;
     std::mutex mutex_;
-    LogLevel level_ = LogLevel::Info;
+    std::atomic<LogLevel> level_{LogLevel::Info};
     std::size_t max_bytes_ = 8u * 1024u * 1024u;
     Sink sink_;
 };
@@ -43,6 +44,8 @@ private:
 // not wired to it directly; these helpers send their diagnostics to the same
 // next.log instead of a stderr that a GUI build cannot show.
 void LogMessage(LogLevel level, const std::string& message);
+// Level of the process logger; Info when no logger is installed.
+LogLevel CurrentLogLevel();
 // printf-shaped variant for the existing diagnostic call sites.
 void LogPrintf(LogLevel level, const char* format, ...);
 inline void LogDebug(const std::string& message) {

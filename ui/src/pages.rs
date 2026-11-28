@@ -2123,8 +2123,6 @@ impl Root {
                         ("Error", "error"),
                         ("Warn", "warn"),
                         ("Info", "info"),
-                        ("Debug", "debug"),
-                        ("All", "trace"),
                     ],
                     cx,
                 ),

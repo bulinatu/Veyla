@@ -130,10 +130,26 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 2.7.9 - standalone build
+Veyla 2.7.10 - standalone build
 =======================================
 
 Run veyla.exe. No installer, no console window, no background service.
+
+What changed in 2.7.10
+----------------------
+- Production logging is Info again and is enforced: Debug/All are removed from
+  the shell and any leftover diagnostic level falls back to Info. The
+  per-second stream line, Wi-Fi sampling and console ping only run at Debug, so
+  normal play writes a handful of lines per session and logging cannot cost a
+  frame.
+- Periodic video stalls with a clean link are still detected and warned about,
+  and after three the app shows an actionable hint: maximum Wi-Fi performance,
+  disable Wi-Fi 7 MLO/roaming scans, update the driver.
+- Repeated stalls buy the same extra buffer as packet loss, so a short gap is
+  smoothed instead of shown as a freeze.
+- "WlanQueryInterface=5" now explains that Windows Location is required for
+  desktop apps to expose Wi-Fi signal.
+- The disconnect summary includes the stall count.
 
 What changed in 2.7.9
 ---------------------

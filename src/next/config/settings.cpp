@@ -55,7 +55,8 @@ LogLevel ReadLogLevel(const FlatMap& flat, const std::string& key, LogLevel fall
     if (value == "trace") return LogLevel::Trace;
     if (value == "debug") return LogLevel::Debug;
     if (value == "info") return LogLevel::Info;
-    if (value == "warning") return LogLevel::Warning;
+    // The shell writes "warn"; older files use "warning".
+    if (value == "warn" || value == "warning") return LogLevel::Warning;
     if (value == "error") return LogLevel::Error;
     return fallback;
 }
@@ -448,6 +449,12 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
     s.advanced.debug_log =
         FlatJson::GetBool(f, "advanced.debug_log", s.advanced.debug_log);
     s.advanced.log_level = ReadLogLevel(f, "advanced.log_level", s.advanced.log_level);
+    // Production builds keep Info: the per-second stream/Wi-Fi diagnostics are
+    // development tools and must not cost a frame or fill the disk. Error/Warn
+    // are honoured; Debug/Trace fall back to Info.
+    if (s.advanced.log_level < LogLevel::Info) {
+        s.advanced.log_level = LogLevel::Info;
+    }
     s.advanced.prefer_gpu_present = FlatJson::GetBool(
         f, "advanced.prefer_gpu_present", s.advanced.prefer_gpu_present);
 }

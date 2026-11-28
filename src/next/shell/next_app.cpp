@@ -19,6 +19,7 @@
 #include <d3d11_4.h>
 #include <iphlpapi.h>
 #include <icmpapi.h>
+#include <ws2tcpip.h>
 #include <netioapi.h>
 #include <mmsystem.h>
 #include <shellapi.h>
@@ -76,7 +77,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"2.7.9";
+constexpr wchar_t kVersion[] = L"2.7.10";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
@@ -101,8 +102,7 @@ std::string JsonEscape(const std::string& text) {
 // shows up as input delay, which is the one thing this app must not add.
 int PingMs(const std::string& host) {
     IN_ADDR address{};
-    address.S_un.S_addr = ::inet_addr(host.c_str());
-    if (address.S_un.S_addr == INADDR_NONE) {
+    if (::InetPtonA(AF_INET, host.c_str(), &address) != 1) {
         return -1;
     }
     HANDLE icmp = ::IcmpCreateFile();
@@ -901,6 +901,10 @@ void NextApp::Frame() {
     }
     if (streaming_) {
         streaming_->Poll();
+        std::string link_advice;
+        if (streaming_->TakeLinkAdvice(link_advice)) {
+            Toast(Widen(link_advice), true);
+        }
         if (watch_on_connect_ && streaming_->Connected()) {
             watch_on_connect_ = false;
             reconnect_attempts_ = 0;
@@ -1207,7 +1211,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"Veyla", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  2.7.9", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  2.7.10", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -1321,7 +1325,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"Veyla 2.7.9",
+        renderer_->Text(L"Veyla 2.7.10",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -2450,7 +2454,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"Veyla 2.7.9  |  stable release", L"STABLE", true);
+               L"Veyla 2.7.10  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -2459,7 +2463,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"Veyla", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 2.7.9  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 2.7.10  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -3618,10 +3622,6 @@ void NextApp::PresentVideo() {
     present_frame_ = false;
     brp::Presenter* video = ActivePresenter();
 
-    const double content =
-        content_fps_ > 10.0
-            ? std::clamp(content_fps_, 24.0, 60.0)
-            : std::clamp(static_cast<double>(settings_.streaming.fps), 24.0, 240.0);
     const bool fg_mode = settings_.ai.frame_generation &&
                          settings_.ai.fg_backend == AiBackend::DlssFg &&
                          !dlss_fg_failed_;
@@ -4128,8 +4128,12 @@ void NextApp::StartPadThread() {
             // Wi-Fi association drifts while playing. Probe off the render
             // thread and log only material changes, so a drop can be matched to
             // a signal/rate event without spamming the file.
+            // Wi-Fi/ping probes are development diagnostics. At the production
+            // Info level they are not even sampled, so logging cannot affect
+            // the stream.
+            const bool diagnostics = CurrentLogLevel() <= LogLevel::Debug;
             const auto wifi_now = Clock::now();
-            if (wifi_now - last_wifi > std::chrono::seconds(5)) {
+            if (diagnostics && wifi_now - last_wifi > std::chrono::seconds(5)) {
                 last_wifi = wifi_now;
                 const WifiInfo info = ProbeWifi();
                 bool changed = false;
@@ -4150,8 +4154,8 @@ void NextApp::StartPadThread() {
                     LogDebug(FormatWifi(info));
                 }
             }
-            if (streaming_ && streaming_->Connected() &&
-                wifi_now - last_ping > std::chrono::seconds(5)) {
+            if (diagnostics && streaming_ && streaming_->Connected() &&
+                wifi_now - last_ping > std::chrono::seconds(1)) {
                 last_ping = wifi_now;
                 const std::string host = streaming_->Profile().host;
                 ping_ms_.store(host.empty() ? -1 : PingMs(host));
@@ -4419,15 +4423,15 @@ void NextApp::ConnectStream() {
     content_unique_ = 0;
     content_window_ = -1.0;
     {
-        // Record the wireless association at the moment the session starts.
-        const WifiInfo wifi = ProbeWifi();
-        {
-            std::lock_guard<std::mutex> lock(wifi_mutex_);
-            wifi_ = wifi;
+        // Wi-Fi is a development diagnostic: do not even query it in production.
+        if (CurrentLogLevel() <= LogLevel::Debug) {
+            const WifiInfo wifi = ProbeWifi();
+            {
+                std::lock_guard<std::mutex> lock(wifi_mutex_);
+                wifi_ = wifi;
+            }
+            LogInfo(FormatWifi(wifi));
         }
-        // Always log the probe result: "not connected" with a reason is as
-        // useful as a full association line when Wi-Fi telemetry fails.
-        LogInfo(FormatWifi(wifi));
         const std::string fg =
             settings_.ai.frame_generation
                 ? std::string(ToString(settings_.ai.fg_backend))
@@ -4634,7 +4638,7 @@ void NextApp::PublishBridgeStatus() {
     // The shell side of the story: what the user actually sees. Every ~5 s at
     // Debug so a stutter can be tied to network loss, decoder time or
     // presentation misses instead of guesswork.
-    if (++stats_ticks_ >= 50) {
+    if (CurrentLogLevel() <= LogLevel::Debug && ++stats_ticks_ >= 50) {
         stats_ticks_ = 0;
         char line[360] = {};
         std::snprintf(
