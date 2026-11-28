@@ -278,6 +278,8 @@ private:
     double motion_shift_max_ = 0.0;
     int motion_bad_ = 0;
     int motion_samples_ = 0;
+    int motion_fast_hold_ = 0;
+    int motion_slow_hold_ = 0;
     WifiInfo wifi_;        // latest WLAN association, refreshed by the pad thread
     std::mutex wifi_mutex_;
     // Global screen-space motion for DLSS-G, estimated from consecutive frames.

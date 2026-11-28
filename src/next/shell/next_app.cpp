@@ -79,7 +79,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"3.0.0-beta14";
+constexpr wchar_t kVersion[] = L"3.0.0-beta15";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
@@ -4837,10 +4837,20 @@ void NextApp::UpdateGlobalMotion(int width, int height, int out_width,
     const float out_dy = sy * out_height / height;
     const float shift = std::sqrt(out_dx * out_dx + out_dy * out_dy);
     // OFA handles a slow pan well, but a fast pan exceeds what the generator
-    // can interpolate without ghosting. A static or slow frame is safe; a fast
-    // pan or a cut the search cannot explain is not.
-    const bool reliable =
-        shift < 10.0f && (zero_score < 2000 || best < zero_score * 9 / 10);
+    // can interpolate without ghosting. Hold the decision for a few frames so
+    // the mode does not flap between interpolated and repeated frames.
+    const bool fast =
+        shift >= 18.0f || (zero_score >= 2000 && best >= zero_score * 9 / 10);
+    if (fast) {
+        motion_fast_hold_ = 8;
+        motion_slow_hold_ = 0;
+    } else if (motion_fast_hold_ > 0) {
+        --motion_fast_hold_;
+        motion_slow_hold_ = 0;
+    } else if (motion_slow_hold_ < 8) {
+        ++motion_slow_hold_;
+    }
+    const bool reliable = motion_fast_hold_ == 0 && motion_slow_hold_ >= 4;
     motion_shift_sum_ += shift;
     if (shift > motion_shift_max_) {
         motion_shift_max_ = shift;

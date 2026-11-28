@@ -153,8 +153,19 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 3.0.0 beta 14 - standalone build
+Veyla 3.0.0 beta 15 - standalone build
 =======================================
+
+What changed in 3.0.0 beta 15
+-----------------------------
+- The fast-pan gate has hysteresis. A fast pan holds the repeat mode for a few
+  frames, and interpolation resumes only after a short run of small motion, so
+  the output no longer alternates between interpolated and repeated frames.
+- The gate tolerates a moderate pan (about 18 px per frame) and repeats the
+  real frame only on genuinely fast movement. Slow and moderate pans keep the
+  optical-flow interpolation.
+- Everything from beta 14 is included: the shared NGX/D3D12 session, the
+  optical-flow motion, immediate log flushing and the per-second `dlssg:` line.
 
 What changed in 3.0.0 beta 14
 -----------------------------
