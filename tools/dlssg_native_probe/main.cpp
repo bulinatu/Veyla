@@ -141,6 +141,12 @@ int main(int argc, char** argv) {
                 tick = 100000;
                 break;
             }
+            if (tick == 60 && !frame.generated) {
+                video.CaptureToBmp("C:\\Users\\Cosmin\\AppData\\Local\\Temp\\opencode\\dlssg_native_probe.bmp");
+            }
+            if (tick == 60 && frame.generated) {
+                video.CaptureToBmp("C:\\Users\\Cosmin\\AppData\\Local\\Temp\\opencode\\dlssg_native_probe_gen.bmp");
+            }
             if (!video.Present(false)) {
                 std::fprintf(stderr, "Present failed\n");
                 tick = 100000;

@@ -153,8 +153,17 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 3.0.0 beta 2 - standalone build
+Veyla 3.0.0 beta 3 - standalone build
 =======================================
+
+What changed in 3.0.0 beta 3
+----------------------------
+- Native DLSS-G offscreen output is disabled. The 310.9 runtime does not write
+  its interpolated texture without the swapchain path and produced black
+  generated frames; beta 3 keeps the picture on DLSS/FSR Super Resolution.
+  Frame generation returns with the swapchain integration in a later beta.
+- The real DLSS-G frame is copied explicitly, so the picture is never black
+  even when the generator is probing.
 
 What changed in 3.0.0 beta 2
 ----------------------------

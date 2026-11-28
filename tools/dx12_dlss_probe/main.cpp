@@ -149,6 +149,9 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "DrawShared: %s\n", video.status().c_str());
             break;
         }
+        if (tick == 60) {
+            video.CaptureToBmp("C:\\Users\\Cosmin\\AppData\\Local\\Temp\\opencode\\dx12_dlss_probe.bmp");
+        }
         if (!video.Present(false)) {
             std::fprintf(stderr, "Present failed\n");
             break;

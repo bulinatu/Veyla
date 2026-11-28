@@ -4579,6 +4579,18 @@ bool NextApp::EnsureDlssFgDx12(int width, int height) {
         settings_.ai.fg_backend != AiBackend::DlssFg) {
         return false;
     }
+    if (std::getenv("VEYLA_NATIVE_FG") == nullptr) {
+        // DLSS-G 310.x does not write its offscreen OutputInterpolated texture
+        // without the swapchain path; generated frames are black. Keep the
+        // picture on SR until the swapchain integration lands. Opt in only for
+        // development.
+        static bool announced = false;
+        if (!announced) {
+            announced = true;
+            Toast(L"DLSS-G offscreen output is disabled in this beta; using SR", true);
+        }
+        return false;
+    }
     if (fg_dx12_failed_) {
         return false;
     }

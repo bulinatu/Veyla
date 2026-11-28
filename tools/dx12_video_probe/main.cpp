@@ -110,6 +110,9 @@ int main() {
             std::fprintf(stderr, "DrawCpu failed: %s\n", video.status().c_str());
             break;
         }
+        if (tick == 60) {
+            video.CaptureToBmp("C:\\Users\\Cosmin\\AppData\\Local\\Temp\\opencode\\dx12_video_probe.bmp");
+        }
         if (!video.Present(false)) {
             std::fprintf(stderr, "Present failed\n");
             break;

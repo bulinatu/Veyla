@@ -423,7 +423,8 @@ bool NvDlssFg::ClearGuides(std::string& detail) {
     ID3D12DescriptorHeap* heaps[] = {dh.Get()};
     list_->SetDescriptorHeaps(1, heaps);
     const float zero[4] = {0, 0, 0, 0};
-    list_->ClearUnorderedAccessViewFloat(gpu, cpu, depth_.Get(), zero, 0, nullptr);
+    const float far_depth[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    list_->ClearUnorderedAccessViewFloat(gpu, cpu, depth_.Get(), far_depth, 0, nullptr);
     list_->ClearUnorderedAccessViewFloat(gpu2, cpu2, motion_.Get(), zero, 0, nullptr);
     D3D12_RESOURCE_BARRIER barriers[2]{};
     barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -665,16 +666,6 @@ bool NvDlssFg::Evaluate(bool reset, std::string& detail) {
     params->Set("DLSSG.CameraFwdZ", 1.0f);
     params->Set("DLSSG.JitterOffsetX", 0.0f);
     params->Set("DLSSG.JitterOffsetY", 0.0f);
-    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0,
-                                       0, 0, 1, 0, 0, 0, 0, 1};
-    params->Set("DLSSG.CameraViewToClip",
-                const_cast<float*>(identity));
-    params->Set("DLSSG.ClipToCameraView",
-                const_cast<float*>(identity));
-    params->Set("DLSSG.ClipToPrevClip",
-                const_cast<float*>(identity));
-    params->Set("DLSSG.PrevClipToClip",
-                const_cast<float*>(identity));
     params->Set(NVSDK_NGX_Parameter_Width, static_cast<unsigned>(width_));
     params->Set(NVSDK_NGX_Parameter_Height, static_cast<unsigned>(height_));
 
@@ -689,12 +680,38 @@ bool NvDlssFg::Evaluate(bool reset, std::string& detail) {
             return false;
         }
     }
+    // The offscreen mode can leave OutputReal empty; the real frame is the
+    // current color frame, so copy it explicitly. This is also what makes the
+    // first frame visible before any interpolation exists.
+    if (feature_event_) {
+        ::WaitForSingleObject(feature_event_, 50);
+    }
 
     for (UINT i = 0; i < count; ++i) {
         std::swap(barriers[i].Transition.StateBefore,
                   barriers[i].Transition.StateAfter);
     }
     list_->ResourceBarrier(count, barriers);
+    D3D12_RESOURCE_BARRIER copy_barriers[4]{};
+    copy_barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    copy_barriers[0].Transition.pResource = real_.Get();
+    copy_barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    copy_barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+    copy_barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+    copy_barriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    copy_barriers[1].Transition.pResource = eval_input_;
+    copy_barriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    copy_barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+    copy_barriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    list_->ResourceBarrier(2, copy_barriers);
+    list_->CopyResource(real_.Get(), eval_input_);
+    copy_barriers[2] = copy_barriers[0];
+    copy_barriers[2].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+    copy_barriers[2].Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
+    copy_barriers[3] = copy_barriers[1];
+    copy_barriers[3].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    copy_barriers[3].Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
+    list_->ResourceBarrier(2, copy_barriers + 2);
     if (!Submit(detail) || !Wait(detail)) {
         return false;
     }

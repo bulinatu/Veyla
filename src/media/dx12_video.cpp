@@ -634,6 +634,119 @@ bool Dx12Video::DrawTexture(ID3D12Resource* texture, int width, int height) {
     return EndFrame();
 }
 
+bool Dx12Video::CaptureToBmp(const char* path) {
+    if (!swapchain_ || !device_ || !path) {
+        return false;
+    }
+    WaitGpu();
+    const UINT index = swapchain_->GetCurrentBackBufferIndex();
+    ID3D12Resource* backbuffer = backbuffers_[index].Get();
+    if (!backbuffer) {
+        return false;
+    }
+    D3D12_RESOURCE_DESC desc = backbuffer->GetDesc();
+    const UINT width = static_cast<UINT>(desc.Width);
+    const UINT height = desc.Height;
+    const UINT pitch = (width * 4u + 255u) & ~255u;
+    D3D12_HEAP_PROPERTIES heap{};
+    heap.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC buffer_desc{};
+    buffer_desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    buffer_desc.Width = static_cast<UINT64>(pitch) * height;
+    buffer_desc.Height = 1;
+    buffer_desc.DepthOrArraySize = 1;
+    buffer_desc.MipLevels = 1;
+    buffer_desc.Format = DXGI_FORMAT_UNKNOWN;
+    buffer_desc.SampleDesc.Count = 1;
+    buffer_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    Microsoft::WRL::ComPtr<ID3D12Resource> staging;
+    if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer_desc,
+                                                D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                IID_PPV_ARGS(&staging)))) {
+        return false;
+    }
+    if (FAILED(allocator_->Reset()) || FAILED(list_->Reset(allocator_.Get(), nullptr))) {
+        return false;
+    }
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = backbuffer;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    list_->ResourceBarrier(1, &barrier);
+    D3D12_TEXTURE_COPY_LOCATION src{};
+    src.pResource = backbuffer;
+    src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    src.SubresourceIndex = 0;
+    D3D12_TEXTURE_COPY_LOCATION dst{};
+    dst.pResource = staging.Get();
+    dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dst.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    dst.PlacedFootprint.Footprint.Width = width;
+    dst.PlacedFootprint.Footprint.Height = height;
+    dst.PlacedFootprint.Footprint.Depth = 1;
+    dst.PlacedFootprint.Footprint.RowPitch = pitch;
+    list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+    list_->ResourceBarrier(1, &barrier);
+    if (FAILED(list_->Close())) {
+        return false;
+    }
+    ID3D12CommandList* lists[] = {list_.Get()};
+    queue_->ExecuteCommandLists(1, lists);
+    submitted_value_ = ++fence_value_;
+    if (FAILED(queue_->Signal(fence_.Get(), submitted_value_))) {
+        return false;
+    }
+    WaitGpu();
+
+    D3D12_RANGE range{0, static_cast<SIZE_T>(buffer_desc.Width)};
+    void* mapped = nullptr;
+    if (FAILED(staging->Map(0, &range, &mapped)) || !mapped) {
+        return false;
+    }
+    std::FILE* file = nullptr;
+    if (fopen_s(&file, path, "wb") != 0 || !file) {
+        staging->Unmap(0, nullptr);
+        return false;
+    }
+    const std::uint32_t image_bytes = width * height * 4u;
+    unsigned char header[54] = {};
+    header[0] = 'B';
+    header[1] = 'M';
+    const std::uint32_t file_size = 54 + image_bytes;
+    std::memcpy(header + 2, &file_size, 4);
+    const std::uint32_t offset = 54;
+    std::memcpy(header + 10, &offset, 4);
+    const std::uint32_t info = 40;
+    std::memcpy(header + 14, &info, 4);
+    std::memcpy(header + 18, &width, 4);
+    std::memcpy(header + 22, &height, 4);
+    const std::uint16_t planes = 1;
+    std::memcpy(header + 26, &planes, 2);
+    const std::uint16_t bpp = 32;
+    std::memcpy(header + 28, &bpp, 2);
+    std::memcpy(header + 34, &image_bytes, 4);
+    std::fwrite(header, 1, sizeof(header), file);
+    const auto* pixels = static_cast<const unsigned char*>(mapped);
+    std::vector<unsigned char> line(width * 4u);
+    for (int y = static_cast<int>(height) - 1; y >= 0; --y) {
+        const unsigned char* in = pixels + static_cast<std::size_t>(pitch) * y;
+        for (UINT x = 0; x < width; ++x) {
+            line[x * 4 + 0] = in[x * 4 + 2];
+            line[x * 4 + 1] = in[x * 4 + 1];
+            line[x * 4 + 2] = in[x * 4 + 0];
+            line[x * 4 + 3] = 0xFF;
+        }
+        std::fwrite(line.data(), 1, line.size(), file);
+    }
+    std::fclose(file);
+    staging->Unmap(0, nullptr);
+    return true;
+}
+
 bool Dx12Video::Present(bool vsync) {
     if (!swapchain_ || device_lost_) {
         return false;

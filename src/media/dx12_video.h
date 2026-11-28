@@ -50,6 +50,10 @@ public:
     bool Present(bool vsync);
     bool WaitForFrame(DWORD timeout_ms);
 
+    // Debug: copies the just-drawn backbuffer to a 32-bit BMP. Call between a
+    // Draw* call and Present.
+    bool CaptureToBmp(const char* path);
+
     bool ready() const { return swapchain_ != nullptr; }
     bool device_lost() const { return device_lost_; }
     bool has_frame() const { return has_frame_; }
