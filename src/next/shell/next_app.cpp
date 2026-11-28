@@ -77,7 +77,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"3.0.0-beta7";
+constexpr wchar_t kVersion[] = L"3.0.0-beta8";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
@@ -760,6 +760,13 @@ void NextApp::ApplyTargetTo(brp::Presenter* presenter) const {
     presenter->SetUpscaleTarget(width, height);
 }
 
+bool NextApp::PresentVsync() const {
+    // Buffer 0 is the explicit lowest-latency mode: tearing beats waiting for
+    // vblank. Vsync returns as soon as the user picks a real buffer.
+    return settings_.video.vsync &&
+           std::clamp(settings_.streaming.frame_buffer, 0, 3) > 0;
+}
+
 void NextApp::ApplyEnhance() {
     EnhanceParams enhance;
     enhance.active = settings_.video.sharpening > 0;
@@ -813,8 +820,8 @@ bool NextApp::EnsureStreamSurface() {
             config.output_height = stream_window_->height();
             config.source_width = 1920;
             config.source_height = 1080;
-            config.vsync = settings_.video.vsync;
-            config.allow_tearing = !settings_.video.vsync;
+            config.vsync = PresentVsync();
+            config.allow_tearing = !config.vsync;
             config.hdr = false;
             const bool shared = decode_device_ && decode_context_;
             const bool ok =
@@ -1078,7 +1085,7 @@ void NextApp::Render() {
             if (!present_frame_) {
                 return;
             }
-            stream_dx12_->Present(settings_.video.vsync);
+            stream_dx12_->Present(PresentVsync());
             ActiveWindow()->set_hand_cursor(false);
             return;
         }
@@ -1115,7 +1122,7 @@ void NextApp::Render() {
         if (reflex_active) {
             reflex_->PresentStart(reflex_device);
         }
-        video->PresentNow(settings_.video.vsync);
+        video->PresentNow(PresentVsync());
         if (reflex_active) {
             reflex_->PresentEnd(reflex_device);
         }
@@ -2629,6 +2636,8 @@ bool NextApp::Apply() {
     ApplyEnhance();
     const bool surface_change =
         before.video.vsync != settings_.video.vsync ||
+        (before.streaming.frame_buffer == 0) !=
+            (settings_.streaming.frame_buffer == 0) ||
         before.ai.frame_generation != settings_.ai.frame_generation;
     if (surface_change && watching_ && (stream_presenter_ || stream_dx12_)) {
         // ALLOW_TEARING and the surface type are creation flags. Recreate the
@@ -5034,12 +5043,14 @@ void NextApp::PublishBridgeStatus() {
             line, sizeof(line),
             "present: state=%s connected=%d, source %.1f fps, shown %d fps, "
             "loss %.2f%%, drops %d, decode %.1f/%.1f ms, age %.1f ms, "
-            "cadence %.1f/%.1f ms, misses %llu/s, link=%s",
+            "cadence %.1f/%.1f ms, misses %llu/s, link=%s, input %.1f/%.1f ms",
             stream.state.c_str(), stream.connected ? 1 : 0, stream.source_fps,
             display_rate_, stream.loss_percent, stream.decoder_drops,
             stream.decode_ms, stream.decode_ms_max, last_age_ms_, cadence_p50_,
             cadence_p99_, present_misses_rate_,
-            link_type_.empty() ? "unknown" : link_type_.c_str());
+            link_type_.empty() ? "unknown" : link_type_.c_str(),
+            streaming_ ? streaming_->InputResponseMs() : 0.0,
+            streaming_ ? streaming_->InputResponseAvgMs() : 0.0);
         LogDebug(line);
     }
     std::string json;
