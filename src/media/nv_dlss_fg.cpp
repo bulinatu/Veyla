@@ -703,7 +703,11 @@ bool NvDlssFg::Evaluate(bool reset, std::string& detail) {
     params->Set("DLSSG.MVecs", motion_source_ ? motion_source_ : motion_.Get());
     params->Set("DLSSG.Depth", depth_.Get());
     params->Set("DLSSG.OutputReal", real_.Get());
-    params->Set("DLSSG.MultiFrameCount", static_cast<unsigned>(generated_));
+    // A reset has no previous frame, so the runtime must see count/index 1
+    // even when the multiplier is 4x-6x. Driving it with the pair's count
+    // poisons the history (the next intervals come back out of phase).
+    const int evaluate_count = reset ? 1 : generated_;
+    params->Set("DLSSG.MultiFrameCount", static_cast<unsigned>(evaluate_count));
     params->Set("DLSSG.Reset", reset ? 1u : 0u);
     params->Set("DLSSG.IsRecording", 1u);
     params->Set("DLSSG.MustCallEval", 1u);
@@ -759,7 +763,7 @@ bool NvDlssFg::Evaluate(bool reset, std::string& detail) {
     params->Set(NVSDK_NGX_Parameter_Width, static_cast<unsigned>(width_));
     params->Set(NVSDK_NGX_Parameter_Height, static_cast<unsigned>(height_));
 
-    for (int i = 0; i < generated_; ++i) {
+    for (int i = 0; i < evaluate_count; ++i) {
         params->Set("DLSSG.OutputInterpolated", generated_tex_[i].Get());
         params->Set("DLSSG.MultiFrameIndex", static_cast<unsigned>(i + 1));
         const NVSDK_NGX_Result result =
@@ -807,8 +811,10 @@ bool NvDlssFg::Evaluate(bool reset, std::string& detail) {
     }
     frames_.clear();
     frames_.push_back({real_handle_, false});
-    for (int i = 0; i < generated_; ++i) {
-        frames_.push_back({generated_handles_[i], true});
+    if (!reset) {
+        for (int i = 0; i < generated_; ++i) {
+            frames_.push_back({generated_handles_[i], true});
+        }
     }
     status_ = "generating";
     return true;

@@ -79,7 +79,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"3.0.0-beta15";
+constexpr wchar_t kVersion[] = L"3.0.0-beta16";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
@@ -1942,7 +1942,7 @@ void NextApp::RenderAi(Widgets& widgets) {
                     system_.dlss_sr, L"nvngx_dlss.dll");
     capability_card(1, L"DLSS Frame Generation", system_.dlss_fg ? L"AVAILABLE" : L"MISSING",
                     system_.dlss_fg,
-                    system_.dlss_fg_multi ? L"NVIDIA + SM86 proxy" : L"NVIDIA 2x");
+                    system_.dlss_fg_multi ? L"NVIDIA native MFG (up to 6x)" : L"NVIDIA 2x");
     capability_card(2, L"Neural Rendering", system_.nr_worker ? L"AVAILABLE" : L"MISSING",
                     system_.nr_worker, L"ngx + DLSS NR");
 
@@ -2555,7 +2555,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     };
     runtime(L"DLSS Super Resolution", system_.dlss_sr, L"nvngx_dlss.dll");
     runtime(L"DLSS Frame Generation", system_.dlss_fg,
-            system_.dlss_fg_multi ? L"NVIDIA runtime + SM86 proxy (up to 6x)"
+            system_.dlss_fg_multi ? L"NVIDIA native MFG (up to 6x)"
                                   : L"NVIDIA runtime (2x)");
     runtime(L"Neural Rendering", system_.nr_worker, L"NGX + DLSS NR worker");
 
@@ -3033,7 +3033,7 @@ void NextApp::BuildOverlayView() {
         L"Multiplier",
         std::to_wstring(std::clamp(settings_.ai.fg_multiplier, 2, 6)) + L"x",
         OverlayAction::FgMultPrev, OverlayAction::FgMultNext,
-        L"2x is the clean cadence; 3x-6x need the SM86 proxy", dlss_fg));
+        L"2x is the clean cadence; 3x-6x need an RTX 50", dlss_fg));
     fg.rows.push_back(info(L"OUTPUT", std::to_wstring(output_fps) + L" fps",
                            L"source rate x multiplier"));
     fg.rows.push_back(info(
@@ -4124,7 +4124,7 @@ bool NextApp::PresentVideoDx12() {
                 LogPrintf(LogLevel::Info,
                           "dlssg: process %.1f ms, motion %.1f ms, %.1f fps, "
                           "shown %.1f fps, generated %d, interp %d, shift %.1f/%.1f px, "
-                          "bad %d/%d",
+                          "bad %d/%d, due %d drop %d late %d",
                           fg_process_ms_sum_ / fg_timing_samples_,
                           fg_motion_ms_sum_ / fg_timing_samples_,
                           fg_timing_samples_ / span,
@@ -4132,7 +4132,8 @@ bool NextApp::PresentVideoDx12() {
                           dlss_fg_dx12_->actual_generated(),
                           dlss_fg_dx12_->interpolation_enabled() ? 1 : 0,
                           motion_samples_ > 0 ? motion_shift_sum_ / motion_samples_ : 0.0,
-                          motion_shift_max_, motion_bad_, motion_samples_);
+                          motion_shift_max_, motion_bad_, motion_samples_,
+                          fg_due_presented_, fg_due_dropped_, fg_due_late_);
                 fg_process_ms_sum_ = 0.0;
                 fg_motion_ms_sum_ = 0.0;
                 fg_timing_start_ = now_;
@@ -4141,6 +4142,9 @@ bool NextApp::PresentVideoDx12() {
                 motion_shift_max_ = 0.0;
                 motion_bad_ = 0;
                 motion_samples_ = 0;
+                fg_due_presented_ = 0;
+                fg_due_dropped_ = 0;
+                fg_due_late_ = 0;
             }
             if (processed) {
                 fg_dx12_reset_ = false;
@@ -4151,9 +4155,35 @@ bool NextApp::PresentVideoDx12() {
                                                : static_cast<double>(settings_.streaming.fps);
                     const double interval = 1.0 / std::max(24.0, content);
                     const int generated = static_cast<int>(frames.size()) - 1;
+                    if (generated <= 0) {
+                        // Reset frame: there is no previous pair to subdivide,
+                        // so the runtime generated nothing and nothing may be
+                        // presented between this real frame and the next.
+                        fg_pending_.clear();
+                    }
+                    // N generated frames sit at 1/(N+1), 2/(N+1) ... of the
+                    // real-frame interval. Using N as the denominator put the
+                    // 2x frame on top of the next real frame, and the last MFG
+                    // frame exactly at the next input.
+                    // A new real frame closes the previous interval. Drop any
+                    // generated frame that was not presented in time instead of
+                    // letting a 6x queue fall behind the input.
+                    while (!fg_pending_.empty() &&
+                           fg_pending_.front().due <= now_) {
+                        fg_pending_.pop_front();
+                        ++fg_due_dropped_;
+                    }
+                    const double step =
+                        interval / static_cast<double>(generated + 1);
+                    // Schedule from the moment the real frame is ready, not
+                    // from the loop's earlier timestamp: SR and the generator
+                    // have already spent a few milliseconds by now, and that
+                    // delay used to eat most of the 2x window.
+                    const double schedule_now = SecondsNow();
                     // When the motion is too fast for a clean interpolation,
                     // repeat the real frame at the generated slot. The output
-                    // cadence stays 2x, but no warped frame is shown.
+                    // cadence stays at the multiplier, but no warped frame is
+                    // shown.
                     const bool interpolate =
                         dlss_fg_dx12_->interpolation_enabled();
                     for (int i = 1; i <= generated; ++i) {
@@ -4162,9 +4192,7 @@ bool NextApp::PresentVideoDx12() {
                                 ? frames[static_cast<std::size_t>(i)].shared
                                 : frames[0].shared;
                         fg_pending_.push_back(
-                            {handle, true,
-                             now_ + interval * static_cast<double>(i) /
-                                        static_cast<double>(generated)});
+                            {handle, true, schedule_now + step * static_cast<double>(i)});
                     }
                     drawn = stream_dx12_->DrawShared(frames[0].shared, fg_width,
                                                      fg_height, video_frame_.pq);
@@ -4228,6 +4256,10 @@ bool NextApp::TickDlssFgDx12() {
     if (!stream_dx12_->DrawShared(frame.shared, width, height, video_frame_.pq)) {
         return false;
     }
+    if (now_ - frame.due > 0.005) {
+        ++fg_due_late_;
+    }
+    ++fg_due_presented_;
     present_frame_ = true;
     RecordVideoShown();
     return true;
@@ -4836,6 +4868,13 @@ void NextApp::UpdateGlobalMotion(int width, int height, int out_width,
     const float out_dx = sx * out_width / width;
     const float out_dy = sy * out_height / height;
     const float shift = std::sqrt(out_dx * out_dx + out_dy * out_dy);
+    // A hard cut has a large residual that no shift explains. Reset the
+    // generator so it does not blend two different shots.
+    const bool cut = zero_score >= 12000 && best >= zero_score * 95 / 100;
+    if (cut) {
+        fg_dx12_reset_ = true;
+        fg_pending_.clear();
+    }
     // OFA handles a slow pan well, but a fast pan exceeds what the generator
     // can interpolate without ghosting. Hold the decision for a few frames so
     // the mode does not flap between interpolated and repeated frames.
@@ -4922,10 +4961,20 @@ bool NextApp::EnsureDlssFgDx12(int width, int height) {
     fg_dx12_w_ = width;
     fg_dx12_h_ = height;
     fg_pending_.clear();
-    LogPrintf(LogLevel::Info, "[next] native DLSS-G %dx at %dx%d",
-              dlss_fg_dx12_->requested_multiplier(), width, height);
-    Toast(std::to_wstring(dlss_fg_dx12_->requested_multiplier()) +
-          L"x DLSS-G active (DX12)");
+    const int effective = dlss_fg_dx12_->effective_multiplier();
+    const int requested = dlss_fg_dx12_->requested_multiplier();
+    LogPrintf(LogLevel::Info,
+              "[next] native DLSS-G %dx at %dx%d (%d generated, max %dx)%s",
+              effective, width, height, dlss_fg_dx12_->actual_generated(),
+              dlss_fg_dx12_->max_multiplier(),
+              requested != effective ? " requested multiplier clamped" : "");
+    if (requested != effective) {
+        LogPrintf(LogLevel::Info,
+                  "[next] native DLSS-G: %dx requested, %dx is the driver maximum",
+                  requested, effective);
+    }
+    Toast(std::to_wstring(effective) + L"x DLSS-G active (DX12)" +
+          (requested != effective ? L", driver max" : L""));
     return true;
 }
 

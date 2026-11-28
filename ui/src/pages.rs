@@ -1347,21 +1347,22 @@ impl Root {
                 "Native DLSS-G",
                 "Runs in-process on DX12; optical flow interpolates slow pans and fast pans repeat the real frame.",
             ));
+            let multi = self.status.dlss_fg_multi;
+            let multiplier_note = if multi {
+                "Native 2x-6x on RTX 50; 2x has the lowest latency"
+            } else {
+                "2x on this GPU; 3x-6x need an RTX 50"
+            };
+            let multiplier_options: Vec<(i64, &str)> = if multi {
+                vec![(2, "2x"), (3, "3x"), (4, "4x"), (5, "5x"), (6, "6x")]
+            } else {
+                vec![(2, "2x")]
+            };
             fg_rows.push(self.seg_int_row(
                 "ai.fg_multiplier",
                 "Multiplier",
-                if self.status.dlss_fg_multi {
-                    "2x holds 1 frame, 4x/6x hold 3/5; 60 fps + 2x is lowest. 5x/6x: RTX 50 MFG"
-                } else {
-                    "2x holds 1 frame, 4x/6x hold 3/5; 60 fps + 2x is lowest. 5x/6x forced"
-                },
-                &[
-                    (2, "2x"),
-                    (3, "3x"),
-                    (4, "4x"),
-                    (5, "5x"),
-                    (6, "6x"),
-                ],
+                multiplier_note,
+                &multiplier_options,
                 cx,
             ));
             if self.status.content_fps > 1.0 && self.status.content_fps < 45.0 {

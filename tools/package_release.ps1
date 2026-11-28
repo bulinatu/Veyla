@@ -153,8 +153,27 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 3.0.0 beta 15 - standalone build
+Veyla 3.0.0 beta 16 - standalone build
 =======================================
+
+What changed in 3.0.0 beta 16
+-----------------------------
+- Generated frames now sit at the right phase. The 2x frame was scheduled on
+  top of the next real frame and the 3x-6x frames used N as the denominator;
+  all of them now use 1/(N+1) and are timed from the moment the real frame is
+  ready, not from the earlier loop timestamp.
+- A reset frame is evaluated with count/index 1 and produces no generated
+  frame. Driving a reset with the pair's own count poisoned the history: on a
+  4x conversion the first interval came back as three copies of the new frame
+  and the next interval was out of phase.
+- A hard scene cut is detected from the frame residual and resets the
+  generator instead of blending two shots.
+- Native 3x-6x is enabled on RTX 50 (DLSS 4.5 Multi Frame Generation). Other
+  GPUs stay at 2x and the multiplier selector only offers what the GPU can do.
+  4x is the even cadence for 60 fps on a 240 Hz display; 5x/6x are for a
+  faster display or a lower source rate.
+- The `dlssg:` line also reports presented/dropped/late generated frames, so a
+  pacing problem is visible without guessing.
 
 What changed in 3.0.0 beta 15
 -----------------------------

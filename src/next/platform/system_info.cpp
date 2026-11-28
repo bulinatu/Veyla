@@ -201,8 +201,11 @@ SystemInfo ProbeSystem() {
             info.nr_dir = (abs_ec ? candidate : absolute).wstring();
             info.nr_worker = true;
             info.dlss_fg = std::filesystem::exists(candidate / "nvngx_dlssg.dll", ec);
+            // Native multi-frame generation (3x-6x) is a Blackwell capability
+            // in NVIDIA's DLSS 4.5 runtime. The old SM86 proxy is not required
+            // for the in-process path.
             info.dlss_fg_multi =
-                std::filesystem::exists(candidate / "fg" / "winmm.dll", ec);
+                info.gpu.name.find("RTX 50") != std::string::npos;
             break;
         }
     }

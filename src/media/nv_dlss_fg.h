@@ -74,6 +74,8 @@ public:
     // was selected.
     int requested_multiplier() const { return requested_multiplier_; }
     int actual_generated() const { return generated_; }
+    int effective_multiplier() const { return generated_ + 1; }
+    int max_multiplier() const { return static_cast<int>(max_generated_) + 1; }
     bool available() const { return feature_ != nullptr; }
     bool HasOpticalFlow() const { return of_ != nullptr; }
     const std::string& status() const { return status_; }
