@@ -220,11 +220,15 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
     frame_count_.store(0);
     audio_frames_.store(0);
     buffer_target_.store(1);
+    ordered_target_.store(1);
+    ordered_mode_.store(false);
     buffer_drops_.store(0);
     primed_ = false;
     last_drought_ = -100.0;
     last_recovery_ = 0.0;
     last_drop_ = -100.0;
+    last_ordered_drop_ = -100.0;
+    last_ordered_recovery_ = 0.0;
     last_queue_ = 0;
     stats_frames_.store(0);
     stats_lost_.store(0);
@@ -785,14 +789,38 @@ bool Streaming::TakeFrameNow(media::DecodedFrame& out) {
 
 bool Streaming::TakeFrameOrdered(media::DecodedFrame& out, int max_queue) {
     std::lock_guard<std::mutex> lock(frame_mutex_);
+    ordered_mode_.store(true);
     if (frames_.empty()) {
         last_queue_ = 0;
         return false;
     }
+    const auto now = std::chrono::steady_clock::now();
+    const double seconds =
+        std::chrono::duration<double>(now - started_).count();
+    // Frame buffer 0 means "no queue", but a bursty Wi-Fi link should not turn
+    // into drops: buy one frame of slack when a burst arrives, and only give it
+    // back after 10 s without a drop.
+    if (seconds - last_ordered_recovery_ >= 5.0 &&
+        seconds - last_ordered_drop_ >= 10.0) {
+        const int depth = ordered_target_.load();
+        if (depth > 1) {
+            ordered_target_.store(depth - 1);
+        }
+        last_ordered_recovery_ = seconds;
+    }
     const int limit = std::clamp(max_queue, 1, 8);
-    while (static_cast<int>(frames_.size()) > limit) {
+    int allowed = std::max(limit, ordered_target_.load() + 1);
+    while (static_cast<int>(frames_.size()) > allowed) {
+        if (ordered_target_.load() < 3) {
+            ordered_target_.store(ordered_target_.load() + 1);
+            last_ordered_drop_ = seconds;
+            last_ordered_recovery_ = seconds;
+            allowed = std::max(limit, ordered_target_.load() + 1);
+            continue;
+        }
         frames_.pop_front();
         buffer_drops_.fetch_add(1);
+        last_ordered_drop_ = seconds;
     }
     out = std::move(frames_.front());
     frames_.pop_front();
@@ -802,6 +830,7 @@ bool Streaming::TakeFrameOrdered(media::DecodedFrame& out, int max_queue) {
 
 bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, bool paced) {
     std::lock_guard<std::mutex> lock(frame_mutex_);
+    ordered_mode_.store(false);
     const auto now = std::chrono::steady_clock::now();
     const double seconds =
         std::chrono::duration<double>(now - started_).count();
@@ -912,7 +941,8 @@ Streaming::StreamStats Streaming::ConsumeStats() {
                            ? static_cast<double>(arrival_us) / arrivals / 1000.0
                            : 0.0;
     stats.arrival_outliers = stats_arrival_outliers_.exchange(0);
-    stats.buffer = buffer_target_.load();
+    stats.buffer = ordered_mode_.load() ? std::max(0, ordered_target_.load() - 1)
+                                        : buffer_target_.load();
     stats.buffer_drops = buffer_drops_.exchange(0);
     {
         std::lock_guard<std::mutex> lock(frame_mutex_);

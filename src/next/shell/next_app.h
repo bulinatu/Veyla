@@ -212,6 +212,8 @@ private:
     void StopNr();
     void EnhanceNeural(media::DecodedFrame& frame);
     bool NeuralInWorkerWanted() const;
+    // Frame buffer 0 is the explicit lowest-latency mode; 1+ keeps vsync.
+    bool PresentVsync() const;
     bool dlss_fg_failed_ = false;
     bool fg_covering_ = false;
     int fg_actual_mult_ = 0;

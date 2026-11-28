@@ -186,6 +186,10 @@ private:
 
     // adaptive jitter buffer
     std::atomic<int> buffer_target_{1};
+    // Frame buffer 0 (ordered mode): stays at 0 on a clean link and only adds
+    // frames when a burst would otherwise force a drop.
+    std::atomic<int> ordered_target_{1};
+    std::atomic<bool> ordered_mode_{false};
     std::atomic<int> buffer_drops_{0};
     bool primed_ = false;
     int last_queue_ = 0;
@@ -194,6 +198,8 @@ private:
     // Last time the queue had to drop a frame. A jittery link must not start
     // shrinking the buffer again a few seconds after every burst.
     double last_drop_ = -100.0;
+    double last_ordered_drop_ = -100.0;
+    double last_ordered_recovery_ = 0.0;
 
     // per-interval video telemetry
     std::atomic<int> stats_frames_{0};

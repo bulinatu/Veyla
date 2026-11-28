@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(BetterRemotePlay VERSION 2.7.6 LANGUAGES CXX)
+project(BetterRemotePlay VERSION 2.7.7 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

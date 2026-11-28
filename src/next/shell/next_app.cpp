@@ -75,7 +75,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"2.7.6";
+constexpr wchar_t kVersion[] = L"2.7.7";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
@@ -729,6 +729,13 @@ void NextApp::ApplyTargetTo(brp::Presenter* presenter) const {
     presenter->SetUpscaleTarget(width, height);
 }
 
+bool NextApp::PresentVsync() const {
+    // Buffer 0 is the explicit lowest-latency mode: tearing beats waiting for
+    // vblank. Vsync returns as soon as the user picks a real buffer.
+    return settings_.video.vsync &&
+           std::clamp(settings_.streaming.frame_buffer, 0, 3) > 0;
+}
+
 void NextApp::ApplyEnhance() {
     EnhanceParams enhance;
     enhance.active = settings_.video.sharpening > 0;
@@ -767,10 +774,10 @@ bool NextApp::EnsureStreamSurface() {
         config.output_height = stream_window_->height();
         config.source_width = 1920;
         config.source_height = 1080;
-        // VSync is the UI switch; tearing is only requested when VSync is off,
-        // which is the low-latency path for a non frame-generated stream.
-        config.vsync = settings_.video.vsync;
-        config.allow_tearing = !settings_.video.vsync;
+        // VSync is the UI switch; tearing is requested when VSync is off or when
+        // frame buffer 0 (lowest-latency mode) is selected.
+        config.vsync = PresentVsync();
+        config.allow_tearing = !config.vsync;
         config.hdr = false;
         const bool shared = decode_device_ && decode_context_;
         const bool ok =
@@ -1054,7 +1061,7 @@ void NextApp::Render() {
         if (reflex_active) {
             reflex_->PresentStart(reflex_device);
         }
-        video->PresentNow(settings_.video.vsync);
+        video->PresentNow(PresentVsync());
         if (reflex_active) {
             reflex_->PresentEnd(reflex_device);
         }
@@ -1173,7 +1180,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"Veyla", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  2.7.6", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  2.7.7", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -1287,7 +1294,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"Veyla 2.7.6",
+        renderer_->Text(L"Veyla 2.7.7",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -2416,7 +2423,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"Veyla 2.7.6  |  stable release", L"STABLE", true);
+               L"Veyla 2.7.7  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -2425,7 +2432,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"Veyla", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 2.7.6  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 2.7.7  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -2554,7 +2561,10 @@ bool NextApp::Apply() {
     pad_rate_hz_.store(std::clamp(settings_.controller.poll_hz, 60, 1000));
     ApplyPresenterTarget();
     ApplyEnhance();
-    if (before.video.vsync != settings_.video.vsync && watching_ && stream_presenter_) {
+    if ((before.video.vsync != settings_.video.vsync ||
+         (before.streaming.frame_buffer == 0) !=
+             (settings_.streaming.frame_buffer == 0)) &&
+        watching_ && stream_presenter_) {
         // ALLOW_TEARING is a swapchain creation flag. Recreate the surface so a
         // live vsync change (or the Lowest latency preset) takes effect now
         // instead of on the next session.
@@ -4547,12 +4557,14 @@ void NextApp::PublishBridgeStatus() {
             line, sizeof(line),
             "present: state=%s connected=%d, source %.1f fps, shown %d fps, "
             "loss %.2f%%, drops %d, decode %.1f/%.1f ms, age %.1f ms, "
-            "cadence %.1f/%.1f ms, misses %llu/s, link=%s",
+            "cadence %.1f/%.1f ms, misses %llu/s, link=%s, input %.1f/%.1f ms",
             stream.state.c_str(), stream.connected ? 1 : 0, stream.source_fps,
             display_rate_, stream.loss_percent, stream.decoder_drops,
             stream.decode_ms, stream.decode_ms_max, last_age_ms_, cadence_p50_,
             cadence_p99_, present_misses_rate_,
-            link_type_.empty() ? "unknown" : link_type_.c_str());
+            link_type_.empty() ? "unknown" : link_type_.c_str(),
+            streaming_ ? streaming_->InputResponseMs() : 0.0,
+            streaming_ ? streaming_->InputResponseAvgMs() : 0.0);
         LogDebug(line);
     }
     std::string json;

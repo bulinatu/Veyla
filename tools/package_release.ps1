@@ -130,10 +130,21 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 2.7.6 - standalone build
+Veyla 2.7.7 - standalone build
 =======================================
 
 Run veyla.exe. No installer, no console window, no background service.
+
+What changed in 2.7.7
+---------------------
+- Frame buffer 0 now adapts too. On a clean link it stays at 0 as before; when
+  a burst would force a drop, it buys one frame of slack (up to 3) and only
+  gives it back after 10 s without a drop. Lowest-latency mode is no longer the
+  first to stutter on Wi-Fi.
+- Frame buffer 0 also presents with vsync off (tearing) for the lowest
+  control-to-image delay. Buffer 1+ keeps the Vsync switch as set.
+- The log's buffer field now reports the real ordered depth (0 when calm), and
+  the presentation line includes the measured input-to-first-frame latency.
 
 What changed in 2.7.6
 ---------------------
