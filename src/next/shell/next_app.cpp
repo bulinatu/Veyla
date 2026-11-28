@@ -75,7 +75,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"2.7.2";
+constexpr wchar_t kVersion[] = L"2.7.3";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
@@ -1173,7 +1173,7 @@ void NextApp::RenderTitleBar(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"Veyla", Rect(46, 2, 220, 21), 12.5f,
                     ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"NEXT  ·  2.7.2", Rect(46, 19, 220, 35), 9.0f,
+    renderer_->Text(L"NEXT  ·  2.7.3", Rect(46, 19, 220, 35), 9.0f,
                     ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
 
     const PageInfo* page = navigation_.Find(navigation_.Current());
@@ -1287,7 +1287,7 @@ void NextApp::RenderSidebar(Widgets& widgets) {
                                                     card_top + 90),
                         9.0f, ToD2D(theme.accent), DWRITE_FONT_WEIGHT_MEDIUM);
 
-        renderer_->Text(L"Veyla 2.7.2",
+        renderer_->Text(L"Veyla 2.7.3",
                         Rect(18, logical_height_ - 38, width - 14, logical_height_ - 22),
                         9.0f, ToD2D(theme.text_faint), DWRITE_FONT_WEIGHT_MEDIUM);
         renderer_->Text(L"stable release", Rect(18, logical_height_ - 22, width - 14,
@@ -2416,7 +2416,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
     const float x = ContentX();
     const float w = ContentWidth();
     PageHeader(widgets, L"APPLICATION", L"About",
-               L"Veyla 2.7.2  |  stable release", L"STABLE", true);
+               L"Veyla 2.7.3  |  stable release", L"STABLE", true);
 
     widgets.Card(Rect(x, 138, x + w, 238));
     renderer_->FillRounded(Rect(x + 18, 154, x + 66, 202), 12.0f,
@@ -2425,7 +2425,7 @@ void NextApp::RenderAboutPage(Widgets& widgets) {
                     DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
     renderer_->Text(L"Veyla", Rect(x + 80, 152, x + w - 20, 182),
                     20.0f, ToD2D(theme.text), DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    renderer_->Text(L"Version 2.7.2  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
+    renderer_->Text(L"Version 2.7.3  |  win64  |  C++20 / Win32 / Direct2D / D3D11",
                     Rect(x + 80, 182, x + w - 20, 204), 11.5f,
                     ToD2D(theme.text_dim));
     renderer_->Text(L"PS5 Remote Play with native DualSense input, DLSS Super Resolution, "
@@ -2536,6 +2536,13 @@ bool NextApp::Apply() {
     }
     settings_ = host_->Settings();
     last_apply_scope_ = scope;
+    if (before.general.update_channel != settings_.general.update_channel &&
+        settings_.general.check_updates) {
+        const std::string repo = settings_.general.update_repo.empty()
+                                     ? std::string("bulinatu/Veyla")
+                                     : settings_.general.update_repo;
+        update_.Check(repo, settings_.general.update_channel == 1, AppVersion());
+    }
     if (streaming_) {
         streaming_->SetCpuPixels(NeedsCpuPixels());
     }

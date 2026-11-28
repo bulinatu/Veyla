@@ -130,7 +130,7 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 2.7.2 - standalone build
+Veyla 2.7.3 - standalone build
 =======================================
 
 Run veyla.exe. No installer, no console window, no background service.
