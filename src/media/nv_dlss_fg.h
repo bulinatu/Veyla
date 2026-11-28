@@ -51,6 +51,14 @@ public:
     bool ProcessTexture(ID3D12Resource* color, int width, int height, bool reset,
                         std::string& detail);
 
+    // Global screen-space motion in pixels (current minus previous). Video has
+    // no engine motion vectors; a global estimate still lets the generator
+    // interpolate pans instead of repeating the real frame.
+    void SetGlobalMotion(float dx, float dy) {
+        motion_x_ = dx;
+        motion_y_ = dy;
+    }
+
     const std::vector<Frame>& Frames() const { return frames_; }
     int width() const { return width_; }
     int height() const { return height_; }
@@ -101,6 +109,11 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource> depth_;
     Microsoft::WRL::ComPtr<ID3D12Resource> motion_;
     Microsoft::WRL::ComPtr<ID3D12Resource> motion_of_;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> motion_heap_;
+    D3D12_CPU_DESCRIPTOR_HANDLE motion_cpu_{};
+    D3D12_GPU_DESCRIPTOR_HANDLE motion_gpu_{};
+    float motion_x_ = 0.0f;
+    float motion_y_ = 0.0f;
     ID3D12Resource* motion_source_ = nullptr;
     Microsoft::WRL::ComPtr<ID3D12Resource> real_;
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> generated_tex_;
@@ -114,6 +127,7 @@ private:
     bool input_ready_ = false;
     int input_slot_ = 0;
     int frames_fed_ = 0;
+    std::uint64_t frame_id_ = 0;
     bool have_previous_ = false;
     bool of_failed_ = false;
     ID3D12Resource* eval_input_ = nullptr;

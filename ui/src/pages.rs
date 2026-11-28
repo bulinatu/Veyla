@@ -1344,8 +1344,8 @@ impl Root {
         }
         if dlss_backend {
             fg_rows.push(widgets::kv(
-                "Beta 3",
-                "Native DLSS-G is paused while the DX12 swapchain path is finished; SR is used.",
+                "Native DLSS-G",
+                "Runs in-process on DX12; a global motion estimate drives the generated frames.",
             ));
             fg_rows.push(self.seg_int_row(
                 "ai.fg_multiplier",

@@ -262,6 +262,12 @@ private:
     int stats_ticks_ = 0;  // presentation stats line every ~5 s at Debug
     WifiInfo wifi_;        // latest WLAN association, refreshed by the pad thread
     std::mutex wifi_mutex_;
+    // Global screen-space motion for DLSS-G, estimated from consecutive frames.
+    std::vector<std::uint8_t> motion_low_;
+    std::vector<std::uint8_t> motion_prev_;
+    int motion_w_ = 0;
+    int motion_h_ = 0;
+    void UpdateGlobalMotion(int width, int height, int out_width, int out_height);
     std::atomic<int> ping_ms_{-1};  // ICMP RTT to the console, every ~5 s
     double bridge_status_at_ = -1.0;
     bool publish_devices_ = false;

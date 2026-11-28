@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 
@@ -357,6 +358,23 @@ bool NvDlssFg::CreateResources(std::string& detail) {
         detail = "DLSS-G guide textures failed";
         return false;
     }
+    // Persistent UAV for the per-frame global motion fill.
+    D3D12_DESCRIPTOR_HEAP_DESC motion_heap{};
+    motion_heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    motion_heap.NumDescriptors = 1;
+    motion_heap.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    if (FAILED(device12_->CreateDescriptorHeap(&motion_heap,
+                                               IID_PPV_ARGS(&motion_heap_)))) {
+        detail = "DLSS-G motion descriptor heap failed";
+        return false;
+    }
+    motion_cpu_ = motion_heap_->GetCPUDescriptorHandleForHeapStart();
+    motion_gpu_ = motion_heap_->GetGPUDescriptorHandleForHeapStart();
+    D3D12_UNORDERED_ACCESS_VIEW_DESC motion_uav{};
+    motion_uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    motion_uav.Format = DXGI_FORMAT_R16G16_FLOAT;
+    device12_->CreateUnorderedAccessView(motion_.Get(), nullptr, &motion_uav, motion_cpu_);
+
     auto output = [&](Microsoft::WRL::ComPtr<ID3D12Resource>& tex, HANDLE& handle) -> bool {
         D3D12_HEAP_PROPERTIES heap{};
         heap.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -457,7 +475,15 @@ bool NvDlssFg::CreateFeature(std::string& detail) {
     params->Set("DLSSG.InternalHeight", 0u);
     params->Set("DLSSG.DynamicResolution", 0u);
     params->Set("DLSSG.MustCallEval", 1u);
+    params->Set("DLSSG.NumFrames", 1);
     params->Set("DLSSG.MultiFrameCount", static_cast<unsigned>(generated_));
+    // Undocumented but required for the offscreen (recording) path: without
+    // these two the feature is created and evaluated but writes no pixels.
+    params->Set("Enable.OFA", 1u);
+    params->Set("DLSSG.EnableInterp", 1u);
+    params->Set("DLSSG.OrthoProjection", 0u);
+    params->Set("DLSSG.CameraPinholeOffsetX", 0.0f);
+    params->Set("DLSSG.CameraPinholeOffsetY", 0.0f);
     NVSDK_NGX_Handle* feature = nullptr;
     const NVSDK_NGX_Result result =
         api_->create(list_.Get(), NVSDK_NGX_Feature_FrameGeneration, params, &feature);
@@ -614,10 +640,36 @@ bool NvDlssFg::Evaluate(bool reset, std::string& detail) {
     }
     list_->ResourceBarrier(count, barriers);
 
+    // Fill the whole motion field with the estimated global shift. ClearUAV
+    // writes every texel, which is exactly a constant screen-space motion.
+    const bool global_motion =
+        motion_source_ == nullptr || motion_source_ == motion_.Get();
+    if (global_motion && motion_heap_) {
+        D3D12_RESOURCE_BARRIER motion_barrier{};
+        motion_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        motion_barrier.Transition.pResource = motion_.Get();
+        motion_barrier.Transition.Subresource =
+            D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        motion_barrier.Transition.StateBefore =
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        motion_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        list_->ResourceBarrier(1, &motion_barrier);
+        const float shift[4] = {motion_x_, motion_y_, 0.0f, 0.0f};
+        list_->ClearUnorderedAccessViewFloat(motion_gpu_, motion_cpu_, motion_.Get(),
+                                              shift, 0, nullptr);
+        std::swap(motion_barrier.Transition.StateBefore,
+                  motion_barrier.Transition.StateAfter);
+        list_->ResourceBarrier(1, &motion_barrier);
+    }
+
     auto* params = static_cast<NVSDK_NGX_Parameter*>(parameters_);
     params->Set("DLSSG.CmdQueue", static_cast<void*>(queue_.Get()));
     params->Set("DLSSG.CmdAlloc", static_cast<void*>(allocator_.Get()));
     params->Set("DLSSG.FenceEvent", static_cast<void*>(feature_event_));
+    // Temporal history key: without a changing frame id the runtime treats
+    // every call as the first frame and cannot interpolate.
+    params->Set("DLSSG.BackbufferFrameID",
+                reinterpret_cast<void*>(static_cast<uintptr_t>(++frame_id_)));
     params->Set("DLSSG.HUDLess", eval_input_);
     params->Set("DLSSG.Backbuffer", eval_input_);
     params->Set("DLSSG.MVecs", motion_source_ ? motion_source_ : motion_.Get());
@@ -627,14 +679,21 @@ bool NvDlssFg::Evaluate(bool reset, std::string& detail) {
     params->Set("DLSSG.Reset", reset ? 1u : 0u);
     params->Set("DLSSG.IsRecording", 1u);
     params->Set("DLSSG.MustCallEval", 1u);
+    params->Set("DLSSG.NumFrames", 1);
     params->Set("DLSSG.CameraMotionIncluded", 0u);
     params->Set("DLSSG.ColorBuffersHDR", 0u);
+    params->Set("DLSSG.DepthInverted", 0u);
+    params->Set("DLSSG.OrthoProjection", 0u);
+    params->Set("DLSSG.CameraPinholeOffsetX", 0.0f);
+    params->Set("DLSSG.CameraPinholeOffsetY", 0.0f);
+    params->Set("DLSSG.UI", static_cast<ID3D12Resource*>(nullptr));
     params->Set("DLSSG.MvecDilated", 0u);
     params->Set("DLSSG.OutputDisableInterpolation", 0u);
     params->Set("DLSSG.NotRenderingGameFrames", 0u);
     params->Set("DLSSG.DynamicResolution", 0u);
-    params->Set("DLSSG.MvecScaleX", 1.0f);
-    params->Set("DLSSG.MvecScaleY", 1.0f);
+    // Global motion is expressed in pixels; tell the runtime the scale.
+    params->Set("DLSSG.MvecScaleX", static_cast<float>(width_));
+    params->Set("DLSSG.MvecScaleY", static_cast<float>(height_));
     params->Set("DLSSG.MVecsSubrectBaseX", 0u);
     params->Set("DLSSG.MVecsSubrectBaseY", 0u);
     params->Set("DLSSG.MVecsSubrectWidth", static_cast<unsigned>(width_));
@@ -661,6 +720,7 @@ bool NvDlssFg::Evaluate(bool reset, std::string& detail) {
     params->Set("DLSSG.CameraUpX", 0.0f);
     params->Set("DLSSG.CameraUpY", 1.0f);
     params->Set("DLSSG.CameraUpZ", 0.0f);
+    // The 310.x runtime exposes CameraFwd*, not CameraForward*.
     params->Set("DLSSG.CameraFwdX", 0.0f);
     params->Set("DLSSG.CameraFwdY", 0.0f);
     params->Set("DLSSG.CameraFwdZ", 1.0f);
@@ -683,9 +743,9 @@ bool NvDlssFg::Evaluate(bool reset, std::string& detail) {
     // The offscreen mode can leave OutputReal empty; the real frame is the
     // current color frame, so copy it explicitly. This is also what makes the
     // first frame visible before any interpolation exists.
-    if (feature_event_) {
-        ::WaitForSingleObject(feature_event_, 50);
-    }
+    //
+    // feature_event_ is signalled by the app's own fence after the submit, not
+    // by the runtime: waiting on it here blocked every frame for 50 ms.
 
     for (UINT i = 0; i < count; ++i) {
         std::swap(barriers[i].Transition.StateBefore,

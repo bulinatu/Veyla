@@ -79,7 +79,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"3.0.0-beta11";
+constexpr wchar_t kVersion[] = L"3.0.0-beta12";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
@@ -4089,6 +4089,9 @@ bool NextApp::PresentVideoDx12() {
         const int fg_width = sr_ok ? sr_width : width;
         const int fg_height = sr_ok ? sr_height : height;
         if (EnsureDlssFgDx12(fg_width, fg_height)) {
+            // Video has no engine motion vectors: estimate a global screen
+            // shift so the generator interpolates pans instead of repeating.
+            UpdateGlobalMotion(width, height, fg_width, fg_height);
             std::string detail;
             const bool processed =
                 sr_ok ? dlss_fg_dx12_->ProcessShared(sr_handle, fg_width, fg_height,
@@ -4673,6 +4676,85 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
     return true;
 }
 
+void NextApp::UpdateGlobalMotion(int width, int height, int out_width,
+                                 int out_height) {
+    if (!dlss_fg_dx12_ || video_frame_.rgba.empty() || width < 32 ||
+        height < 32 || out_width <= 0 || out_height <= 0) {
+        return;
+    }
+    const int lw = std::min(480, width);
+    const int lh = std::max(16, height * lw / width);
+    if (motion_w_ != lw || motion_h_ != lh) {
+        motion_w_ = lw;
+        motion_h_ = lh;
+        motion_low_.resize(static_cast<std::size_t>(lw) * lh);
+        motion_prev_.clear();
+    }
+    const int step_x = std::max(1, width / lw);
+    const int step_y = std::max(1, height / lh);
+    const std::uint8_t* pixels = video_frame_.rgba.data();
+    for (int y = 0; y < lh; ++y) {
+        const std::uint8_t* row =
+            pixels + static_cast<std::size_t>(y * step_y) * width * 4;
+        for (int x = 0; x < lw; ++x) {
+            const std::uint8_t* p = row + static_cast<std::size_t>(x * step_x) * 4;
+            motion_low_[static_cast<std::size_t>(y) * lw + x] =
+                static_cast<std::uint8_t>((77 * p[0] + 150 * p[1] + 29 * p[2]) >> 8);
+        }
+    }
+    if (motion_prev_.size() != motion_low_.size()) {
+        motion_prev_ = motion_low_;
+        return;
+    }
+    auto sad = [&](int dx, int dy, int stride) -> long long {
+        long long sum = 0;
+        int samples = 0;
+        const int y0 = std::max(0, dy);
+        const int y1 = std::min(lh, lh + dy);
+        const int x0 = std::max(0, dx);
+        const int x1 = std::min(lw, lw + dx);
+        for (int y = y0; y < y1; y += stride) {
+            const int py = y - dy;
+            for (int x = x0; x < x1; x += stride) {
+                const int px = x - dx;
+                sum += std::abs(static_cast<int>(motion_low_[y * lw + x]) -
+                                static_cast<int>(motion_prev_[py * lw + px]));
+                ++samples;
+            }
+        }
+        const int minimum = (lw * lh) / (stride * stride * 8);
+        return samples >= minimum ? (sum * 1000) / samples : (1LL << 60);
+    };
+    int best_dx = 0;
+    int best_dy = 0;
+    long long best = 1LL << 62;
+    for (int dy = -4; dy <= 4; ++dy) {
+        for (int dx = -4; dx <= 4; ++dx) {
+            const long long score = sad(dx * 2, dy * 2, 2);
+            if (score < best) {
+                best = score;
+                best_dx = dx * 2;
+                best_dy = dy * 2;
+            }
+        }
+    }
+    for (int dy = -2; dy <= 2; ++dy) {
+        for (int dx = -2; dx <= 2; ++dx) {
+            const long long score = sad(best_dx + dx, best_dy + dy, 1);
+            if (score < best) {
+                best = score;
+                best_dx += dx;
+                best_dy += dy;
+            }
+        }
+    }
+    const float sx = static_cast<float>(best_dx) * width / lw;
+    const float sy = static_cast<float>(best_dy) * height / lh;
+    dlss_fg_dx12_->SetGlobalMotion(sx * out_width / width,
+                                   sy * out_height / height);
+    motion_prev_ = motion_low_;
+}
+
 bool NextApp::EnsureDlssFgDx12(int width, int height) {
     if (!settings_.ai.frame_generation ||
         settings_.ai.fg_backend != AiBackend::DlssFg) {
@@ -4681,18 +4763,6 @@ bool NextApp::EnsureDlssFgDx12(int width, int height) {
     if (settings_.ai.SrWantsFsr(system_.gpu.nvidia)) {
         // DLSS-G is only valid next to DLSS SR. The UI blocks the pair, but a
         // config from an older build must not reach the generator either.
-        return false;
-    }
-    if (std::getenv("VEYLA_NATIVE_FG") == nullptr) {
-        // DLSS-G 310.x does not write its offscreen OutputInterpolated texture
-        // without the swapchain path; generated frames are black. Keep the
-        // picture on SR until the swapchain integration lands. Opt in only for
-        // development.
-        static bool announced = false;
-        if (!announced) {
-            announced = true;
-            Toast(L"DLSS-G offscreen output is disabled in this beta; using SR", true);
-        }
         return false;
     }
     if (fg_dx12_failed_) {
@@ -4911,6 +4981,9 @@ void NextApp::ConnectStream() {
     content_fps_ = 0.0;
     content_unique_ = 0;
     content_window_ = -1.0;
+    motion_prev_.clear();
+    motion_w_ = 0;
+    motion_h_ = 0;
     {
         // Wi-Fi is a development diagnostic: do not even query it in production.
         if (CurrentLogLevel() <= LogLevel::Debug) {

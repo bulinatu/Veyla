@@ -125,6 +125,9 @@ int main(int argc, char** argv) {
             }
         }
         auto rgba = Frame(1920, 1080, tick);
+        // The test pattern moves the bar 12 px per tick; feed the same global
+        // motion the shell estimates for a video pan.
+        fg.SetGlobalMotion(12.0f, 0.0f);
         if (!fg.Process(rgba.data(), 1920, 1080, tick == 0, detail)) {
             ++failures;
             if (failures < 4) {

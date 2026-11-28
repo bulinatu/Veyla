@@ -153,8 +153,22 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 3.0.0 beta 11 - standalone build
+Veyla 3.0.0 beta 12 - standalone build
 =======================================
+
+What changed in 3.0.0 beta 12
+-----------------------------
+- Native DLSS-G offscreen output works. Generated frames are no longer black:
+  the runtime needs the undocumented Enable.OFA and DLSSG.EnableInterp flags,
+  a changing BackbufferFrameID and the CameraFwd* camera basis. The 50 ms wait
+  on an event the runtime never signals is gone.
+- The Watch window presents the real and generated frames through the DX12
+  surface; no external worker, no second window, no SM86 injection.
+- Video has no engine motion vectors, so the shell estimates a global screen
+  shift from consecutive frames and feeds it as MVecs. Pans interpolate; a
+  static camera with only small objects falls back to the real frame.
+- 2x is verified on RTX 40. Multi-frame counts above 2x use the driver maximum
+  and remain experimental.
 
 What changed in 3.0.0 beta 11
 -----------------------------
