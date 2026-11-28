@@ -81,6 +81,23 @@ void TestSettings() {
     settings.Validate(warnings, errors);
     Expect(errors.empty(), "defaults validate");
 
+    // Production logging: diagnostic levels fall back to Info, and the shell's
+    // "warn" value must map to Warning (it used to fall back to Info).
+    brp::next::AppSettings log_settings;
+    brp::next::FlatMap log_flat = brp::next::SettingsToFlat(log_settings);
+    log_flat["advanced.log_level"] = brp::next::FlatValue{"debug", false};
+    brp::next::SettingsFromFlat(log_flat, log_settings);
+    Expect(log_settings.advanced.log_level == brp::next::LogLevel::Info,
+           "debug log level falls back to info");
+    log_flat["advanced.log_level"] = brp::next::FlatValue{"trace", false};
+    brp::next::SettingsFromFlat(log_flat, log_settings);
+    Expect(log_settings.advanced.log_level == brp::next::LogLevel::Info,
+           "trace log level falls back to info");
+    log_flat["advanced.log_level"] = brp::next::FlatValue{"warn", false};
+    brp::next::SettingsFromFlat(log_flat, log_settings);
+    Expect(log_settings.advanced.log_level == brp::next::LogLevel::Warning,
+           "shell warn maps to warning");
+
     settings.streaming.fps = 10;
     settings.overlay.opacity = 2.0f;
     settings.Validate(warnings, errors);

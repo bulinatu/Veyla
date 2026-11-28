@@ -39,6 +39,9 @@ public:
     Status Connect(const ConsoleSettings& console) override;
     void Disconnect() override;
     StreamSnapshot Snapshot() const override;
+    // Periodic stalls with a clean link produce one actionable hint for the
+    // shell; the shell shows it once as a toast.
+    bool TakeLinkAdvice(std::string& text);
     Status Pair(std::uint32_t pin) override;
     Status StartDiscovery() override;
     std::vector<ConsoleCandidate> Discovered() const override;
@@ -106,6 +109,10 @@ private:
     int session_fps_min_ = 0;
     int session_fps_max_ = 0;
     int session_fps_samples_ = 0;
+    std::atomic<int> session_stalls_{0};
+    int stall_count_ = 0;
+    std::chrono::steady_clock::time_point first_stall_{};
+    std::string advice_;
     // Drop/stutter warnings are throttled so a bad second does not fill the log.
     std::chrono::steady_clock::time_point last_warn_{};
     std::filesystem::path next_path_;

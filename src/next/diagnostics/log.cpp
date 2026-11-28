@@ -54,6 +54,13 @@ void LogMessage(LogLevel level, const std::string& message) {
     }
 }
 
+LogLevel CurrentLogLevel() {
+    if (Logger* logger = g_logger.load()) {
+        return logger->Level();
+    }
+    return LogLevel::Info;
+}
+
 void LogPrintf(LogLevel level, const char* format, ...) {
     if (g_logger.load() == nullptr || format == nullptr) {
         return;
@@ -91,7 +98,7 @@ void Logger::RotateLocked() {
 }
 
 void Logger::Log(LogLevel level, const std::string& message) {
-    if (static_cast<int>(level) < static_cast<int>(level_)) {
+    if (static_cast<int>(level) < static_cast<int>(level_.load())) {
         return;
     }
     const std::string line =

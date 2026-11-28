@@ -231,6 +231,9 @@ WifiInfo ProbeWifi() {
     const DWORD opened = WlanOpenHandle(2, nullptr, &negotiated, &client);
     if (opened != ERROR_SUCCESS) {
         info.error = "WlanOpenHandle=" + std::to_string(opened);
+        if (opened == ERROR_ACCESS_DENIED) {
+            info.error += " (enable Windows Location for desktop apps)";
+        }
         FillAdapterFallback(info);
         return info;
     }
@@ -258,6 +261,9 @@ WifiInfo ProbeWifi() {
             &size, &data, nullptr);
         if (queried != ERROR_SUCCESS || data == nullptr) {
             info.error = "WlanQueryInterface=" + std::to_string(queried);
+            if (queried == ERROR_ACCESS_DENIED) {
+                info.error += " (enable Windows Location for desktop apps)";
+            }
             continue;
         }
         const auto* connection = static_cast<const WLAN_CONNECTION_ATTRIBUTES*>(data);

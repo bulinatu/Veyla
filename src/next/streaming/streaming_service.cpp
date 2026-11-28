@@ -179,6 +179,9 @@ Status StreamingService::Connect(const ConsoleSettings& console) {
         session_fps_min_ = 0;
         session_fps_max_ = 0;
         session_fps_samples_ = 0;
+        session_stalls_.store(0);
+        stall_count_ = 0;
+        advice_.clear();
     }
     connecting_.store(true);
     connect_thread_ = std::thread([this, profile]() {
@@ -246,10 +249,10 @@ void StreamingService::Disconnect() {
             std::snprintf(
                 line, sizeof(line),
                 "stream: summary %.0fs, %lld frames, %.1f fps avg (min %d, max %d), "
-                "%lld lost (%.2f%%), %lld drops, %.1f Mbps avg",
+                "%lld lost (%.2f%%), %lld drops, %d stalls, %.1f Mbps avg",
                 session_seconds_, session_frames_, avg_fps, session_fps_min_,
                 session_fps_max_, session_lost_, lost_pct, session_drops_,
-                avg_mbps);
+                session_stalls_.load(), avg_mbps);
             summary = line;
         }
         message_ = "Disconnected";
@@ -274,6 +277,16 @@ void StreamingService::JoinDiscovery() {
     if (discovery_thread_.joinable()) {
         discovery_thread_.join();
     }
+}
+
+bool StreamingService::TakeLinkAdvice(std::string& text) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (advice_.empty()) {
+        return false;
+    }
+    text = advice_;
+    advice_.clear();
+    return true;
 }
 
 StreamSnapshot StreamingService::Snapshot() const {
@@ -432,19 +445,22 @@ void StreamingService::Poll() {
         // drop counter the presentation path relies on. A degraded second is
         // repeated at Warning (throttled) so it is visible on the default level
         // too.
-        const double lost_pct =
-            stats.frames > 0
-                ? 100.0 * static_cast<double>(stats.lost) / stats.frames
-                : 0.0;
-        char line[320] = {};
-        std::snprintf(
-            line, sizeof(line),
-            "stream: %.1f fps, lost %d (%.2f%%), decode %.1f/%.1f ms, queue %d, "
-            "buffer %d, drops %d, arrival %.1f ms, outliers %d, %.0f kbps",
-            fps, stats.lost, lost_pct, stats.decode_ms_avg, stats.decode_ms_max,
-            stats.queue, stats.buffer, stats.buffer_drops, stats.arrival_ms,
-            stats.arrival_outliers, stats.kbps);
-        LogDebug(line);
+        // Do not even format the per-second line in production.
+        if (CurrentLogLevel() <= LogLevel::Debug) {
+            const double lost_pct =
+                stats.frames > 0
+                    ? 100.0 * static_cast<double>(stats.lost) / stats.frames
+                    : 0.0;
+            char line[320] = {};
+            std::snprintf(
+                line, sizeof(line),
+                "stream: %.1f fps, lost %d (%.2f%%), decode %.1f/%.1f ms, queue %d, "
+                "buffer %d, drops %d, arrival %.1f ms, outliers %d, %.0f kbps",
+                fps, stats.lost, lost_pct, stats.decode_ms_avg, stats.decode_ms_max,
+                stats.queue, stats.buffer, stats.buffer_drops, stats.arrival_ms,
+                stats.arrival_outliers, stats.kbps);
+            LogDebug(line);
+        }
         if (stats.lost > 0) {
             streaming_.NoteLoss();
         }
@@ -452,12 +468,54 @@ void StreamingService::Poll() {
         // every burst made the log look broken while the picture was fine. Warn
         // only when frames were actually lost/dropped, decode stalled, or the
         // source rate collapsed.
+        // A stall with a clean link (no loss, fast decode) is the signature of
+        // Wi-Fi power save / roaming / MLO or a console encoder pause. Count it
+        // and, after it repeats, tell the shell what to change.
+        // Skip the priming seconds at session start; they always look slow.
+        const bool stall = session_seconds_ > 5.0 && stats.elapsed > 0.5 &&
+                           fps < 24.0 && stats.lost == 0 &&
+                           stats.decode_ms_max < 30.0;
+        if (stall) {
+            ++stall_count_;
+            session_stalls_.fetch_add(1);
+            if (stall_count_ == 1) {
+                first_stall_ = now;
+            }
+            char stall_line[260] = {};
+            std::snprintf(stall_line, sizeof(stall_line),
+                          "stream: stall #%d (%.1f fps, queue %d, buffer %d, "
+                          "%.0f kbps, decode %.1f ms)",
+                          stall_count_, fps, stats.queue, stats.buffer, stats.kbps,
+                          stats.decode_ms_max);
+            LogWarning(stall_line);
+            if (stall_count_ >= 2) {
+                streaming_.NoteLoss();
+            }
+            if (stall_count_ == 3) {
+                const std::string advice =
+                    "Wi-Fi stalls with a clean ping: set the adapter to maximum "
+                    "performance, disable Wi-Fi 7 MLO and roaming scans, and update "
+                    "the Wi-Fi driver.";
+                LogWarning("stream: diagnosis: " + advice);
+                std::lock_guard<std::mutex> lock(mutex_);
+                advice_ = advice;
+            }
+        } else if (stall_count_ > 0 &&
+                   now - first_stall_ > std::chrono::minutes(5)) {
+            stall_count_ = 0;
+        }
         const bool degraded =
             stats.lost > 0 || stats.buffer_drops > 0 || stats.decode_ms_max > 40.0 ||
             (stats.elapsed > 0.5 && fps < stream_options_.fps * 0.75);
         if (degraded && now - last_warn_ > std::chrono::seconds(5)) {
             last_warn_ = now;
-            LogWarning(line);
+            char warning[260] = {};
+            std::snprintf(warning, sizeof(warning),
+                          "stream: degraded second (%.1f fps, lost %d, drops %d, "
+                          "decode %.1f ms, %.0f kbps)",
+                          fps, stats.lost, stats.buffer_drops, stats.decode_ms_max,
+                          stats.kbps);
+            LogWarning(warning);
         }
     }
 }
