@@ -62,6 +62,9 @@ public:
     const std::string& status() const { return status_; }
     double last_ms() const { return last_ms_; }
     void SetResetEachFrame(bool reset) { reset_each_frame_ = reset; }
+    void SetSharpness(float sharpness) {
+        sharpness_ = sharpness < 0.0f ? 0.0f : (sharpness > 1.0f ? 1.0f : sharpness);
+    }
 
 private:
     struct Api;
@@ -81,6 +84,7 @@ private:
     int out_height_ = 0;
     bool hdr_input_ = false;
     bool reset_each_frame_ = true;
+    float sharpness_ = 0.0f;
     double last_ms_ = 0.0;
     std::string provider_;
     std::string status_;

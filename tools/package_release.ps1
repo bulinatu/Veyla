@@ -153,8 +153,18 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 3.0.0 beta 1 - standalone build
+Veyla 3.0.0 beta 2 - standalone build
 =======================================
+
+What changed in 3.0.0 beta 2
+----------------------------
+- AMD FSR upscaling has its own quality ladder: Native AA, Quality (1.5x),
+  Balanced (1.7x), Performance (2x) and Ultra Performance (3x), plus RCAS
+  sharpness. The DLSS preset list is hidden while FSR is selected, and the FSR
+  controls are hidden while DLSS is selected.
+- The FSR render scale is real: the decoded frame is downscaled to the selected
+  input size and FSR reconstructs it at the output size (1080p/1440p/4K or the
+  window).
 
 What changed in 3.0.0 beta 1
 ----------------------------

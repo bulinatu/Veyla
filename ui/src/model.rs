@@ -143,6 +143,8 @@ impl Settings {
             ("ai.sr_output", Value::from("native")),
             ("ai.sr_model", Value::from("auto")),
             ("ai.sr_quality", Value::from(4)),
+    ("ai.fsr_quality", Value::from(2)),
+    ("ai.fsr_sharpness", Value::from(30)),
             ("ai.temporal", Value::from(false)),
             ("ai.frame_generation", Value::from(false)),
             ("ai.fg_backend", Value::from("none")),

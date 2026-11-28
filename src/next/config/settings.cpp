@@ -117,6 +117,12 @@ void AppSettings::Validate(std::vector<std::string>& warnings,
     if (ai.sr_preset < 0 || ai.sr_preset > 4) {
         errors.push_back("ai.dlss_preset must be 0..4");
     }
+    if (ai.fsr_quality < 0 || ai.fsr_quality > 4) {
+        errors.push_back("ai.fsr_quality must be 0..4");
+    }
+    if (ai.fsr_sharpness < 0 || ai.fsr_sharpness > 100) {
+        errors.push_back("ai.fsr_sharpness must be 0..100");
+    }
     if (ai.sr_model != "auto" && ai.sr_model != "dlss" && ai.sr_model != "fsr4" &&
         ai.sr_model != "fsr3") {
         errors.push_back("ai.sr_model must be auto, dlss, fsr4 or fsr3");
@@ -211,6 +217,8 @@ FlatMap SettingsToFlat(const AppSettings& s) {
     FlatJson::PutString(f, "ai.sr_model", s.ai.sr_model);
     FlatJson::PutInt(f, "ai.sr_quality", s.ai.sr_quality);
     FlatJson::PutInt(f, "ai.dlss_preset", s.ai.sr_preset);
+    FlatJson::PutInt(f, "ai.fsr_quality", s.ai.fsr_quality);
+    FlatJson::PutInt(f, "ai.fsr_sharpness", s.ai.fsr_sharpness);
     FlatJson::PutBool(f, "ai.temporal", s.ai.temporal);
     FlatJson::PutBool(f, "ai.frame_generation", s.ai.frame_generation);
     FlatJson::PutString(f, "ai.fg_backend", std::string(ToString(s.ai.fg_backend)));
@@ -340,6 +348,10 @@ void SettingsFromFlat(const FlatMap& f, AppSettings& s) {
         ClampInt(FlatJson::GetInt(f, "ai.sr_quality", s.ai.sr_quality), 0, 5);
     s.ai.sr_preset =
         ClampInt(FlatJson::GetInt(f, "ai.dlss_preset", s.ai.sr_preset), 0, 4);
+    s.ai.fsr_quality =
+        ClampInt(FlatJson::GetInt(f, "ai.fsr_quality", s.ai.fsr_quality), 0, 4);
+    s.ai.fsr_sharpness =
+        ClampInt(FlatJson::GetInt(f, "ai.fsr_sharpness", s.ai.fsr_sharpness), 0, 100);
     if (s.ai.sr_quality >= 5) {
         // DLAA runs at the stream size; an SR target has no meaning.
         s.ai.sr_output = Resolution::Native;

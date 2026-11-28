@@ -56,9 +56,14 @@ struct VideoSettings {
 struct AiSettings {
     bool super_resolution = false;
     Resolution sr_output = Resolution::Native;
-    std::string sr_model = "dlss";
+    std::string sr_model = "auto";
     int sr_quality = 4;  // 0 performance .. 5 dlaa
     int sr_preset = 0;   // 0 auto, 1 K, 2 L, 3 M, 4 J (DLSS model)
+    // AMD FSR upscaling: 0 native AA, 1 quality, 2 balanced, 3 performance,
+    // 4 ultra performance. Separate from the DLSS ladder because the names
+    // and ratios do not line up.
+    int fsr_quality = 2;
+    int fsr_sharpness = 30;  // 0..100, RCAS strength
     bool temporal = false;
     bool frame_generation = false;
     AiBackend fg_backend = AiBackend::None;

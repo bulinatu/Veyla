@@ -421,47 +421,109 @@ bool HttpGet(const std::wstring& url, const std::wstring& headers,
     return ok;
 }
 
-std::vector<int> VersionParts(const std::string& tag) {
-    std::vector<int> parts;
+struct SemVer {
+    std::vector<long long> numeric;
+    std::vector<std::string> prerelease;
+    bool has_prerelease = false;
+};
+
+SemVer ParseVersion(const std::string& tag) {
+    SemVer version;
     std::size_t i = 0;
     if (i < tag.size() && (tag[i] == 'v' || tag[i] == 'V')) {
         ++i;
     }
-    int value = 0;
+    long long value = 0;
     bool any = false;
+    auto push_numeric = [&]() {
+        if (any) {
+            version.numeric.push_back(value);
+            value = 0;
+            any = false;
+        }
+    };
     for (; i < tag.size(); ++i) {
         const char ch = tag[i];
         if (ch >= '0' && ch <= '9') {
             value = value * 10 + (ch - '0');
             any = true;
-        } else if (ch == '.' || ch == '-' || ch == '_' || ch == '+') {
-            if (any) {
-                parts.push_back(value);
-                value = 0;
-                any = false;
-            }
+        } else if (ch == '.') {
+            push_numeric();
         } else {
             break;
         }
     }
-    if (any) {
-        parts.push_back(value);
+    push_numeric();
+    if (i < tag.size() && tag[i] == '-') {
+        ++i;
+        version.has_prerelease = true;
+        std::string part;
+        for (; i < tag.size(); ++i) {
+            if (tag[i] == '.') {
+                version.prerelease.push_back(part);
+                part.clear();
+            } else if (tag[i] == '+') {
+                break;
+            } else {
+                part.push_back(static_cast<char>(std::tolower(
+                    static_cast<unsigned char>(tag[i]))));
+            }
+        }
+        if (!part.empty()) {
+            version.prerelease.push_back(part);
+        }
     }
-    return parts;
+    return version;
+}
+
+int ComparePrerelease(const std::vector<std::string>& a,
+                      const std::vector<std::string>& b) {
+    const std::size_t count = std::max(a.size(), b.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        if (i >= a.size()) return -1;  // shorter prerelease is older
+        if (i >= b.size()) return 1;
+        const std::string& left = a[i];
+        const std::string& right = b[i];
+        const bool left_number =
+            !left.empty() && std::all_of(left.begin(), left.end(), [](unsigned char ch) {
+                return std::isdigit(ch) != 0;
+            });
+        const bool right_number =
+            !right.empty() && std::all_of(right.begin(), right.end(), [](unsigned char ch) {
+                return std::isdigit(ch) != 0;
+            });
+        if (left_number && right_number) {
+            const long long l = std::strtoll(left.c_str(), nullptr, 10);
+            const long long r = std::strtoll(right.c_str(), nullptr, 10);
+            if (l != r) return l < r ? -1 : 1;
+        } else if (left_number != right_number) {
+            // numeric identifiers have lower precedence than alphanumeric ones
+            return left_number ? -1 : 1;
+        } else if (left != right) {
+            return left < right ? -1 : 1;
+        }
+    }
+    return 0;
 }
 
 int CompareVersions(const std::string& a, const std::string& b) {
-    const auto left = VersionParts(a);
-    const auto right = VersionParts(b);
-    const std::size_t count = std::max(left.size(), right.size());
+    const SemVer left = ParseVersion(a);
+    const SemVer right = ParseVersion(b);
+    const std::size_t count = std::max(left.numeric.size(), right.numeric.size());
     for (std::size_t i = 0; i < count; ++i) {
-        const int l = i < left.size() ? left[i] : 0;
-        const int r = i < right.size() ? right[i] : 0;
+        const long long l = i < left.numeric.size() ? left.numeric[i] : 0;
+        const long long r = i < right.numeric.size() ? right.numeric[i] : 0;
         if (l != r) {
             return l < r ? -1 : 1;
         }
     }
-    return 0;
+    if (left.has_prerelease != right.has_prerelease) {
+        return left.has_prerelease ? -1 : 1;  // 3.0.0 > 3.0.0-beta2
+    }
+    if (!left.has_prerelease) {
+        return 0;
+    }
+    return ComparePrerelease(left.prerelease, right.prerelease);
 }
 
 std::string TrimNotes(std::string body) {
@@ -604,7 +666,6 @@ void UpdateService::RunCheck(std::string repo, bool include_prerelease,
         return;
     }
     const Json* best = nullptr;
-    int best_kind = 0;  // 2 stable, 1 beta, 0 none
     for (const Json& release : root.items) {
         if (release.type != Json::Type::Object) {
             continue;
@@ -613,18 +674,22 @@ void UpdateService::RunCheck(std::string repo, bool include_prerelease,
             continue;
         }
         const bool pre = release.Bool("prerelease", false);
-        if (pre && !include_prerelease) {
+        if (!include_prerelease && pre) {
             continue;
         }
         const std::string tag = release.String("tag_name");
+        if (!include_prerelease && tag.find('-') != std::string::npos) {
+            // A prerelease tag must never reach a stable user even if the
+            // GitHub flag was forgotten.
+            continue;
+        }
         if (tag.empty() || CompareVersions(tag, current) <= 0) {
             continue;
         }
-        const int kind = pre ? 1 : 2;
-        if (!best || kind > best_kind ||
-            (kind == best_kind && CompareVersions(tag, best->String("tag_name")) > 0)) {
+        // On the beta channel the newest version wins, whether it is a beta or
+        // a stable. On stable, prereleases were filtered above.
+        if (!best || CompareVersions(tag, best->String("tag_name")) > 0) {
             best = &release;
-            best_kind = kind;
         }
     }
     if (!best) {

@@ -536,8 +536,8 @@ bool AmdFsr::Process(const std::uint8_t* rgba, int width, int height,
                            static_cast<uint32_t>(in_height_)};
     dispatch.upscaleSize = {static_cast<uint32_t>(out_width_),
                             static_cast<uint32_t>(out_height_)};
-    dispatch.enableSharpening = false;
-    dispatch.sharpness = 0.0f;
+    dispatch.enableSharpening = sharpness_ > 0.001f;
+    dispatch.sharpness = sharpness_;
     dispatch.frameTimeDelta = frame_time_ms > 0.0f ? frame_time_ms : 16.67f;
     dispatch.preExposure = 1.0f;
     dispatch.reset = reset_each_frame_;

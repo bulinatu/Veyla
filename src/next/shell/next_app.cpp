@@ -632,6 +632,13 @@ bool NextApp::Init() {
         logger->SetLevel(settings_.advanced.log_level);
     }
     system_ = ProbeSystem();
+    if (AppVersion().find('-') == std::string::npos) {
+        // A stable build reached the desktop: the beta rollback snapshot is no
+        // longer needed.
+        std::error_code backup_ec;
+        std::filesystem::remove_all(
+            std::filesystem::path(system_.exe_dir) / "_update_backup", backup_ec);
+    }
 
     streaming_ = std::make_shared<StreamingService>(paths_.session_file,
                                                     paths_.legacy_settings);
@@ -2590,6 +2597,13 @@ bool NextApp::Apply() {
     }
     settings_ = host_->Settings();
     last_apply_scope_ = scope;
+    if (before.general.update_channel != settings_.general.update_channel &&
+        settings_.general.check_updates) {
+        const std::string repo = settings_.general.update_repo.empty()
+                                     ? std::string("bulinatu/Veyla")
+                                     : settings_.general.update_repo;
+        update_.Check(repo, settings_.general.update_channel == 1, AppVersion());
+    }
     if (streaming_) {
         streaming_->SetCpuPixels(NeedsCpuPixels());
     }
@@ -2630,6 +2644,8 @@ bool NextApp::Apply() {
         previous_ai.sr_output != settings_.ai.sr_output ||
         previous_ai.sr_quality != settings_.ai.sr_quality ||
         previous_ai.sr_preset != settings_.ai.sr_preset ||
+        previous_ai.fsr_quality != settings_.ai.fsr_quality ||
+        previous_ai.fsr_sharpness != settings_.ai.fsr_sharpness ||
         previous_ai.sr_model != settings_.ai.sr_model) {
         dlss_ready_ = false;
         dlss_failed_ = false;
@@ -3959,7 +3975,17 @@ bool NextApp::PresentVideoDx12() {
                 return false;
             }
             std::string detail;
-            if (!fsr_->Process(video_frame_.rgba.data(), width, height,
+            const int fiw = fsr_->in_width();
+            const int fih = fsr_->in_height();
+            const std::uint8_t* input = video_frame_.rgba.data();
+            if (fiw != width || fih != height) {
+                sr_scaled_.resize(static_cast<std::size_t>(fiw) * fih * 4);
+                brp::media::DownscaleRgba(video_frame_.rgba.data(), width, height,
+                                          sr_scaled_.data(), fiw, fih, sr_scale_temp_);
+                input = sr_scaled_.data();
+            }
+            fsr_->SetSharpness(static_cast<float>(settings_.ai.fsr_sharpness) / 100.0f);
+            if (!fsr_->Process(input, fiw, fih,
                                static_cast<float>(1000.0 / std::max(1, settings_.streaming.fps)),
                                detail)) {
                 Toast(L"FSR: " + Widen(detail), true);
@@ -4616,9 +4642,30 @@ bool NextApp::EnsureFsr(int input_width, int input_height) {
         out_w = std::max(stream_window_->width(), input_width);
         out_h = std::max(stream_window_->height(), input_height);
     }
-    if (settings_.ai.sr_quality >= 5) {
+    if (out_w <= input_width || out_h <= input_height) {
         out_w = input_width;
         out_h = input_height;
+    }
+    const int quality = std::clamp(settings_.ai.fsr_quality, 0, 4);
+    int in_w = out_w;
+    int in_h = out_h;
+    if (quality == 0) {
+        // Native AA: no upscale, input and output are the decoded frame.
+        out_w = input_width;
+        out_h = input_height;
+        in_w = input_width;
+        in_h = input_height;
+    } else {
+        static const float kRatio[5] = {1.0f, 1.5f, 1.7f, 2.0f, 3.0f};
+        const float ratio = kRatio[quality];
+        in_w = std::max(64, static_cast<int>(out_w / ratio) / 2 * 2);
+        in_h = std::max(64, static_cast<int>(out_h / ratio) / 2 * 2);
+        in_w = std::min(in_w, input_width);
+        in_h = std::min(in_h, input_height);
+    }
+    if (fsr_ready_ && fsr_in_w_ == input_width && fsr_in_h_ == input_height &&
+        fsr_out_w_ == out_w && fsr_out_h_ == out_h && fsr_quality_ == quality) {
+        return true;
     }
     if (!fsr_) {
         fsr_ = std::make_unique<brp::media::AmdFsr>();
@@ -4650,17 +4697,21 @@ bool NextApp::EnsureFsr(int input_width, int input_height) {
         return false;
     }
     std::string detail;
-    if (!fsr_->Initialize(sr_device, sr_context, input_width, input_height, out_w, out_h,
-                          variant, false, detail)) {
+    if (!fsr_->Initialize(sr_device, sr_context, in_w, in_h, out_w, out_h, variant, false,
+                          detail)) {
         fsr_failed_ = true;
-        std::fprintf(stderr, "[next] FSR init %dx%d -> %dx%d: %s\n", input_width,
-                     input_height, out_w, out_h, detail.c_str());
+        std::fprintf(stderr, "[next] FSR init %dx%d -> %dx%d: %s\n", in_w, in_h, out_w,
+                     out_h, detail.c_str());
         Toast(L"FSR: " + Widen(detail), true);
         return false;
     }
+    fsr_->SetSharpness(static_cast<float>(settings_.ai.fsr_sharpness) / 100.0f);
     fsr_ready_ = true;
     fsr_in_w_ = input_width;
     fsr_in_h_ = input_height;
+    fsr_out_w_ = out_w;
+    fsr_out_h_ = out_h;
+    fsr_quality_ = quality;
     fsr_provider_ = fsr_->provider();
     return true;
 }

@@ -1190,69 +1190,99 @@ impl Root {
     }
 
     pub(crate) fn page_upscaling(&self, cx: &mut Context<Self>) -> AnyElement {
-        let sr = group(
-            "Super resolution",
-            "Per-frame reconstruction",
-            vec![
-                self.toggle_row(
-                    "ai.super_resolution",
-                    "Super resolution",
-                    "Run DLSS or FSR on the decoded frame",
-                    cx,
-                ),
-                self.seg_row(
-                    "ai.sr_model",
-                    "Backend",
-                    "FSR 4 needs an RX 6000/7000/9000; FSR 3.1.6 is cross-vendor",
-                    &[
-                        ("Auto", "auto"),
-                        ("DLSS", "dlss"),
-                        ("FSR 4", "fsr4"),
-                        ("FSR 3", "fsr3"),
-                    ],
-                    cx,
-                ),
-                self.seg_int_row(
-                    "ai.sr_quality",
-                    "Quality",
-                    "Higher quality costs GPU time",
-                    &[
-                        (0, "Perf"),
-                        (1, "Balanced"),
-                        (2, "Quality"),
-                        (3, "Ultra"),
-                        (4, "Max"),
-                        (5, "DLAA"),
-                    ],
-                    cx,
-                ),
-                self.seg_row(
-                    "ai.sr_output",
-                    "SR output",
-                    "Target size for the reconstructed frame",
-                    &[
-                        ("Native", "native"),
-                        ("1440p", "1440p"),
-                        ("4K", "2160p"),
-                    ],
-                    cx,
-                ),
-                self.seg_int_row(
-                    "ai.dlss_preset",
-                    "DLSS model",
-                    "Auto: K for DLAA/Quality, M for Perf, L for Ultra Perf",
-                    &[
-                        (0, "Auto"),
-                        (1, "K"),
-                        (2, "L"),
-                        (3, "M"),
-                        (4, "J"),
-                    ],
-                    cx,
-                ),
-                widgets::kv("Rendering API", "DX11 or DX12 for upscaling"),
-            ],
-        );
+        let backend = self.settings.s("ai.sr_model", "auto");
+        let nvidia = self.status.gpu.to_lowercase().contains("nvidia");
+        let show_dlss = backend == "dlss" || (backend == "auto" && nvidia);
+        let show_fsr =
+            backend == "fsr4" || backend == "fsr3" || (backend == "auto" && !nvidia);
+
+        let mut rows: Vec<AnyElement> = vec![
+            self.toggle_row(
+                "ai.super_resolution",
+                "Super resolution",
+                "Run DLSS or FSR on the decoded frame",
+                cx,
+            ),
+            self.seg_row(
+                "ai.sr_model",
+                "Backend",
+                "FSR 4 needs an RX 6000/7000/9000; FSR 3.1.6 is cross-vendor",
+                &[
+                    ("Auto", "auto"),
+                    ("DLSS", "dlss"),
+                    ("FSR 4", "fsr4"),
+                    ("FSR 3", "fsr3"),
+                ],
+                cx,
+            ),
+        ];
+
+        if show_dlss {
+            rows.push(self.seg_int_row(
+                "ai.sr_quality",
+                "DLSS quality",
+                "Higher quality costs GPU time",
+                &[
+                    (0, "Perf"),
+                    (1, "Balanced"),
+                    (2, "Quality"),
+                    (3, "Ultra"),
+                    (4, "Max"),
+                    (5, "DLAA"),
+                ],
+                cx,
+            ));
+            rows.push(self.seg_row(
+                "ai.sr_output",
+                "SR output",
+                "Target size for the reconstructed frame",
+                &[("Native", "native"), ("1440p", "1440p"), ("4K", "2160p")],
+                cx,
+            ));
+            rows.push(self.seg_int_row(
+                "ai.dlss_preset",
+                "DLSS model",
+                "Auto: K for DLAA/Quality, M for Perf, L for Ultra Perf",
+                &[(0, "Auto"), (1, "K"), (2, "L"), (3, "M"), (4, "J")],
+                cx,
+            ));
+        } else if show_fsr {
+            rows.push(self.seg_int_row(
+                "ai.fsr_quality",
+                "FSR quality",
+                "Render scale: Quality 1.5x, Balanced 1.7x, Performance 2x, Ultra 3x",
+                &[
+                    (0, "Native AA"),
+                    (1, "Quality"),
+                    (2, "Balanced"),
+                    (3, "Performance"),
+                    (4, "Ultra"),
+                ],
+                cx,
+            ));
+            rows.push(self.slider_row(
+                "ai.fsr_sharpness",
+                "FSR sharpness",
+                "RCAS sharpening applied after the upscale",
+                "%",
+                cx,
+            ));
+            rows.push(self.seg_row(
+                "ai.sr_output",
+                "FSR output",
+                "Target size for the reconstructed frame",
+                &[("Native", "native"), ("1440p", "1440p"), ("4K", "2160p")],
+                cx,
+            ));
+        } else {
+            rows.push(widgets::kv(
+                "Settings",
+                "Auto picks DLSS on NVIDIA and FSR on Radeon",
+            ));
+        }
+        rows.push(widgets::kv("Rendering API", "DX11 or DX12 for upscaling"));
+
+        let sr = group("Super resolution", "Per-frame reconstruction", rows);
 
         div()
             .flex()
@@ -1897,7 +1927,7 @@ impl Root {
                 self.seg_int_row(
                     "general.update_channel",
                     "Channel",
-                    "Stable skips prereleases",
+                    "Stable skips prereleases; Beta is opt-in and keeps a rollback copy",
                     &[(0, "Stable"), (1, "Beta")],
                     cx,
                 ),

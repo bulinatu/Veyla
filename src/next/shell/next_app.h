@@ -204,6 +204,9 @@ private:
     bool fsr_failed_ = false;
     int fsr_in_w_ = 0;
     int fsr_in_h_ = 0;
+    int fsr_out_w_ = 0;
+    int fsr_out_h_ = 0;
+    int fsr_quality_ = -1;
     std::string fsr_provider_;
     std::unique_ptr<brp::media::NvDlssFg> dlss_fg_dx12_;
     bool fg_dx12_failed_ = false;

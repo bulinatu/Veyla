@@ -262,7 +262,106 @@ bool EqualsIgnoreCase(const std::string& left, const std::string& right) {
 // Copies the staged payload into the install only after every file matches the
 // hash in _manifest.txt. A truncated download or a half-written file can never
 // reach the app folder this way.
+fs::path BackupDirectory(const fs::path& dir) {
+    return dir / "_update_backup";
+}
+
+void BackupFile(const fs::path& dir, const std::string& relative) {
+    if (relative.empty()) {
+        return;
+    }
+    const fs::path backup = BackupDirectory(dir);
+    std::error_code ec;
+    fs::create_directories(backup, ec);
+    const fs::path source = dir / fs::path(relative);
+    if (!fs::exists(source, ec)) {
+        std::ofstream added(backup / "_added.txt", std::ios::app);
+        if (added) {
+            added << relative << "\n";
+        }
+        return;
+    }
+    const fs::path target = backup / fs::path(relative);
+    fs::create_directories(target.parent_path(), ec);
+    fs::copy_file(source, target, fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+        Log("backup failed for " + relative + ": " + ec.message());
+    }
+}
+
+void StartBackup(const fs::path& dir) {
+    const fs::path backup = BackupDirectory(dir);
+    std::error_code ec;
+    fs::remove_all(backup, ec);
+    fs::create_directories(backup, ec);
+    const fs::path version = dir / "version.txt";
+    if (fs::exists(version, ec)) {
+        fs::copy_file(version, backup / "_previous_version.txt",
+                      fs::copy_options::overwrite_existing, ec);
+    }
+    Log("backup started in " + Utf8(backup.wstring()));
+}
+
+bool RestoreBackup(const fs::path& dir, std::string& error) {
+    const fs::path backup = BackupDirectory(dir);
+    std::error_code ec;
+    if (!fs::exists(backup, ec)) {
+        error = "no previous-version backup";
+        return false;
+    }
+    // Remove files the failed update added; they did not exist before it.
+    std::ifstream added(backup / "_added.txt");
+    std::string line;
+    while (std::getline(added, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
+            line.pop_back();
+        }
+        if (line.empty()) {
+            continue;
+        }
+        fs::remove(dir / fs::path(line), ec);
+    }
+    // Copy every backed-up file back over the failed install.
+    for (const auto& entry : fs::recursive_directory_iterator(backup, ec)) {
+        if (ec || !entry.is_regular_file()) {
+            continue;
+        }
+        const fs::path relative = fs::relative(entry.path(), backup, ec);
+        const std::string name = relative.filename().string();
+        if (name == "_added.txt" || name == "_previous_version.txt") {
+            continue;
+        }
+        const fs::path target = dir / relative;
+        fs::create_directories(target.parent_path(), ec);
+        bool done = false;
+        for (int retry = 0; retry < 20 && !done; ++retry) {
+            done = ::CopyFileW(entry.path().wstring().c_str(),
+                               target.wstring().c_str(), FALSE) != FALSE;
+            if (!done) {
+                ::Sleep(250);
+            }
+        }
+        if (!done) {
+            error = "could not restore " + Utf8(relative.wstring());
+            return false;
+        }
+    }
+    const fs::path previous = backup / "_previous_version.txt";
+    if (fs::exists(previous, ec)) {
+        std::ifstream in(previous);
+        std::string version;
+        std::getline(in, version);
+        std::ofstream out(dir / "version.txt", std::ios::trunc);
+        if (out) {
+            out << version << "\n";
+        }
+    }
+    Log("restored the previous version from " + Utf8(backup.wstring()));
+    return true;
+}
+
 bool ApplyStaged(const fs::path& stage, const fs::path& dir, std::string& error) {
+    StartBackup(dir);
     std::ifstream in(stage / "_manifest.txt");
     if (!in) {
         error = "Update package has no manifest.";
@@ -291,6 +390,7 @@ bool ApplyStaged(const fs::path& stage, const fs::path& dir, std::string& error)
         }
         const fs::path target = dir / fs::path(relative);
         std::error_code ec;
+        BackupFile(dir, relative);
         fs::create_directories(target.parent_path(), ec);
         bool done = false;
         for (int retry = 0; retry < 40 && !done; ++retry) {
@@ -472,7 +572,15 @@ int wmain(int argc, wchar_t** argv) {
                     std::string verify_error;
                     if (!ApplyStaged(stage, dir, verify_error)) {
                         fs::remove_all(stage, ec);
-                        ReportFailure(dir, verify_error);
+                        std::string restore_error;
+                        const bool restored = RestoreBackup(dir, restore_error);
+                        std::string message = verify_error;
+                        if (restored) {
+                            message += " (previous version restored)";
+                        } else {
+                            message += " (restore failed: " + restore_error + ")";
+                        }
+                        ReportFailure(dir, message);
                         return 1;
                     }
                     metadata_dir = stage;
@@ -501,6 +609,7 @@ int wmain(int argc, wchar_t** argv) {
                 }
                 std::error_code ec;
                 const fs::path victim = dir / fs::path(line);
+                BackupFile(dir, line);
                 if (fs::remove(victim, ec)) {
                     ++removed;
                     PruneEmptyParents(dir, victim);
@@ -527,6 +636,14 @@ int wmain(int argc, wchar_t** argv) {
             std::error_code stage_ec;
             fs::remove_all(metadata_dir, stage_ec);
         }
+        if (!fs::exists(AppExe(dir)) || !fs::exists(dir / "veyla-engine.exe")) {
+            std::string restore_error;
+            const bool restored = RestoreBackup(dir, restore_error);
+            ReportFailure(dir, "The update did not produce a runnable Veyla." +
+                                 (restored ? std::string(" (previous version restored)")
+                                           : " (restore failed: " + restore_error + ")"));
+            return 1;
+        }
         Log("update complete" + (version.empty() ? std::string() : ": version " + version));
         if (launch) {
             Relaunch(dir);
@@ -536,6 +653,7 @@ int wmain(int argc, wchar_t** argv) {
 
     // Folder form, kept for the release tooling.
     const fs::path payload = dir / "payload";
+    StartBackup(dir);
     int copied = 0;
     int failed = 0;
     std::error_code ec;
@@ -545,6 +663,7 @@ int wmain(int argc, wchar_t** argv) {
         }
         const fs::path relative = fs::relative(entry.path(), payload, ec);
         const fs::path target = dir / relative;
+        BackupFile(dir, Utf8(relative.wstring()));
         fs::create_directories(target.parent_path(), ec);
         bool done = false;
         for (int retry = 0; retry < 40 && !done; ++retry) {
@@ -562,7 +681,11 @@ int wmain(int argc, wchar_t** argv) {
         }
     }
     if (failed > 0) {
-        ReportFailure(dir, "Could not copy " + std::to_string(failed) + " file(s).");
+        std::string restore_error;
+        const bool restored = RestoreBackup(dir, restore_error);
+        ReportFailure(dir, "Could not copy " + std::to_string(failed) + " file(s)." +
+                             (restored ? " (previous version restored)"
+                                       : " (restore failed: " + restore_error + ")"));
         return 1;
     }
     Log("copied " + std::to_string(copied) + " file(s)");
@@ -581,6 +704,7 @@ int wmain(int argc, wchar_t** argv) {
             }
             std::error_code remove_ec;
             const fs::path victim = dir / fs::path(line);
+            BackupFile(dir, line);
             if (fs::remove(victim, remove_ec)) {
                 ++removed;
                 PruneEmptyParents(dir, victim);
