@@ -130,10 +130,20 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 2.7.5 - standalone build
+Veyla 2.7.6 - standalone build
 =======================================
 
 Run veyla.exe. No installer, no console window, no background service.
+
+What changed in 2.7.6
+---------------------
+- The frame buffer now adapts to a bursty link instead of dropping frames. When
+  frames arrive in a burst and the queue would overflow, the session raises its
+  internal buffer by one (up to 3) and only gives the latency back after 10 s
+  without a drop. Wi-Fi jitter no longer turns into stutter.
+- Optimize sets frame buffer 1 on Wi-Fi and 0 on a cable. 0 stays the explicit
+  lowest-latency mode.
+- The periodic presentation log line now includes the active link type.
 
 What changed in 2.7.5
 ---------------------
