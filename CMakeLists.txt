@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 project(BetterRemotePlay VERSION 3.0.0 LANGUAGES CXX)
 # The display/update string for the beta. The numeric project version stays
 # 3.0.0 so packaging and the delta keep the usual shape.
-set(BRP_APP_VERSION_STRING "3.0.0-beta8")
+set(BRP_APP_VERSION_STRING "3.0.0-beta9")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -380,6 +380,7 @@ set(BRP_NEXT_SHELL_SOURCES
     src/next/ui/widgets.cpp
     src/next/ui/theme.cpp
     src/next/platform/system_info.cpp
+    src/next/platform/wifi_info.cpp
     src/next/overlay/overlay_window.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/app.rc"
 )

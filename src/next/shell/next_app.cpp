@@ -77,7 +77,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"3.0.0-beta8";
+constexpr wchar_t kVersion[] = L"3.0.0-beta9";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
@@ -4379,6 +4379,7 @@ void NextApp::StartPadThread() {
     pad_thread_ = std::thread([this]() {
         using Clock = std::chrono::steady_clock;
         Clock::time_point last_haptics = Clock::now();
+        Clock::time_point last_wifi = Clock::now() - std::chrono::seconds(30);
         bool haptics_on = false;
         DWORD task_index = 0;
         HANDLE mmcss = ::AvSetMmThreadCharacteristicsW(L"Games", &task_index);
@@ -4400,6 +4401,27 @@ void NextApp::StartPadThread() {
             const int poll_hz = std::clamp(pad_rate_hz_.load(), 60, 1000);
             apply_rate(poll_hz);
             pad_.Poll();
+            // Wi-Fi association drifts while playing. Probe off the render
+            // thread and log only material changes, so a drop can be matched to
+            // a signal/rate event without spamming the file.
+            const auto wifi_now = Clock::now();
+            if (wifi_now - last_wifi > std::chrono::seconds(30)) {
+                last_wifi = wifi_now;
+                const WifiInfo info = ProbeWifi();
+                bool changed = false;
+                {
+                    std::lock_guard<std::mutex> lock(wifi_mutex_);
+                    changed = info.connected != wifi_.connected ||
+                              info.rssi_dbm != wifi_.rssi_dbm ||
+                              info.channel != wifi_.channel ||
+                              info.rx_rate_kbps != wifi_.rx_rate_kbps ||
+                              info.tx_rate_kbps != wifi_.tx_rate_kbps;
+                    wifi_ = info;
+                }
+                if (changed) {
+                    LogDebug(FormatWifi(info));
+                }
+            }
             if (streaming_ && streaming_->Connected()) {
                 streaming_->SendController(pad_.snapshot());
                 brp::PadConsoleFeedback feedback = streaming_->Feedback();
@@ -4843,6 +4865,30 @@ void NextApp::ConnectStream() {
     content_fps_ = 0.0;
     content_unique_ = 0;
     content_window_ = -1.0;
+    {
+        // Record the wireless association at the moment the session starts.
+        const WifiInfo wifi = ProbeWifi();
+        {
+            std::lock_guard<std::mutex> lock(wifi_mutex_);
+            wifi_ = wifi;
+        }
+        if (wifi.connected) {
+            LogInfo(FormatWifi(wifi));
+        }
+        const std::string fg =
+            settings_.ai.frame_generation
+                ? std::string(ToString(settings_.ai.fg_backend))
+                : std::string("off");
+        LogPrintf(LogLevel::Info,
+                  "session: fps=%d buffer=%d bitrate=%d decoder=%s vsync=%s poll=%dHz "
+                  "sr=%s fg=%s refresh=%dHz",
+                  settings_.streaming.fps, settings_.streaming.frame_buffer,
+                  settings_.streaming.bitrate_kbps,
+                  settings_.streaming.decoder.c_str(),
+                  PresentVsync() ? "on" : "off", settings_.controller.poll_hz,
+                  settings_.ai.super_resolution ? settings_.ai.sr_model.c_str() : "off",
+                  fg.c_str(), RefreshHz());
+    }
     ConsoleSettings console = settings_.console;
     console.fps = settings_.streaming.fps;
     if (console.address.empty()) {
