@@ -153,8 +153,22 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 3.0.0 beta 3 - standalone build
+Veyla 3.0.0 beta 4 - standalone build
 =======================================
+
+What changed in 3.0.0 beta 4
+----------------------------
+- Frame generation is locked to its own upscaler: DLSS-G only runs with DLSS
+  Super Resolution, FSR-G only with FSR. The incompatible choice is visible in
+  the list but blocked, so it is always either 0 frame generation or the
+  generator of the selected family - never a mix.
+- Old settings files and profiles that carry a mixed pair (for example FSR SR
+  with DLSS-G) are cleaned on load: the generator is dropped and the picture
+  stays on Super Resolution.
+- FSR-G is not wired yet. With FSR selected the only choice is off; the FSR-G
+  entry stays visible and blocked so the pairing is explicit.
+- The beta 3 picture fix is included: native DLSS-G offscreen output remains
+  disabled, so the Watch window cannot go black with audio.
 
 What changed in 3.0.0 beta 3
 ----------------------------
