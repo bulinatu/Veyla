@@ -2,12 +2,54 @@
 // the with/without comparison charts. No framework and no build step.
 
 const THEMES = {
-  Aurora: { accent: "#8b5cf6", bright: "#a78bfa", deep: "#4f46e5", pink: "#f472b6" },
-  Ocean: { accent: "#3b82f6", bright: "#60a5fa", deep: "#1d4ed8", pink: "#38bdf8" },
-  Emerald: { accent: "#10b981", bright: "#34d399", deep: "#047857", pink: "#5eead4" },
-  Ember: { accent: "#f97316", bright: "#fb923c", deep: "#c2410c", pink: "#f87171" },
-  Rose: { accent: "#ec4899", bright: "#f472b6", deep: "#be185d", pink: "#f9a8d4" },
-  Graphite: { accent: "#64748b", bright: "#cbd5e1", deep: "#334155", pink: "#94a3b8" },
+  Aurora: {
+    accent: "#8b5cf6",
+    bright: "#a78bfa",
+    deep: "#4f46e5",
+    pink: "#f472b6",
+    wash: "#160b33",
+    blobs: ["#7c3aed", "#4f46e5", "#db2777", "#0891b2", "#6d28d9"],
+  },
+  Ocean: {
+    accent: "#3b82f6",
+    bright: "#60a5fa",
+    deep: "#1d4ed8",
+    pink: "#38bdf8",
+    wash: "#0b1a3a",
+    blobs: ["#1d4ed8", "#0369a1", "#0ea5e9", "#22d3ee", "#1e3a8a"],
+  },
+  Emerald: {
+    accent: "#10b981",
+    bright: "#34d399",
+    deep: "#047857",
+    pink: "#5eead4",
+    wash: "#06251d",
+    blobs: ["#059669", "#047857", "#0d9488", "#22d3ee", "#065f46"],
+  },
+  Ember: {
+    accent: "#f97316",
+    bright: "#fb923c",
+    deep: "#c2410c",
+    pink: "#f87171",
+    wash: "#2a1005",
+    blobs: ["#ea580c", "#c2410c", "#dc2626", "#f59e0b", "#9a3412"],
+  },
+  Rose: {
+    accent: "#ec4899",
+    bright: "#f472b6",
+    deep: "#be185d",
+    pink: "#f9a8d4",
+    wash: "#2a0a1a",
+    blobs: ["#db2777", "#be185d", "#e11d48", "#f472b6", "#831843"],
+  },
+  Graphite: {
+    accent: "#64748b",
+    bright: "#cbd5e1",
+    deep: "#334155",
+    pink: "#94a3b8",
+    wash: "#0d1420",
+    blobs: ["#334155", "#1e293b", "#475569", "#0ea5e9", "#0f172a"],
+  },
 };
 
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -20,6 +62,10 @@ function applyTheme(name) {
   root.style.setProperty("--accent-bright", theme.bright);
   root.style.setProperty("--accent-deep", theme.deep);
   root.style.setProperty("--pink", theme.pink);
+  root.style.setProperty("--wash", theme.wash);
+  theme.blobs.forEach((color, index) => {
+    root.style.setProperty(`--blob-${index + 1}`, color);
+  });
   document.querySelectorAll("[data-theme]").forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.theme === name));
   });
