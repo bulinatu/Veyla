@@ -1,5 +1,7 @@
 #include "overlay/overlay_window.h"
 
+#include "diagnostics/log.h"
+
 #include <windowsx.h>
 
 #include <algorithm>
@@ -73,7 +75,7 @@ bool OverlayWindow::Create() {
         kClass, L"Veyla control center", WS_POPUP, 0, 0, kCompactW,
         kCompactH, nullptr, nullptr, wc.hInstance, this);
     if (!hwnd_) {
-        std::fprintf(stderr, "[overlay] CreateWindowEx failed %lu\n",
+        LogPrintf(LogLevel::Warning, "[overlay] CreateWindowEx failed %lu",
                      static_cast<unsigned long>(::GetLastError()));
         return false;
     }

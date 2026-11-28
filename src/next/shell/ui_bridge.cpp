@@ -1,13 +1,23 @@
 #include "shell/ui_bridge.h"
 
+#include "diagnostics/log.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 
 namespace brp::next {
 namespace {
 
 void BridgeLog(const char* text) {
+    if (text == nullptr) {
+        return;
+    }
+    // The shell/engine conversation is part of the app diagnostics: keep it in
+    // next.log at Debug (visible with the "All" level), and still honour the
+    // dedicated bridge.log when the environment variable asks for it.
+    LogDebug(std::string("bridge: ") + text);
     if (std::getenv("BRP_BRIDGE_LOG") == nullptr) {
         return;
     }

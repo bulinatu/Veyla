@@ -96,6 +96,8 @@ private:
     std::string pairing_message_;
     session::Streaming::StreamStats stats_{};
     std::chrono::steady_clock::time_point last_stats_{};
+    // Drop/stutter warnings are throttled so a bad second does not fill the log.
+    std::chrono::steady_clock::time_point last_warn_{};
     std::filesystem::path next_path_;
     std::filesystem::path legacy_path_;
     bool loaded_ = false;

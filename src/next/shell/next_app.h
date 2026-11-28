@@ -228,6 +228,7 @@ private:
     // a much lower bitrate than Ethernet before it starts queuing packets.
     std::string link_type_ = "unknown";
     int link_ticks_ = 39;  // compute on the first status publish
+    int stats_ticks_ = 0;  // presentation stats line every ~5 s at Debug
     double bridge_status_at_ = -1.0;
     bool publish_devices_ = false;
     bool overlay_pause_fg_ = false;

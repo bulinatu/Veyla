@@ -1,5 +1,6 @@
 #include "ai/dlss_fg.h"
 
+#include "diagnostics/log.h"
 #include "media/nv_dlssnr.h"
 
 #include <algorithm>
@@ -128,7 +129,7 @@ bool DlssFg::Start(const std::wstring& runtime_dir, int width, int height, int m
     thread_ = std::thread([this]() { WorkerMain(); });
     log_run_.store(true);
     log_thread_ = std::thread([this]() { LogMain(); });
-    std::fprintf(stderr, "[next] DLSS-G worker %dx%d %dx pid %lu\n", width, height,
+    LogPrintf(LogLevel::Info, "[next] DLSS-G worker %dx%d %dx pid %lu", width, height,
                  multiplier_.load(),
                  static_cast<unsigned long>(nr_->worker_pid()));
     return true;
@@ -228,7 +229,8 @@ void DlssFg::WorkerMain() {
             if (reconfigure) {
                 std::string detail;
                 if (!nr_->Reconfigure(options, detail)) {
-                    std::fprintf(stderr, "[next] NR reconfigure: %s\n", detail.c_str());
+                    LogPrintf(LogLevel::Debug, "[next] NR reconfigure: %s",
+                              detail.c_str());
                 }
                 // The bypass is a per-frame flag: toggling neural rendering
                 // must reach the worker without recreating it.
@@ -253,7 +255,8 @@ void DlssFg::WorkerMain() {
                 std::lock_guard<std::mutex> lock(note_mutex_);
                 note_ = L"DLSS-G: " + Widen(detail);
             }
-            std::fprintf(stderr, "[next] DLSS-G process failed: %s\n", detail.c_str());
+            LogPrintf(LogLevel::Warning, "[next] DLSS-G process failed: %s",
+                      detail.c_str());
             return;
         }
     }
@@ -294,7 +297,7 @@ bool DlssFg::Attach(HWND app) {
                         ex | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW);
     worker_window_ = find.hwnd;
     last_x_ = last_y_ = last_w_ = last_h_ = 0;
-    std::fprintf(stderr, "[next] DLSS-G window attached (hwnd %p)\n",
+    LogPrintf(LogLevel::Debug, "[next] DLSS-G window attached (hwnd %p)",
                  reinterpret_cast<void*>(worker_window_));
     return true;
 }

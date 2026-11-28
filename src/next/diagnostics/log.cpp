@@ -1,6 +1,8 @@
 #include "diagnostics/log.h"
 
+#include <atomic>
 #include <chrono>
+#include <cstdarg>
 #include <cstdio>
 #include <ctime>
 #include <utility>
@@ -8,6 +10,10 @@
 namespace brp::next {
 namespace {
 
+std::atomic<Logger*> g_logger{nullptr};
+
+// A release log can span days. The bare HH:MM:SS made a multi-day file look
+// like the clock was jumping backwards.
 std::string Timestamp() {
     using namespace std::chrono;
     const auto now = system_clock::now();
@@ -19,9 +25,11 @@ std::string Timestamp() {
 #else
     localtime_r(&seconds, &local);
 #endif
-    char buffer[32];
-    std::snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d.%03d", local.tm_hour,
-                  local.tm_min, local.tm_sec, static_cast<int>(ms.count()));
+    char buffer[40];
+    std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d %02d:%02d:%02d.%03d",
+                  local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
+                  local.tm_hour, local.tm_min, local.tm_sec,
+                  static_cast<int>(ms.count()));
     return buffer;
 }
 
@@ -29,8 +37,33 @@ std::string Timestamp() {
 
 Logger::Logger(std::filesystem::path path, LogLevel level, std::size_t max_bytes)
     : path_(std::move(path)), level_(level), max_bytes_(max_bytes) {
+    g_logger.store(this);
     std::lock_guard<std::mutex> lock(mutex_);
     OpenLocked();
+}
+
+Logger::~Logger() {
+    if (g_logger.load() == this) {
+        g_logger.store(nullptr);
+    }
+}
+
+void LogMessage(LogLevel level, const std::string& message) {
+    if (Logger* logger = g_logger.load()) {
+        logger->Log(level, message);
+    }
+}
+
+void LogPrintf(LogLevel level, const char* format, ...) {
+    if (g_logger.load() == nullptr || format == nullptr) {
+        return;
+    }
+    char buffer[1024] = {};
+    va_list args;
+    va_start(args, format);
+    std::vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    LogMessage(level, buffer);
 }
 
 void Logger::OpenLocked() {

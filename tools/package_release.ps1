@@ -130,10 +130,21 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 2.7.4 - standalone build
+Veyla 2.7.5 - standalone build
 =======================================
 
 Run veyla.exe. No installer, no console window, no background service.
+
+What changed in 2.7.5
+---------------------
+- Settings > System > Logging has a new "All" level, next to Error / Warn /
+  Info / Debug. It records everything the app and the stream can report.
+- Stream diagnostics now reach next.log: connect/start/failure events, one line
+  per second with fps, lost frames, decode time, queue, buffer drops, arrival
+  jitter and bitrate, plus presentation stats (shown fps, age, cadence, misses).
+- Decoder, DX12 surface, DLSS/FSR/DLSS-G failures and shell/engine bridge
+  messages are written to the same log instead of a stderr no GUI build shows.
+- Log lines include the date, and the file rotates at 8 MiB.
 
 What changed in 2.7.1
 ---------------------
