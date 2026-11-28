@@ -219,6 +219,8 @@ Status StreamingService::Connect(const ConsoleSettings& console) {
 }
 
 void StreamingService::Disconnect() {
+    const bool was_active =
+        streaming_.state() != session::StreamState::Idle || connecting_.load();
     JoinConnect();
     streaming_.Stop();
     {
@@ -226,7 +228,9 @@ void StreamingService::Disconnect() {
         message_ = "Disconnected";
         stats_ = {};
     }
-    LogInfo("stream: disconnected");
+    if (was_active) {
+        LogInfo("stream: disconnected");
+    }
 }
 
 void StreamingService::JoinConnect() {
@@ -270,7 +274,10 @@ StreamSnapshot StreamingService::Snapshot() const {
     snapshot.source_width = profile_.width;
     snapshot.source_height = profile_.height;
     snapshot.bitrate_kbps = static_cast<double>(profile_.bitrate_kbps);
-    snapshot.source_fps = streaming_.fps();
+    // fps() is frames over total uptime, so after a stop it decays instead of
+    // reporting zero; an idle session has no source rate.
+    snapshot.source_fps =
+        snapshot.connected ? streaming_.fps() : 0.0;
     snapshot.decode_ms = stats_.decode_ms_avg;
     snapshot.decode_ms_max = stats_.decode_ms_max;
     snapshot.decoder_drops = stats_.buffer_drops;
@@ -393,9 +400,13 @@ void StreamingService::Poll() {
             stats.queue, stats.buffer, stats.buffer_drops, stats.arrival_ms,
             stats.arrival_outliers, stats.kbps);
         LogDebug(line);
-        const bool degraded = stats.lost > 0 || stats.buffer_drops > 0 ||
-                              stats.decode_ms_max > 40.0 ||
-                              stats.arrival_outliers > 6;
+        // Outliers are normal on Wi-Fi and the buffer absorbs them; warning on
+        // every burst made the log look broken while the picture was fine. Warn
+        // only when frames were actually lost/dropped, decode stalled, or the
+        // source rate collapsed.
+        const bool degraded =
+            stats.lost > 0 || stats.buffer_drops > 0 || stats.decode_ms_max > 40.0 ||
+            (stats.elapsed > 0.5 && fps < stream_options_.fps * 0.75);
         if (degraded && now - last_warn_ > std::chrono::seconds(5)) {
             last_warn_ = now;
             LogWarning(line);

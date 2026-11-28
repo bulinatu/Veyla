@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(BetterRemotePlay VERSION 2.7.7 LANGUAGES CXX)
+project(BetterRemotePlay VERSION 2.7.8 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -346,6 +346,7 @@ set(BRP_NEXT_SHELL_SOURCES
     src/next/ui/widgets.cpp
     src/next/ui/theme.cpp
     src/next/platform/system_info.cpp
+    src/next/platform/wifi_info.cpp
     src/next/overlay/overlay_window.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/app.rc"
 )

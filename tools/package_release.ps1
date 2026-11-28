@@ -130,10 +130,23 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 2.7.7 - standalone build
+Veyla 2.7.8 - standalone build
 =======================================
 
 Run veyla.exe. No installer, no console window, no background service.
+
+What changed in 2.7.8
+---------------------
+- The log now records the actual Wi-Fi association: SSID, BSSID, RSSI (dBm),
+  signal quality, RX/TX link rate, channel, band, PHY and adapter name, at
+  session start and whenever it changes during play.
+- A session line records the effective settings (fps, buffer, bitrate, decoder,
+  vsync, poll rate, SR, FG, display refresh), so a report is self-contained.
+- Warnings now fire only on real trouble (lost/dropped frames, decode over
+  40 ms, source rate collapse). Normal Wi-Fi arrival outliers no longer produce
+  a warning every few seconds while the picture is fine.
+- An idle session reports 0 source fps instead of a slowly decaying value, and
+  "disconnected" is logged once.
 
 What changed in 2.7.7
 ---------------------

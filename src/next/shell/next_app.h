@@ -9,6 +9,7 @@
 #include "overlay/overlay_window.h"
 #include "platform/gamepad.h"
 #include "platform/system_info.h"
+#include "platform/wifi_info.h"
 #include "shell/ui_bridge.h"
 #include "ui/theme.h"
 #include "ui/widgets.h"
@@ -231,6 +232,8 @@ private:
     std::string link_type_ = "unknown";
     int link_ticks_ = 39;  // compute on the first status publish
     int stats_ticks_ = 0;  // presentation stats line every ~5 s at Debug
+    WifiInfo wifi_;        // latest WLAN association, refreshed by the pad thread
+    std::mutex wifi_mutex_;
     double bridge_status_at_ = -1.0;
     bool publish_devices_ = false;
     bool overlay_pause_fg_ = false;
