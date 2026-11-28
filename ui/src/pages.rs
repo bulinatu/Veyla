@@ -1313,6 +1313,10 @@ impl Root {
             ),
         ];
         if dlss_backend {
+            fg_rows.push(widgets::kv(
+                "Beta 3",
+                "Native DLSS-G is paused while the DX12 swapchain path is finished; SR is used.",
+            ));
             fg_rows.push(self.seg_int_row(
                 "ai.fg_multiplier",
                 "Multiplier",
