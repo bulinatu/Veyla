@@ -21,6 +21,12 @@
 
 ---
 
+> **3.0.0 beta 1 is out:** FSR upscaling, a pure Direct3D 12 Watch surface and
+> native in-process DLSS-G. [Download the beta](https://github.com/bulinatu/Veyla/releases/tag/v3.0.0-beta1).
+> The previous stable build remains [2.7.2](https://github.com/bulinatu/Veyla/releases/tag/v2.7.2).
+
+---
+
 ## What is Veyla?
 
 Veyla connects your PC to a PlayStation 5 on the same network and streams the
@@ -34,9 +40,9 @@ You pair once, pick a preset, and press **Connect & Play**.
 
 **Picture**
 - 1080p60 by default, with a frame buffer of 0 - the lowest-latency path.
-- DLSS Super Resolution to clean up and upscale the stream.
-- DLSS Frame Generation with 2x-6x multipliers, plus a neural renderer for
-  motion smoothing, on any RTX card.
+- DLSS Super Resolution on RTX, or AMD FSR 4.1.2 / 3.1.6 on Radeon, to clean up and upscale the stream.
+- Native DLSS Frame Generation on DX12: 2x on RTX 40, the driver's multi-frame
+  count on RTX 50, plus a neural renderer for motion smoothing.
 - Works with 30 fps games too: they stay 60 on the wire and frame generation
   keeps the motion smooth.
 
