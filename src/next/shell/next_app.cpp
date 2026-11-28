@@ -77,7 +77,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"3.0.0-beta5";
+constexpr wchar_t kVersion[] = L"3.0.0-beta6";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
@@ -330,8 +330,8 @@ bool NextApp::CreateDecodeDevice() {
         static_cast<UINT>(std::size(levels)), D3D11_SDK_VERSION, &decode_device_, &got,
         &decode_context_);
     if (FAILED(hr)) {
-        std::fprintf(stderr, "[decode] shared device unavailable: 0x%08lX\n",
-                     static_cast<unsigned long>(hr));
+        LogPrintf(LogLevel::Warning, "[decode] shared device unavailable: 0x%08lX",
+                  static_cast<unsigned long>(hr));
         decode_device_ = nullptr;
         decode_context_ = nullptr;
         return false;
@@ -697,8 +697,8 @@ void NextApp::Resize() {
     renderer_->SetScale(scale_);
     window_->SetFrameMetrics(watching_ ? 0 : static_cast<int>(kTitleHeight * scale_),
                              watching_ ? 0 : static_cast<int>(370.0f * scale_));
-    std::fprintf(stderr, "[next] window %dx%d scale %.3f logical %.1fx%.1f\n",
-                 width, height, scale_, logical_width_, logical_height_);
+    LogPrintf(LogLevel::Debug, "[next] window %dx%d scale %.3f logical %.1fx%.1f",
+              width, height, scale_, logical_width_, logical_height_);
 }
 
 void NextApp::ResizeStream() {
@@ -713,7 +713,7 @@ void NextApp::ResizeStream() {
     if (stream_dx12_) {
         stream_dx12_->Resize(width, height);
         redraw_needed_ = true;
-        std::fprintf(stderr, "[next] stream window %dx%d (DX12)\n", width, height);
+        LogPrintf(LogLevel::Debug, "[next] stream window %dx%d (DX12)", width, height);
         return;
     }
     if (!stream_presenter_) {
@@ -723,7 +723,7 @@ void NextApp::ResizeStream() {
     ApplyTargetTo(stream_presenter_.get());
     ApplyEnhance();
     redraw_needed_ = true;
-    std::fprintf(stderr, "[next] stream window %dx%d\n", width, height);
+    LogPrintf(LogLevel::Debug, "[next] stream window %dx%d", width, height);
 }
 
 brp::Win32Window* NextApp::ActiveWindow() const {
@@ -802,8 +802,8 @@ bool NextApp::EnsureStreamSurface() {
                 stream_dx12_ = std::move(dx12);
                 redraw_needed_ = true;
             } else {
-                std::fprintf(stderr, "[next] DX12 surface unavailable: %s\n",
-                             detail.c_str());
+                LogPrintf(LogLevel::Warning, "[next] DX12 surface unavailable: %s",
+                          detail.c_str());
             }
         }
         if (!stream_dx12_) {
@@ -3810,8 +3810,8 @@ void NextApp::PresentVideo() {
                         have_rgba = true;
                     } else {
                         dlss_failed_ = true;
-                        std::fprintf(stderr, "[next] DLSS SR frame %dx%d: %s\n", iw, ih,
-                                     detail.c_str());
+                        LogPrintf(LogLevel::Warning, "[next] DLSS SR frame %dx%d: %s", iw,
+                                  ih, detail.c_str());
                         Toast(L"DLSS SR readback: " + Widen(detail), true);
                     }
                 }
@@ -4546,7 +4546,7 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
         std::string detail;
         if (!dlss_sr_->LoadRuntime(directory.wstring(), detail)) {
             dlss_failed_ = true;
-            std::fprintf(stderr, "[next] DLSS runtime: %s\n", detail.c_str());
+            LogPrintf(LogLevel::Warning, "[next] DLSS runtime: %s", detail.c_str());
             Toast(L"DLSS runtime: " + Widen(detail), true);
             return false;
         }
@@ -4584,8 +4584,9 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
     if (!dlss_sr_->Initialize(sr_device, sr_context, in_w,
                               in_h, out_w, out_h, preset, quality, detail)) {
         dlss_failed_ = true;
-        std::fprintf(stderr, "[next] DLSS SR init %dx%d -> %dx%d preset %d quality %d: %s\n",
-                     in_w, in_h, out_w, out_h, preset, quality, detail.c_str());
+        LogPrintf(LogLevel::Warning,
+                  "[next] DLSS SR init %dx%d -> %dx%d preset %d quality %d: %s", in_w,
+                  in_h, out_w, out_h, preset, quality, detail.c_str());
         Toast(L"DLSS SR: " + Widen(detail), true);
         return false;
     }
@@ -4648,7 +4649,7 @@ bool NextApp::EnsureDlssFgDx12(int width, int height) {
                               detail)) {
         dlss_fg_dx12_.reset();
         fg_dx12_failed_ = true;
-        std::fprintf(stderr, "[next] native DLSS-G: %s\n", detail.c_str());
+        LogPrintf(LogLevel::Warning, "[next] native DLSS-G: %s", detail.c_str());
         Toast(L"DLSS-G: " + Widen(detail), true);
         return false;
     }
@@ -4712,7 +4713,7 @@ bool NextApp::EnsureFsr(int input_width, int input_height) {
         std::string detail;
         if (!fsr_->LoadRuntime(system_.fsr_dir, detail)) {
             fsr_failed_ = true;
-            std::fprintf(stderr, "[next] FSR runtime: %s\n", detail.c_str());
+            LogPrintf(LogLevel::Warning, "[next] FSR runtime: %s", detail.c_str());
             Toast(L"FSR runtime: " + Widen(detail), true);
             return false;
         }
@@ -4738,8 +4739,8 @@ bool NextApp::EnsureFsr(int input_width, int input_height) {
     if (!fsr_->Initialize(sr_device, sr_context, in_w, in_h, out_w, out_h, variant, false,
                           detail)) {
         fsr_failed_ = true;
-        std::fprintf(stderr, "[next] FSR init %dx%d -> %dx%d: %s\n", in_w, in_h, out_w,
-                     out_h, detail.c_str());
+        LogPrintf(LogLevel::Warning, "[next] FSR init %dx%d -> %dx%d: %s", in_w, in_h,
+                  out_w, out_h, detail.c_str());
         Toast(L"FSR: " + Widen(detail), true);
         return false;
     }
@@ -5017,11 +5018,29 @@ void NextApp::PublishBridgeStatus() {
         const std::string link = NetworkLinkName();
         if (link != link_type_) {
             link_type_ = link;
-            std::fprintf(stderr, "[net] default route link=%s\n", link_type_.c_str());
+            LogPrintf(LogLevel::Info, "[net] default route link=%s",
+                      link_type_.c_str());
         }
     }
     const StreamSnapshot stream = streaming_ ? streaming_->Snapshot() : StreamSnapshot{};
     const bool streaming_now = watching_ && stream.connected;
+    // The shell side of the story: what the user actually sees. Every ~5 s at
+    // Debug so a stutter can be tied to network loss, decoder time or
+    // presentation misses instead of guesswork.
+    if (++stats_ticks_ >= 50) {
+        stats_ticks_ = 0;
+        char line[360] = {};
+        std::snprintf(
+            line, sizeof(line),
+            "present: state=%s connected=%d, source %.1f fps, shown %d fps, "
+            "loss %.2f%%, drops %d, decode %.1f/%.1f ms, age %.1f ms, "
+            "cadence %.1f/%.1f ms, misses %llu/s",
+            stream.state.c_str(), stream.connected ? 1 : 0, stream.source_fps,
+            display_rate_, stream.loss_percent, stream.decoder_drops,
+            stream.decode_ms, stream.decode_ms_max, last_age_ms_, cadence_p50_,
+            cadence_p99_, present_misses_rate_);
+        LogDebug(line);
+    }
     std::string json;
     json.reserve(512);
     json += "S {";
@@ -5110,9 +5129,9 @@ void NextApp::PublishBridgeStatus() {
         number("update_progress", update.progress, true);
         if (update.phase != last_update_phase_) {
             last_update_phase_ = update.phase;
-            std::fprintf(stderr, "[update] %s version=%s error=%s\n",
-                         UpdateStateName(update.phase).c_str(),
-                         update.version.c_str(), update.error.c_str());
+            LogPrintf(LogLevel::Info, "[update] %s version=%s error=%s",
+                      UpdateStateName(update.phase).c_str(), update.version.c_str(),
+                      update.error.c_str());
         }
     }
     integer("width", stream.source_width, true);

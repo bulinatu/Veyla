@@ -1,5 +1,6 @@
 #include "streaming/streaming_service.h"
 
+#include "diagnostics/log.h"
 #include "session/discovery.h"
 #include "session/psn_auth.h"
 
@@ -92,7 +93,7 @@ Status StreamingService::Load() {
             loaded_ = true;
             return Status::Ok();
         }
-        std::fprintf(stderr, "[next] session load failed: %s\n", detail.c_str());
+        LogWarning("[next] session load failed: " + detail);
     }
     if (std::filesystem::exists(legacy_path_, ec)) {
         if (session::Load(legacy_path_.string(), profile_, detail)) {
@@ -100,12 +101,11 @@ Status StreamingService::Load() {
             // Own a copy so pairing and updates never touch the old app.
             const Status saved = SaveProfile();
             if (!saved.ok()) {
-                std::fprintf(stderr, "[next] could not copy legacy session: %s\n",
-                             saved.message().c_str());
+                LogWarning("[next] could not copy legacy session: " + saved.message());
             }
             return Status::Ok();
         }
-        std::fprintf(stderr, "[next] legacy session load failed: %s\n", detail.c_str());
+        LogWarning("[next] legacy session load failed: " + detail);
     }
     profile_ = session::Profile{};
     return Status::Ok();
@@ -150,6 +150,15 @@ Status StreamingService::Connect(const ConsoleSettings& console) {
     profile.bitrate_kbps = std::clamp(stream_options_.bitrate_kbps, 1000, 200000);
     profile.decoder = DecoderFromName(stream_options_.decoder);
     profile.frame_buffer = std::clamp(stream_options_.frame_buffer, 0, 3);
+    {
+        char line[256] = {};
+        std::snprintf(line, sizeof(line),
+                      "stream: connect %s %dx%d@%d, %d kbps, decoder %s, buffer %d",
+                      profile.host.c_str(), profile.width, profile.height, profile.fps,
+                      profile.bitrate_kbps, stream_options_.decoder.c_str(),
+                      profile.frame_buffer);
+        LogInfo(line);
+    }
     JoinConnect();
     streaming_.Stop();
     {
@@ -184,6 +193,8 @@ Status StreamingService::Connect(const ConsoleSettings& console) {
             std::lock_guard<std::mutex> lock(mutex_);
             connecting_.store(false);
             message_ = "Console is not reachable. Wake it or check the address.";
+            LogWarning("stream: " + profile.host +
+                       " is not reachable after the wake attempts");
             return;
         }
         {
@@ -198,8 +209,10 @@ Status StreamingService::Connect(const ConsoleSettings& console) {
         connecting_.store(false);
         if (!ok) {
             message_ = error.empty() ? "session start failed" : error;
+            LogError("stream: start failed: " + message_);
         } else {
             message_ = "Waiting for the first frame";
+            LogInfo("stream: session started, waiting for the first frame");
         }
     });
     return Status::Ok();
@@ -213,6 +226,7 @@ void StreamingService::Disconnect() {
         message_ = "Disconnected";
         stats_ = {};
     }
+    LogInfo("stream: disconnected");
 }
 
 void StreamingService::JoinConnect() {
@@ -352,12 +366,39 @@ void StreamingService::Poll() {
     const auto now = std::chrono::steady_clock::now();
     if (streaming_.state() == session::StreamState::Streaming &&
         now - last_stats_ > std::chrono::seconds(1)) {
-        session::Streaming::StreamStats stats = streaming_.ConsumeStats();
-        std::lock_guard<std::mutex> lock(mutex_);
-        stats_ = stats;
-        last_stats_ = now;
-        if (message_ == "Waiting for the first frame" && stats.frames > 0) {
-            message_ = "Streaming";
+        const session::Streaming::StreamStats stats = streaming_.ConsumeStats();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stats_ = stats;
+            last_stats_ = now;
+            if (message_ == "Waiting for the first frame" && stats.frames > 0) {
+                message_ = "Streaming";
+            }
+        }
+        // One line per second at Debug: source cadence, decoder time and every
+        // drop counter the presentation path relies on. A degraded second is
+        // repeated at Warning (throttled) so it is visible on the default level
+        // too.
+        const double fps = stats.elapsed > 0.0 ? stats.frames / stats.elapsed : 0.0;
+        const double lost_pct =
+            stats.frames > 0
+                ? 100.0 * static_cast<double>(stats.lost) / stats.frames
+                : 0.0;
+        char line[320] = {};
+        std::snprintf(
+            line, sizeof(line),
+            "stream: %.1f fps, lost %d (%.2f%%), decode %.1f/%.1f ms, queue %d, "
+            "buffer %d, drops %d, arrival %.1f ms, outliers %d, %.0f kbps",
+            fps, stats.lost, lost_pct, stats.decode_ms_avg, stats.decode_ms_max,
+            stats.queue, stats.buffer, stats.buffer_drops, stats.arrival_ms,
+            stats.arrival_outliers, stats.kbps);
+        LogDebug(line);
+        const bool degraded = stats.lost > 0 || stats.buffer_drops > 0 ||
+                              stats.decode_ms_max > 40.0 ||
+                              stats.arrival_outliers > 6;
+        if (degraded && now - last_warn_ > std::chrono::seconds(5)) {
+            last_warn_ = now;
+            LogWarning(line);
         }
     }
 }
