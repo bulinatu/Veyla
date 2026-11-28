@@ -1,6 +1,7 @@
 #include "media/nv_dlss_sr.h"
 
 #include <dxgi.h>
+#include <dxgi1_2.h>
 
 #include <nvsdk_ngx.h>
 
@@ -304,6 +305,14 @@ bool NvDlssSr::CreateTextures(int in_width, int in_height, int out_width, int ou
             detail = "DLSS output SRV failed";
             return false;
         }
+        Microsoft::WRL::ComPtr<IDXGIResource1> dxgi;
+        if (SUCCEEDED(output11_[i].As(&dxgi))) {
+            HANDLE handle = nullptr;
+            if (SUCCEEDED(dxgi->CreateSharedHandle(nullptr, GENERIC_ALL, nullptr,
+                                                   &handle))) {
+                output_handles_[i] = handle;
+            }
+        }
     }
     output_slot_ = 0;
     last_output_slot_ = 0;
@@ -587,6 +596,13 @@ bool NvDlssSr::Readback(std::vector<uint8_t>& out, std::string& detail) {
     return ReadbackSlot(last_output_slot_, out, detail);
 }
 
+HANDLE NvDlssSr::SharedHandle() const {
+    if (!have_output_ || last_output_slot_ < 0 || last_output_slot_ >= kOutputSlots) {
+        return nullptr;
+    }
+    return output_handles_[last_output_slot_];
+}
+
 bool NvDlssSr::ReadbackSlot(int slot, std::vector<uint8_t>& out, std::string& detail) {
     if (!initialized_ || slot < 0 || slot >= kOutputSlots || !output11_[slot] || !context_ ||
         !device_) {
@@ -650,6 +666,10 @@ void NvDlssSr::Shutdown() {
         output11_[i].Reset();
         output12_[i].Reset();
         output_srv_[i].Reset();
+        if (output_handles_[i]) {
+            ::CloseHandle(output_handles_[i]);
+            output_handles_[i] = nullptr;
+        }
     }
     output_staging_.Reset();
     output_slot_ = 0;

@@ -1197,7 +1197,19 @@ impl Root {
                 self.toggle_row(
                     "ai.super_resolution",
                     "Super resolution",
-                    "Run DLSS on the decoded frame",
+                    "Run DLSS or FSR on the decoded frame",
+                    cx,
+                ),
+                self.seg_row(
+                    "ai.sr_model",
+                    "Backend",
+                    "FSR 4 needs an RX 6000/7000/9000; FSR 3.1.6 is cross-vendor",
+                    &[
+                        ("Auto", "auto"),
+                        ("DLSS", "dlss"),
+                        ("FSR 4", "fsr4"),
+                        ("FSR 3", "fsr3"),
+                    ],
                     cx,
                 ),
                 self.seg_int_row(
@@ -1238,6 +1250,7 @@ impl Root {
                     ],
                     cx,
                 ),
+                widgets::kv("Rendering API", "DX11 or DX12 for upscaling"),
             ],
         );
 
@@ -1247,7 +1260,7 @@ impl Root {
             .gap(px(20.0))
             .child(widgets::page_title(
                 "Upscaling",
-                "DLSS Super Resolution and DLAA",
+                "DLSS and FSR upscaling - DX11 or DX12",
             ))
             .child(sr)
             .into_any_element()
@@ -1264,7 +1277,7 @@ impl Root {
             self.seg_row(
                 "ai.fg_backend",
                 "Backend",
-                "DLSS-G needs an RTX 40/50",
+                "DLSS-G runs natively on DX12 and needs an RTX 40/50",
                 &[("None", "none"), ("DLSS-G", "dlss-fg")],
                 cx,
             ),
@@ -1304,7 +1317,11 @@ impl Root {
         let fg = group(
             "Frame generation",
             "Generated frames between decoded ones",
-            fg_rows,
+            {
+                let mut rows = fg_rows;
+                rows.push(widgets::kv("Rendering API", "DX12 only for frame generation"));
+                rows
+            },
         );
 
         div()
@@ -1313,7 +1330,7 @@ impl Root {
             .gap(px(20.0))
             .child(widgets::page_title(
                 "Frame generation",
-                "Generated frames between the decoded ones",
+                "DX12 only - generated frames between the decoded ones",
             ))
             .child(fg)
             .into_any_element()
@@ -1505,7 +1522,7 @@ impl Root {
             .gap(px(20.0))
             .child(widgets::page_title(
                 "Neural rendering",
-                "DLSS 5 Neural Rendering - video mode",
+                "DLSS 5 Neural Rendering - DX12 only",
             ))
             .child(neural)
             .child(dlss5)
@@ -1953,6 +1970,35 @@ impl Root {
                         yes_no(self.status.dlss_sr_ready),
                         yes_no(self.status.dlss_fg_ready)
                     ),
+                ),
+                widgets::kv(
+                    "FSR",
+                    format!(
+                        "SR {} / Frame Gen {}{}",
+                        yes_no(self.status.fsr_sr_ready),
+                        yes_no(self.status.fsr_fg_ready),
+                        if self.status.fsr_provider.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" ({})", self.status.fsr_provider)
+                        }
+                    ),
+                ),
+                widgets::kv(
+                    "AI surface",
+                    if self.status.dx12_surface {
+                        "DX12".to_string()
+                    } else {
+                        "D3D11 fallback".to_string()
+                    },
+                ),
+                widgets::kv(
+                    "SR backend",
+                    if self.status.sr_provider.is_empty() {
+                        self.status.sr_backend.clone()
+                    } else {
+                        format!("{} ({})", self.status.sr_backend, self.status.sr_provider)
+                    },
                 ),
                 widgets::row(
                     "Optimize for this PC",

@@ -12,6 +12,8 @@ namespace brp::next {
 struct GpuInfo {
     bool present = false;
     bool nvidia = false;
+    bool amd = false;
+    bool intel = false;
     std::string name;
     std::string driver;
     std::uint32_t vendor_id = 0;
@@ -42,6 +44,9 @@ struct SystemInfo {
     bool nr_worker = false;
     bool dlss_fg = false;
     bool dlss_fg_multi = false;
+    bool fsr_sr = false;
+    bool fsr_fg = false;
+    std::wstring fsr_dir;
     std::wstring nr_dir;
     std::wstring exe_dir;
 };

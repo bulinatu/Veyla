@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$release = Join-Path $root "build\Release"
+$release = Join-Path $root "build-perf\Release"
 $distRoot = Join-Path $root "dist"
 $dest = Join-Path $distRoot "Veyla"
 $version = $Version
@@ -33,7 +33,7 @@ function Copy-Required([string]$source, [string]$destination) {
 }
 
 if (-not (Test-Path (Join-Path $release "veyla-legacy.exe"))) {
-    throw "build\Release\veyla-legacy.exe not found. Build the Release target first."
+    throw "build-perf\Release\veyla-legacy.exe not found. Build the Release target first."
 }
 
 $running = Get-Process veyla,veyla-engine,veyla-classic,veyla-legacy,brp,brpnext,brpnext-engine -ErrorAction SilentlyContinue |
@@ -67,6 +67,29 @@ foreach ($dll in @("avcodec-63.dll", "avformat-63.dll", "avutil-61.dll",
 
 # DLSS Super Resolution feature runtime (loaded from the executable folder).
 Copy-Required (Join-Path $release "nvngx_dlss.dll") $dest
+
+# Agility SDK runtime: the engine opts in via D3D12SDKVersion/D3D12SDKPath.
+$agility = Join-Path $root "third_party\agility-sdk\x64\D3D12Core.dll"
+if (Test-Path -LiteralPath $agility) {
+    New-Item -ItemType Directory -Path (Join-Path $dest "D3D12") -Force | Out-Null
+    Copy-Item -LiteralPath $agility -Destination (Join-Path $dest "D3D12") -Force
+}
+
+# AMD FSR SDK 2.4 signed DLLs (FSR Upscaling 4.1.2/3.1.6 and Frame Generation).
+$fsr = Join-Path $root "third_party\amd-fsr\signedbin"
+if (Test-Path -LiteralPath $fsr) {
+    $fsrDest = Join-Path $dest "amd-fsr"
+    New-Item -ItemType Directory -Path $fsrDest -Force | Out-Null
+    foreach ($dll in @("amd_fidelityfx_loader_dx12.dll",
+                       "amd_fidelityfx_upscaler_dx12.dll",
+                       "amd_fidelityfx_framegeneration_dx12.dll")) {
+        Copy-Required (Join-Path $fsr $dll) $fsrDest
+    }
+    $license = Join-Path $root "third_party\amd-fsr\docs\license.md"
+    if (Test-Path -LiteralPath $license) {
+        Copy-Item -LiteralPath $license -Destination (Join-Path $fsrDest "LICENSE.md") -Force
+    }
+}
 
 # --- fonts ------------------------------------------------------------------
 $fonts = Join-Path $release "fonts"
@@ -130,8 +153,25 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 2.7.2 - standalone build
+Veyla 3.0.0 beta 1 - standalone build
 =======================================
+
+What changed in 3.0.0 beta 1
+----------------------------
+- AMD FSR is now a first-class upscaler: FSR Upscaling 4.1.2 on Radeon RX
+  6000/7000/9000 and FSR 3.1.6 everywhere else, selected from Upscaling.
+- The Watch surface is pure Direct3D 12. DLSS Super Resolution, FSR upscaling
+  and DLSS Frame Generation run in-process on the DX12 device; the old external
+  frame-generation worker and the SM86 DLL injection are gone.
+- Frame generation and neural rendering are DX12 only. Upscaling supports both
+  DX11 and DX12.
+- DLSS-G no longer has the 1440p worker cap. 2x works on RTX 40; RTX 50 can use
+  the driver's multi-frame count.
+- The Agility D3D12 runtime ships in D3D12\D3D12Core.dll, so the engine can use
+  shader model 6.6 and the newest FSR providers.
+- The FSR SDK 2.4 signed runtimes ship in amd-fsr\.
+- Frame repeats are no longer re-presented at 60 fps when the console sends
+  30 fps content.
 
 Run veyla.exe. No installer, no console window, no background service.
 

@@ -19,6 +19,9 @@ struct DecodedFrame {
     // device and rgba is empty. The view is owned by the decoder's ring and
     // stays valid across frames.
     void* gpu_view = nullptr;   // ID3D11ShaderResourceView*
+    // NT shared handle for the same texture, for a DX12 presenter. Owned by
+    // the decoder's ring, like gpu_view.
+    void* gpu_shared = nullptr;
 };
 
 enum class StreamCodec { H264, Hevc };
@@ -117,6 +120,7 @@ private:
     void* vp_stage_ = nullptr;     // ID3D11Texture2D* (RGBA staging)
     void* vp_gpu_tex_[2] = {nullptr, nullptr};
     void* vp_gpu_srv_[2] = {nullptr, nullptr};
+    void* vp_gpu_handle_[2] = {nullptr, nullptr};
     int vp_gpu_slot_ = 0;
     void* external_device_ = nullptr;   // borrowed ID3D11Device*
     void* external_context_ = nullptr;  // borrowed ID3D11DeviceContext*

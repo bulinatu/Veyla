@@ -4,6 +4,8 @@
 #include "overlay/overlay_view.h"
 #include "diagnostics/metrics.h"
 #include "media/nv_dlss_sr.h"
+#include "media/amd_fsr.h"
+#include "media/nv_dlss_fg.h"
 #include "media/nv_dlssnr.h"
 #include "media/nv_reflex.h"
 #include "media/pipeline.h"
@@ -182,6 +184,8 @@ std::wstring BackendLabel(AiBackend backend) {
         case AiBackend::DlssFg: return L"DLSS-G";
         case AiBackend::NvidiaVfg: return L"NVIDIA VFG";
         case AiBackend::DlssSr: return L"DLSS SR";
+        case AiBackend::Fsr: return L"FSR";
+        case AiBackend::FsrFg: return L"FSR FG";
         default: return L"Off";
     }
 }
@@ -445,6 +449,14 @@ int NextApp::Run() {
                 } else {
                     std::this_thread::sleep_for(std::chrono::milliseconds(4));
                 }
+            } else if (stream_dx12_ && !fg_pending_.empty()) {
+                // Native DLSS-G has a generated frame due between inputs.
+                // Wake at ~1 ms so the generated cadence is not quantised to
+                // the decoded-frame arrival.
+                if (streaming_) {
+                    streaming_->WaitForFrame(1);
+                }
+                std::this_thread::sleep_for(std::chrono::microseconds(500));
             } else if (streaming_ && !settings_.video.vsync) {
                 // Lowest-latency path: wake on the decoded frame itself and
                 // present it right away. Waiting for the swapchain's
@@ -454,6 +466,9 @@ int NextApp::Run() {
                 // throttles when the flip queue is full, and Render() only
                 // presents when something was actually drawn.
                 streaming_->WaitForFrame(2);
+            } else if (stream_dx12_ && stream_dx12_->WaitForFrame(
+                           static_cast<DWORD>(std::clamp(2000 / RefreshHz(), 8, 40)))) {
+                // vblank-aligned cadence on the DX12 surface
             } else if (ActivePresenter() && ActivePresenter()->frame_waitable()) {
                 // One iteration per vblank. A short timeout (the previous 8 ms)
                 // made the loop run twice per refresh: the second pass presented
@@ -680,12 +695,21 @@ void NextApp::Resize() {
 }
 
 void NextApp::ResizeStream() {
-    if (!watching_ || !stream_window_ || !stream_presenter_) {
+    if (!watching_ || !stream_window_) {
         return;
     }
     const int width = stream_window_->width();
     const int height = stream_window_->height();
     if (width <= 0 || height <= 0) {
+        return;
+    }
+    if (stream_dx12_) {
+        stream_dx12_->Resize(width, height);
+        redraw_needed_ = true;
+        std::fprintf(stderr, "[next] stream window %dx%d (DX12)\n", width, height);
+        return;
+    }
+    if (!stream_presenter_) {
         return;
     }
     stream_presenter_->Resize(width, height);
@@ -703,7 +727,7 @@ brp::Win32Window* NextApp::ActiveWindow() const {
 }
 
 brp::Presenter* NextApp::ActivePresenter() const {
-    if (watching_ && stream_presenter_) {
+    if (watching_) {
         return stream_presenter_.get();
     }
     return presenter_.get();
@@ -760,32 +784,46 @@ bool NextApp::EnsureStreamSurface() {
         });
         stream_window_->SetFrameMetrics(0, 0);
     }
-    if (!stream_presenter_) {
-        auto presenter = std::make_unique<brp::Presenter>();
-        brp::PresenterConfig config;
-        config.output_width = stream_window_->width();
-        config.output_height = stream_window_->height();
-        config.source_width = 1920;
-        config.source_height = 1080;
-        // VSync is the UI switch; tearing is only requested when VSync is off,
-        // which is the low-latency path for a non frame-generated stream.
-        config.vsync = settings_.video.vsync;
-        config.allow_tearing = !settings_.video.vsync;
-        config.hdr = false;
-        const bool shared = decode_device_ && decode_context_;
-        const bool ok =
-            shared ? presenter->InitWithDevice(stream_window_->hwnd(), config, decode_device_,
-                                              decode_context_)
-                   : presenter->Init(stream_window_->hwnd(), config);
-        if (!ok) {
-            Toast(L"Cannot create the stream presenter", true);
-            return false;
+    if (!stream_dx12_ && !stream_presenter_) {
+        // Watch runs on the pure DX12 surface, including native DLSS-G.
+        const bool want_dx12 = true;
+        if (want_dx12) {
+            auto dx12 = std::make_unique<brp::Dx12Video>();
+            std::string detail;
+            if (dx12->Init(stream_window_->hwnd(), stream_window_->width(),
+                           stream_window_->height(), decode_device_, detail)) {
+                stream_dx12_ = std::move(dx12);
+                redraw_needed_ = true;
+            } else {
+                std::fprintf(stderr, "[next] DX12 surface unavailable: %s\n",
+                             detail.c_str());
+            }
         }
-        presenter->SetUpscaleMode(2);
-        stream_presenter_ = std::move(presenter);
-        ApplyTargetTo(stream_presenter_.get());
-        ApplyEnhance();
-        ApplyReflex();
+        if (!stream_dx12_) {
+            auto presenter = std::make_unique<brp::Presenter>();
+            brp::PresenterConfig config;
+            config.output_width = stream_window_->width();
+            config.output_height = stream_window_->height();
+            config.source_width = 1920;
+            config.source_height = 1080;
+            config.vsync = settings_.video.vsync;
+            config.allow_tearing = !settings_.video.vsync;
+            config.hdr = false;
+            const bool shared = decode_device_ && decode_context_;
+            const bool ok =
+                shared ? presenter->InitWithDevice(stream_window_->hwnd(), config,
+                                                   decode_device_, decode_context_)
+                       : presenter->Init(stream_window_->hwnd(), config);
+            if (!ok) {
+                Toast(L"Cannot create the stream presenter", true);
+                return false;
+            }
+            presenter->SetUpscaleMode(2);
+            stream_presenter_ = std::move(presenter);
+            ApplyTargetTo(stream_presenter_.get());
+            ApplyEnhance();
+            ApplyReflex();
+        }
     }
 
     // The stream opens on the display chosen in Video > Display (index clamped
@@ -895,7 +933,8 @@ void NextApp::Frame() {
         }
     }
     if (presenter_ && (presenter_->device_lost() ||
-                       (stream_presenter_ && stream_presenter_->device_lost()))) {
+                       (stream_presenter_ && stream_presenter_->device_lost()) ||
+                       (stream_dx12_ && stream_dx12_->device_lost()))) {
         watching_ = false;
         StopDlssFg();
         StopNr();
@@ -942,12 +981,14 @@ void NextApp::Frame() {
         if (presenter_) {
             brp::Presenter* stats_presenter = ActivePresenter();
             const unsigned long long misses =
-                stats_presenter ? stats_presenter->present_misses() : 0;
+                stream_dx12_ ? stream_dx12_->present_misses()
+                             : (stats_presenter ? stats_presenter->present_misses() : 0);
             present_misses_rate_ =
                 misses >= present_misses_seen_ ? misses - present_misses_seen_ : 0;
             present_misses_seen_ = misses;
             const unsigned refresh =
-                stats_presenter ? stats_presenter->present_refresh_count() : 0;
+                stream_dx12_ ? stream_dx12_->present_refresh_count()
+                             : (stats_presenter ? stats_presenter->present_refresh_count() : 0);
             const unsigned refreshes = refresh >= present_refresh_seen_
                                            ? refresh - present_refresh_seen_
                                            : 0;
@@ -978,9 +1019,10 @@ void NextApp::Frame() {
                              loop_intervals_.Percentile(0.50), loop_p99_,
                              loop_intervals_.Max(), cadence_p50_, cadence_p99_,
                              present_refresh_hz_, present_misses_rate_,
-                             stats_presenter ? stats_presenter->present_queue() : 0,
-                             stats_presenter ? stats_presenter->present_lag_ms() : 0.0,
-                             display_rate_,
+                             stream_dx12_ ? stream_dx12_->present_queue()
+                                          : (stats_presenter ? stats_presenter->present_queue() : 0),
+                             stream_dx12_ ? stream_dx12_->present_lag_ms()
+                                          : (stats_presenter ? stats_presenter->present_lag_ms() : 0.0),                             display_rate_,
                              content_fps_, h7, h8, h9, h10, h16,
                              dlss_sr_ ? dlss_sr_->last_ms() : 0.0, sr_cpu_ms_,
                              probe.decode_ms, probe.decode_ms_max,
@@ -1021,6 +1063,18 @@ void NextApp::Render() {
     present_frame_ = false;
     const ThemeTokens& theme = ThemeFor(settings_.general.theme);
     if (watching_) {
+        if (stream_dx12_) {
+            PresentVideo();
+            if (!present_frame_) {
+                TickDlssFgDx12();
+            }
+            if (!present_frame_) {
+                return;
+            }
+            stream_dx12_->Present(settings_.video.vsync);
+            ActiveWindow()->set_hand_cursor(false);
+            return;
+        }
         brp::Presenter* video = ActivePresenter();
         const bool reflex_active =
             video && !fg_covering_ && reflex_ && reflex_->markers_enabled();
@@ -2547,11 +2601,25 @@ bool NextApp::Apply() {
     pad_rate_hz_.store(std::clamp(settings_.controller.poll_hz, 60, 1000));
     ApplyPresenterTarget();
     ApplyEnhance();
-    if (before.video.vsync != settings_.video.vsync && watching_ && stream_presenter_) {
-        // ALLOW_TEARING is a swapchain creation flag. Recreate the surface so a
-        // live vsync change (or the Lowest latency preset) takes effect now
-        // instead of on the next session.
+    const bool surface_change =
+        before.video.vsync != settings_.video.vsync ||
+        before.ai.frame_generation != settings_.ai.frame_generation;
+    if (surface_change && watching_ && (stream_presenter_ || stream_dx12_)) {
+        // ALLOW_TEARING and the surface type are creation flags. Recreate the
+        // surface so a live vsync/AI change takes effect now. The SR context is
+        // bound to the old device and must be dropped with it.
+        stream_dx12_.reset();
         stream_presenter_.reset();
+        if (dlss_fg_dx12_) {
+            dlss_fg_dx12_->Stop();
+            dlss_fg_dx12_.reset();
+        }
+        fg_pending_.clear();
+        dlss_ready_ = false;
+        dlss_failed_ = false;
+        if (dlss_sr_) {
+            dlss_sr_->Shutdown();
+        }
         EnsureStreamSurface();
         redraw_needed_ = true;
     }
@@ -2568,12 +2636,24 @@ bool NextApp::Apply() {
         if (dlss_sr_) {
             dlss_sr_->Shutdown();
         }
+        fsr_ready_ = false;
+        fsr_failed_ = false;
+        if (fsr_) {
+            fsr_->Shutdown();
+        }
     }
     if (previous_ai.frame_generation != settings_.ai.frame_generation ||
         previous_ai.fg_backend != settings_.ai.fg_backend ||
         previous_ai.fg_multiplier != settings_.ai.fg_multiplier) {
         StopDlssFg();
         dlss_fg_failed_ = false;
+        if (dlss_fg_dx12_) {
+            dlss_fg_dx12_->Stop();
+            dlss_fg_dx12_.reset();
+        }
+        fg_dx12_failed_ = false;
+        fg_dx12_reset_ = true;
+        fg_pending_.clear();
     }
     if (previous_ai.neural_render != settings_.ai.neural_render ||
         previous_ai.neural_style != settings_.ai.neural_style ||
@@ -3571,13 +3651,13 @@ void NextApp::PresentVideo() {
     if (!streaming_) {
         return;
     }
+    if (stream_dx12_) {
+        PresentVideoDx12();
+        return;
+    }
     present_frame_ = false;
     brp::Presenter* video = ActivePresenter();
 
-    const double content =
-        content_fps_ > 10.0
-            ? std::clamp(content_fps_, 24.0, 60.0)
-            : std::clamp(static_cast<double>(settings_.streaming.fps), 24.0, 240.0);
     const bool fg_mode = settings_.ai.frame_generation &&
                          settings_.ai.fg_backend == AiBackend::DlssFg &&
                          !dlss_fg_failed_;
@@ -3836,6 +3916,181 @@ void NextApp::PresentVideo() {
     present_frame_ = true;
 }
 
+bool NextApp::PresentVideoDx12() {
+    if (!streaming_ || !stream_dx12_) {
+        return false;
+    }
+    present_frame_ = false;
+    media::DecodedFrame frame;
+    const bool new_frame = PullFrame(frame);
+    if (new_frame) {
+        video_frame_ = std::move(frame);
+        have_frame_ = true;
+        EnhanceNeural(video_frame_);
+    }
+    if (!new_frame && !redraw_needed_) {
+        return false;
+    }
+    if (!have_frame_ || (video_frame_.rgba.empty() && !video_frame_.gpu_shared)) {
+        return false;
+    }
+    // A repeated console frame is not new picture: leaving the last present on
+    // screen is both cheaper and more stable than re-uploading it.
+    if (video_frame_.duplicate && !redraw_needed_) {
+        return false;
+    }
+    redraw_needed_ = false;
+
+    const int width = video_frame_.width;
+    const int height = video_frame_.height;
+    bool drawn = false;
+    HANDLE sr_handle = nullptr;
+    int sr_width = width;
+    int sr_height = height;
+    auto run_sr = [&]() -> bool {
+        if (!settings_.ai.super_resolution || video_frame_.rgba.empty()) {
+            return false;
+        }
+        const bool want_fsr = settings_.ai.sr_model == "fsr4" ||
+                              settings_.ai.sr_model == "fsr3" ||
+                              (settings_.ai.sr_model == "auto" && !system_.gpu.nvidia);
+        if (want_fsr) {
+            if (!EnsureFsr(width, height)) {
+                return false;
+            }
+            std::string detail;
+            if (!fsr_->Process(video_frame_.rgba.data(), width, height,
+                               static_cast<float>(1000.0 / std::max(1, settings_.streaming.fps)),
+                               detail)) {
+                Toast(L"FSR: " + Widen(detail), true);
+                return false;
+            }
+            sr_handle = fsr_->SharedHandle();
+            sr_width = fsr_->out_width();
+            sr_height = fsr_->out_height();
+            return sr_handle != nullptr;
+        }
+        if (!EnsureDlssSr(width, height)) {
+            return false;
+        }
+        brp::media::NvDlssSr::Frame sr_frame;
+        std::string detail;
+        const int iw = dlss_sr_->in_width();
+        const int ih = dlss_sr_->in_height();
+        const std::uint8_t* input = video_frame_.rgba.data();
+        if (iw != width || ih != height) {
+            sr_scaled_.resize(static_cast<std::size_t>(iw) * ih * 4);
+            brp::media::DownscaleRgba(video_frame_.rgba.data(), width, height,
+                                      sr_scaled_.data(), iw, ih, sr_scale_temp_);
+            input = sr_scaled_.data();
+        }
+        if (!dlss_sr_->Process(input, iw, ih, sr_frame, detail)) {
+            dlss_failed_ = true;
+            Toast(L"DLSS SR: " + Widen(detail), true);
+            return false;
+        }
+        sr_handle = dlss_sr_->SharedHandle();
+        sr_width = dlss_sr_->out_width();
+        sr_height = dlss_sr_->out_height();
+        return sr_handle != nullptr;
+    };
+
+    const bool want_fg_dx12 =
+        settings_.ai.frame_generation && settings_.ai.fg_backend == AiBackend::DlssFg &&
+        !fg_dx12_failed_;
+    if (want_fg_dx12 && !video_frame_.duplicate) {
+        const bool sr_ok = run_sr();
+        const int fg_width = sr_ok ? sr_width : width;
+        const int fg_height = sr_ok ? sr_height : height;
+        if (EnsureDlssFgDx12(fg_width, fg_height)) {
+            std::string detail;
+            const bool processed =
+                sr_ok ? dlss_fg_dx12_->ProcessShared(sr_handle, fg_width, fg_height,
+                                                     fg_dx12_reset_, detail)
+                      : dlss_fg_dx12_->Process(video_frame_.rgba.data(), fg_width,
+                                               fg_height, fg_dx12_reset_, detail);
+            if (processed) {
+                fg_dx12_reset_ = false;
+                const auto& frames = dlss_fg_dx12_->Frames();
+                if (!frames.empty()) {
+                    const double content = content_fps_ > 10.0
+                                               ? std::clamp(content_fps_, 24.0, 60.0)
+                                               : static_cast<double>(settings_.streaming.fps);
+                    const double interval = 1.0 / std::max(24.0, content);
+                    const int generated = static_cast<int>(frames.size()) - 1;
+                    for (int i = 1; i <= generated; ++i) {
+                        fg_pending_.push_back(
+                            {frames[static_cast<std::size_t>(i)].shared, true,
+                             now_ + interval * static_cast<double>(i) /
+                                        static_cast<double>(generated)});
+                    }
+                    drawn = stream_dx12_->DrawShared(frames[0].shared, fg_width,
+                                                     fg_height, video_frame_.pq);
+                }
+            } else {
+                Toast(L"DLSS-G: " + Widen(detail), true);
+            }
+        }
+    }
+    if (!drawn && !video_frame_.duplicate) {
+        if (!sr_handle) {
+            run_sr();
+        }
+        if (sr_handle) {
+            drawn = stream_dx12_->DrawShared(sr_handle, sr_width, sr_height,
+                                             video_frame_.pq);
+        }
+    }
+    if (!drawn) {
+        if (video_frame_.gpu_shared && video_frame_.rgba.empty()) {
+            drawn = stream_dx12_->DrawShared(
+                static_cast<HANDLE>(video_frame_.gpu_shared), width, height,
+                video_frame_.pq);
+        } else if (!video_frame_.rgba.empty()) {
+            drawn = stream_dx12_->DrawCpu(video_frame_.rgba.data(), width, height,
+                                          video_frame_.pq);
+        }
+    }
+    if (!drawn) {
+        if (!stream_dx12_->status().empty()) {
+            static double last_note = -1.0;
+            if (now_ - last_note > 5.0) {
+                last_note = now_;
+                Toast(Widen(stream_dx12_->status()), true);
+            }
+        }
+        return false;
+    }
+    present_frame_ = true;
+    RecordVideoShown();
+    return true;
+}
+
+bool NextApp::TickDlssFgDx12() {
+    if (!stream_dx12_ || fg_pending_.empty()) {
+        return false;
+    }
+    if (fg_pending_.front().due > now_ + 0.0005) {
+        return false;
+    }
+    const FgPending frame = fg_pending_.front();
+    fg_pending_.pop_front();
+    if (!frame.shared) {
+        return false;
+    }
+    const int width = fg_dx12_w_ > 0 ? fg_dx12_w_ : video_frame_.width;
+    const int height = fg_dx12_h_ > 0 ? fg_dx12_h_ : video_frame_.height;
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+    if (!stream_dx12_->DrawShared(frame.shared, width, height, video_frame_.pq)) {
+        return false;
+    }
+    present_frame_ = true;
+    RecordVideoShown();
+    return true;
+}
+
 bool NextApp::EnsureNr(int width, int height) {
     if (nr_failed_) {
         return false;
@@ -3994,6 +4249,11 @@ void NextApp::ToggleWatch(bool watching) {
         if (dlss_sr_) {
             dlss_sr_->Shutdown();
         }
+        if (fsr_) {
+            fsr_->Shutdown();
+        }
+        fsr_ready_ = false;
+        fsr_failed_ = false;
         dlss_ready_ = false;
         dlss_failed_ = false;
         dlss_in_w_ = 0;
@@ -4020,6 +4280,11 @@ void NextApp::ToggleWatch(bool watching) {
         have_frame_ = false;
         SetOverlayControl(false);
         StopNr();
+        if (dlss_fg_dx12_) {
+            dlss_fg_dx12_->Stop();
+            dlss_fg_dx12_.reset();
+        }
+        fg_pending_.clear();
         if (dlss_fg_) {
             dlss_fg_->Hide();
         }
@@ -4182,11 +4447,19 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
     int in_h = input_height;
     int quality = 5;
     if (!dlaa) {
-        out_w = settings_.ai.sr_output == Resolution::R2160 ? 3840 : 2560;
-        out_h = settings_.ai.sr_output == Resolution::R2160 ? 2160 : 1440;
-        if (out_w <= input_width || out_h <= input_height) {
+        if (settings_.ai.sr_output == Resolution::R2160) {
+            out_w = 3840;
+            out_h = 2160;
+        } else if (settings_.ai.sr_output == Resolution::R1440) {
             out_w = 2560;
             out_h = 1440;
+        } else if (stream_window_) {
+            out_w = std::max(stream_window_->width(), input_width);
+            out_h = std::max(stream_window_->height(), input_height);
+        }
+        if (out_w <= input_width || out_h <= input_height) {
+            out_w = input_width;
+            out_h = input_height;
         }
         static const int kPercent[6] = {33, 50, 58, 66, 77, 100};
         // NVSDK_NGX_PerfQuality_Value 4 (Ultra Quality) was retired with DLSS
@@ -4251,7 +4524,17 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
             }
             break;
     }
-    if (!dlss_sr_->Initialize(ActivePresenter()->device(), ActivePresenter()->context(), in_w,
+    ID3D11Device* sr_device =
+        decode_device_ ? decode_device_ : (ActivePresenter() ? ActivePresenter()->device() : nullptr);
+    ID3D11DeviceContext* sr_context =
+        decode_context_ ? decode_context_
+                        : (ActivePresenter() ? ActivePresenter()->context() : nullptr);
+    if (!sr_device || !sr_context) {
+        dlss_failed_ = true;
+        Toast(L"DLSS SR: no D3D11 device for the shared textures", true);
+        return false;
+    }
+    if (!dlss_sr_->Initialize(sr_device, sr_context, in_w,
                               in_h, out_w, out_h, preset, quality, detail)) {
         dlss_failed_ = true;
         std::fprintf(stderr, "[next] DLSS SR init %dx%d -> %dx%d preset %d quality %d: %s\n",
@@ -4262,6 +4545,123 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
     dlss_ready_ = true;
     dlss_in_w_ = input_width;
     dlss_in_h_ = input_height;
+    return true;
+}
+
+bool NextApp::EnsureDlssFgDx12(int width, int height) {
+    if (!settings_.ai.frame_generation ||
+        settings_.ai.fg_backend != AiBackend::DlssFg) {
+        return false;
+    }
+    if (fg_dx12_failed_) {
+        return false;
+    }
+    const int multiplier = std::clamp(settings_.ai.fg_multiplier, 2, 6);
+    if (dlss_fg_dx12_ && fg_dx12_w_ == width && fg_dx12_h_ == height &&
+        dlss_fg_dx12_->requested_multiplier() == multiplier) {
+        return true;
+    }
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+    if (dlss_fg_dx12_) {
+        dlss_fg_dx12_->Stop();
+        dlss_fg_dx12_.reset();
+    }
+    if (!system_.gpu.nvidia || !system_.dlss_fg || system_.nr_dir.empty()) {
+        fg_dx12_failed_ = true;
+        Toast(L"DLSS-G runtime missing", true);
+        return false;
+    }
+    if (!decode_device_) {
+        fg_dx12_failed_ = true;
+        Toast(L"DLSS-G needs the decode device", true);
+        return false;
+    }
+    dlss_fg_dx12_ = std::make_unique<brp::media::NvDlssFg>();
+    std::string detail;
+    if (!dlss_fg_dx12_->Start(decode_device_, system_.nr_dir, width, height, multiplier,
+                              detail)) {
+        dlss_fg_dx12_.reset();
+        fg_dx12_failed_ = true;
+        std::fprintf(stderr, "[next] native DLSS-G: %s\n", detail.c_str());
+        Toast(L"DLSS-G: " + Widen(detail), true);
+        return false;
+    }
+    fg_dx12_w_ = width;
+    fg_dx12_h_ = height;
+    fg_pending_.clear();
+    Toast(std::to_wstring(dlss_fg_dx12_->requested_multiplier()) +
+          L"x DLSS-G active (DX12)");
+    return true;
+}
+
+bool NextApp::EnsureFsr(int input_width, int input_height) {
+    if (!settings_.ai.super_resolution || !system_.fsr_sr || fsr_failed_) {
+        return false;
+    }
+    if (fsr_ready_ && fsr_in_w_ == input_width && fsr_in_h_ == input_height) {
+        return true;
+    }
+    int out_w = input_width;
+    int out_h = input_height;
+    if (settings_.ai.sr_output == Resolution::R2160) {
+        out_w = 3840;
+        out_h = 2160;
+    } else if (settings_.ai.sr_output == Resolution::R1440) {
+        out_w = 2560;
+        out_h = 1440;
+    } else if (stream_window_) {
+        // Native = the stream window (or the fullscreen scanout) size.
+        out_w = std::max(stream_window_->width(), input_width);
+        out_h = std::max(stream_window_->height(), input_height);
+    }
+    if (settings_.ai.sr_quality >= 5) {
+        out_w = input_width;
+        out_h = input_height;
+    }
+    if (!fsr_) {
+        fsr_ = std::make_unique<brp::media::AmdFsr>();
+    }
+    if (!fsr_->runtime_loaded()) {
+        std::string detail;
+        if (!fsr_->LoadRuntime(system_.fsr_dir, detail)) {
+            fsr_failed_ = true;
+            std::fprintf(stderr, "[next] FSR runtime: %s\n", detail.c_str());
+            Toast(L"FSR runtime: " + Widen(detail), true);
+            return false;
+        }
+    }
+    brp::media::AmdFsr::Variant variant = brp::media::AmdFsr::Variant::Auto;
+    if (settings_.ai.sr_model == "fsr4") {
+        variant = brp::media::AmdFsr::Variant::Fsr4;
+    } else if (settings_.ai.sr_model == "fsr3") {
+        variant = brp::media::AmdFsr::Variant::Fsr3;
+    }
+    ID3D11Device* sr_device =
+        decode_device_ ? decode_device_
+                       : (ActivePresenter() ? ActivePresenter()->device() : nullptr);
+    ID3D11DeviceContext* sr_context =
+        decode_context_ ? decode_context_
+                        : (ActivePresenter() ? ActivePresenter()->context() : nullptr);
+    if (!sr_device || !sr_context) {
+        fsr_failed_ = true;
+        Toast(L"FSR: no D3D11 device for the adapter", true);
+        return false;
+    }
+    std::string detail;
+    if (!fsr_->Initialize(sr_device, sr_context, input_width, input_height, out_w, out_h,
+                          variant, false, detail)) {
+        fsr_failed_ = true;
+        std::fprintf(stderr, "[next] FSR init %dx%d -> %dx%d: %s\n", input_width,
+                     input_height, out_w, out_h, detail.c_str());
+        Toast(L"FSR: " + Widen(detail), true);
+        return false;
+    }
+    fsr_ready_ = true;
+    fsr_in_w_ = input_width;
+    fsr_in_h_ = input_height;
+    fsr_provider_ = fsr_->provider();
     return true;
 }
 
@@ -4632,16 +5032,27 @@ void NextApp::PublishBridgeStatus() {
     number("shown_fps", static_cast<double>(display_rate_), true);
     number("age_ms", last_age_ms_, true);
     number("present_lag_ms",
-           ActivePresenter() ? ActivePresenter()->present_lag_ms() : 0.0, true);
+           stream_dx12_ ? stream_dx12_->present_lag_ms()
+                        : (ActivePresenter() ? ActivePresenter()->present_lag_ms() : 0.0),
+           true);
     number("input_ms", streaming_ ? streaming_->InputResponseMs() : 0.0, true);
     number("input_avg_ms",
            streaming_ ? streaming_->InputResponseAvgMs() : 0.0, true);
     flag("restart_pending", stream_restart_pending_, true);
-    number("sr_ms", dlss_sr_ ? dlss_sr_->last_ms() : 0.0, true);
-    number("fg_ms", 0.0, true);
+    number("sr_ms", dlss_sr_ ? dlss_sr_->last_ms() : (fsr_ ? fsr_->last_ms() : 0.0), true);
+    number("fg_ms", dlss_fg_dx12_ ? dlss_fg_dx12_->last_ms()
+                                  : (dlss_fg_ ? dlss_fg_->process_ms() : 0.0),
+           true);
     flag("dlss_fg_ready", system_.dlss_fg, true);
     flag("dlss_fg_multi", system_.dlss_fg_multi, true);
     flag("dlss_sr_ready", system_.dlss_sr, true);
+    flag("fsr_sr_ready", system_.fsr_sr, true);
+    flag("fsr_fg_ready", system_.fsr_fg, true);
+    flag("dx12_surface", stream_dx12_ != nullptr, true);
+    text("sr_backend", settings_.ai.sr_model, true);
+    text("fg_backend", std::string(ToString(settings_.ai.fg_backend)), true);
+    text("sr_provider", fsr_provider_.empty() ? (dlss_ready_ ? "DLSS" : "") : fsr_provider_, true);
+    text("fsr_provider", fsr_provider_, true);
     flag("nr_runtime", system_.nr_worker, true);
     flag("nr_ready", nr_ready_, true);
     number("nr_ms", nr_ms_, true);

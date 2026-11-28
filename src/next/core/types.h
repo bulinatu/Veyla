@@ -45,6 +45,8 @@ enum class AiBackend {
     None,
     DlssSr,
     DlssFg,
+    Fsr,
+    FsrFg,
     NvidiaVfg,
 };
 
@@ -118,6 +120,8 @@ inline std::string_view ToString(AiBackend backend) {
         case AiBackend::None: return "none";
         case AiBackend::DlssSr: return "dlss-sr";
         case AiBackend::DlssFg: return "dlss-fg";
+        case AiBackend::Fsr: return "fsr";
+        case AiBackend::FsrFg: return "fsr-fg";
         case AiBackend::NvidiaVfg: return "nvidia-vfg";
     }
     return "none";

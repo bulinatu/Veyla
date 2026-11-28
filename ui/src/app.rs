@@ -155,6 +155,8 @@ pub struct Root {
     pub(crate) psn_redirect: String,
     pub(crate) setup_field: Option<SetupField>,
     pub(crate) consoles_rev: u64,
+    /// Ticks between always-on-top sweeps.
+    topmost_ticks: u8,
     /// Message from a failed self-update, read once at startup.
     pub(crate) update_failure: Option<String>,
     /// Pending "Delete" confirmation for a saved profile: (profile id, when
@@ -270,6 +272,14 @@ impl Root {
                     this.devices_rev = devices_rev;
                     let profiles_changed = profiles_rev != this.profiles_rev;
                     this.profiles_rev = profiles_rev;
+                    // A launcher must never cover other applications. Something
+                    // in the presentation path can set WS_EX_TOPMOST; sweep it
+                    // about once a second so it cannot stick.
+                    this.topmost_ticks = this.topmost_ticks.wrapping_add(1);
+                    if this.topmost_ticks >= 8 {
+                        this.topmost_ticks = 0;
+                        crate::overlay::clear_topmost("Veyla");
+                    }
                     if consoles_rev != this.consoles_rev {
                         this.consoles_rev = consoles_rev;
                         cx.notify();
@@ -470,6 +480,7 @@ impl Root {
             psn_redirect: String::new(),
             setup_field: None,
             consoles_rev: 0,
+            topmost_ticks: 0,
             update_failure: take_update_failure(),
             profile_delete_cooldown: None,
             applied_rev: 0,
@@ -574,7 +585,12 @@ impl Root {
             devices.gpus.first().cloned().unwrap_or_default()
         };
         let nvidia = gpu.to_lowercase().contains("nvidia");
-        let sr_ok = nvidia && self.status.dlss_sr_ready;
+        let amd = {
+            let lower = gpu.to_lowercase();
+            lower.contains("amd") || lower.contains("radeon") || lower.contains("rx ")
+        };
+        let sr_ok = (nvidia && self.status.dlss_sr_ready) ||
+            ((amd || !nvidia) && self.status.fsr_sr_ready);
         let fg_ok = nvidia && self.status.dlss_fg_ready;
         let nr_ok = self.status.nr_runtime;
         let hd_plus = height >= 1300;
@@ -619,6 +635,13 @@ impl Root {
         settings.set_int("controller.poll_hz", 1000);
         settings.set_int("audio.buffer_ms", 10);
 
+        let sr_model = if nvidia {
+            "dlss"
+        } else if amd {
+            "fsr4"
+        } else {
+            "fsr3"
+        };
         // Frame generation costs one generated frame of input latency. On
         // Wi-Fi that is the difference the user feels, so Optimize keeps it off
         // there and leaves the toggle to whoever prefers smoothness.
@@ -629,7 +652,7 @@ impl Root {
             settings.set_int("ai.fg_multiplier", 2);
             settings.set_bool("ai.super_resolution", sr_ok);
             if sr_ok {
-                settings.set_str("ai.sr_model", "dlss");
+                settings.set_str("ai.sr_model", sr_model);
                 if hd_plus {
                     // SR 1440p fills the worker. NR still fits, but only with
                     // Boost (work scale 75 % = a 1080p network) and one pass:
@@ -658,9 +681,14 @@ impl Root {
         } else if sr_ok {
             settings.set_bool("ai.frame_generation", false);
             settings.set_bool("ai.super_resolution", true);
-            settings.set_str("ai.sr_model", "dlss");
-            settings.set_str("ai.sr_output", "native");
-            settings.set_int("ai.sr_quality", 5);
+            settings.set_str("ai.sr_model", sr_model);
+            if nvidia {
+                settings.set_str("ai.sr_output", "native");
+                settings.set_int("ai.sr_quality", 5);
+            } else {
+                settings.set_str("ai.sr_output", if hd_plus { "1440p" } else { "native" });
+                settings.set_int("ai.sr_quality", 4);
+            }
             settings.set_bool("ai.neural_render", nr_ok);
         } else {
             settings.set_bool("ai.frame_generation", false);
@@ -675,7 +703,13 @@ impl Root {
         let ai = if fg_ok && !wifi {
             "DLSS-G 2x"
         } else if sr_ok {
-            "DLSS SR"
+            if nvidia {
+                "DLSS SR"
+            } else if amd {
+                "FSR 4 SR"
+            } else {
+                "FSR 3 SR"
+            }
         } else {
             "no AI"
         };
@@ -911,7 +945,7 @@ impl Root {
                     .gap(px(2.0))
                     .flex_shrink_0()
                     .child(window_button("min", "\u{2013}", false, |window| window.minimize_window()))
-                    .child(window_button("max", "\u{25A2}", false, |window| window.zoom_window()))
+                    .child(window_button("max", "\u{25A2}", false, |window| toggle_maximize(window)))
                     .child(window_button("close", "\u{2715}", true, |window| window.remove_window())),
             )
             .into_any_element()
@@ -1722,6 +1756,37 @@ pub(crate) fn restore_shell_window() {
             SetForegroundWindow(hwnd);
             crate::overlay::clear_topmost("Veyla");
         }
+    }
+}
+
+/// gpui 0.2 only sends SW_MAXIMIZE, so a second click would do nothing. Restore
+/// through Win32 instead of zooming again.
+fn toggle_maximize(window: &mut Window) {
+    if window.is_maximized() {
+        if let Some(hwnd) = shell_hwnd() {
+            unsafe {
+                ShowWindow(hwnd, 9); // SW_RESTORE
+            }
+        }
+    } else {
+        window.zoom_window();
+    }
+}
+
+fn shell_hwnd() -> Option<isize> {
+    let title: Vec<u16> = "Veyla\0".encode_utf16().collect();
+    unsafe {
+        let me = GetCurrentProcessId();
+        let mut hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
+        while hwnd != 0 {
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid == me {
+                return Some(hwnd);
+            }
+            hwnd = FindWindowExW(0, hwnd, std::ptr::null(), title.as_ptr());
+        }
+        None
     }
 }
 

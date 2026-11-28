@@ -128,6 +128,8 @@ GpuInfo ProbeGpu() {
         info.device_id = desc.DeviceId;
         info.vram_mb = static_cast<std::uint64_t>(desc.DedicatedVideoMemory) / (1024 * 1024);
         info.nvidia = desc.VendorId == 0x10DE;
+        info.amd = desc.VendorId == 0x1002;
+        info.intel = desc.VendorId == 0x8086;
         info.driver = ProbeDriverVersion();
         break;
     }
@@ -201,6 +203,28 @@ SystemInfo ProbeSystem() {
             info.dlss_fg = std::filesystem::exists(candidate / "nvngx_dlssg.dll", ec);
             info.dlss_fg_multi =
                 std::filesystem::exists(candidate / "fg" / "winmm.dll", ec);
+            break;
+        }
+    }
+
+    // AMD FSR SDK 2.4: loader + upscaler + frame generation signed DLLs.
+    std::vector<std::filesystem::path> fsr_candidates;
+    fsr_candidates.push_back(dir / "amd-fsr");
+    fsr_candidates.push_back(dir / ".." / "third_party" / "amd-fsr" / "signedbin");
+    fsr_candidates.push_back(dir / "third_party" / "amd-fsr" / "signedbin");
+    if (!cwd_ec) {
+        fsr_candidates.push_back(cwd / "third_party" / "amd-fsr" / "signedbin");
+    }
+    for (const auto& candidate : fsr_candidates) {
+        if (std::filesystem::exists(candidate / "amd_fidelityfx_loader_dx12.dll", ec) &&
+            std::filesystem::exists(candidate / "amd_fidelityfx_upscaler_dx12.dll", ec)) {
+            std::error_code abs_ec;
+            const std::filesystem::path absolute =
+                std::filesystem::absolute(candidate, abs_ec);
+            info.fsr_dir = (abs_ec ? candidate : absolute).wstring();
+            info.fsr_sr = true;
+            info.fsr_fg = std::filesystem::exists(
+                candidate / "amd_fidelityfx_framegeneration_dx12.dll", ec);
             break;
         }
     }

@@ -37,9 +37,9 @@ if ($baseline -ne "" -and -not (Test-Path -LiteralPath $baseline)) {
 }
 if (-not (Test-Path -LiteralPath $new)) { throw "New folder not found: $new" }
 
-$updateExe = Join-Path $root "build\Release\brp_update.exe"
+$updateExe = Join-Path $root "build-perf\Release\brp_update.exe"
 if (-not (Test-Path -LiteralPath $updateExe)) {
-    throw "build\Release\brp_update.exe missing. Build the brp_update target first."
+    throw "build-perf\Release\brp_update.exe missing. Build the brp_update target first."
 }
 
 $temp = Join-Path $env:TEMP ("brp_patch_" + [guid]::NewGuid().ToString("N"))

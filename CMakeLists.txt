@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.25)
-project(BetterRemotePlay VERSION 2.7.2 LANGUAGES CXX)
+project(BetterRemotePlay VERSION 3.0.0 LANGUAGES CXX)
+# The display/update string for the beta. The numeric project version stays
+# 3.0.0 so packaging and the delta keep the usual shape.
+set(BRP_APP_VERSION_STRING "3.0.0-beta1")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -12,6 +15,10 @@ endif()
 add_library(brp_media STATIC
     src/platform/win32_window.cpp
     src/media/pipeline.cpp
+    src/media/dx12_video.cpp
+    src/media/amd_fsr.cpp
+    src/media/nv_dlss_fg.cpp
+    src/media/nv_of.cpp
     src/media/nv_vfx.cpp
     src/media/nv_dlss_sr.cpp
     src/media/nv_dlssnr.cpp
@@ -19,7 +26,13 @@ add_library(brp_media STATIC
     src/media/rgba_scale.cpp
 )
 target_include_directories(brp_media PUBLIC src)
-target_include_directories(brp_media PRIVATE third_party/nvidia-ngx/include)
+target_include_directories(brp_media PUBLIC third_party/nvidia-of)
+target_include_directories(brp_media PRIVATE
+    third_party/agility-sdk/include
+    third_party/amd-fsr/api/include
+    third_party/amd-fsr/upscalers/include
+    third_party/amd-fsr/framegeneration/include
+    third_party/nvidia-ngx/include)
 target_compile_definitions(brp_media PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
 target_link_libraries(brp_media PUBLIC d3d11 dxgi d3dcompiler d3d12 dwmapi)
 
@@ -29,6 +42,27 @@ endif()
 
 add_executable(brp-bench tools/brp-bench/main.cpp)
 target_link_libraries(brp-bench PRIVATE brp_media)
+
+add_executable(dx12_video_probe tools/dx12_video_probe/main.cpp)
+target_link_libraries(dx12_video_probe PRIVATE brp_media)
+target_compile_options(dx12_video_probe PRIVATE /Zi)
+target_link_options(dx12_video_probe PRIVATE /DEBUG)
+
+add_executable(dx12_dlss_probe tools/dx12_dlss_probe/main.cpp)
+target_link_libraries(dx12_dlss_probe PRIVATE brp_media)
+target_include_directories(dx12_dlss_probe PRIVATE third_party/nvidia-ngx/include)
+target_compile_options(dx12_dlss_probe PRIVATE /Zi)
+target_link_options(dx12_dlss_probe PRIVATE /DEBUG)
+
+add_executable(dx12_fsr_probe tools/dx12_fsr_probe/main.cpp)
+target_link_libraries(dx12_fsr_probe PRIVATE brp_media)
+target_compile_options(dx12_fsr_probe PRIVATE /Zi)
+target_link_options(dx12_fsr_probe PRIVATE /DEBUG)
+
+add_executable(dlssg_native_probe tools/dlssg_native_probe/main.cpp)
+target_link_libraries(dlssg_native_probe PRIVATE brp_media)
+target_compile_options(dlssg_native_probe PRIVATE /Zi)
+target_link_options(dlssg_native_probe PRIVATE /DEBUG)
 
 if (MSVC)
     target_compile_options(brp-bench PRIVATE /W4 /permissive- /utf-8)
@@ -304,7 +338,7 @@ add_library(brp_next_core STATIC
     src/next/ui/theme.cpp
 )
 target_include_directories(brp_next_core PUBLIC src/next)
-    target_compile_definitions(brp_next_core PRIVATE BRP_APP_VERSION="${PROJECT_VERSION}")
+    target_compile_definitions(brp_next_core PRIVATE BRP_APP_VERSION="${BRP_APP_VERSION_STRING}")
 target_compile_definitions(brp_next_core PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
 if (MSVC)
     target_compile_options(brp_next_core PRIVATE /W4 /permissive- /utf-8)

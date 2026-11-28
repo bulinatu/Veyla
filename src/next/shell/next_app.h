@@ -6,6 +6,7 @@
 #include "audio/audio_engine.h"
 #include "core/models.h"
 #include "media/decoder.h"
+#include "media/dx12_video.h"
 #include "overlay/overlay_window.h"
 #include "platform/gamepad.h"
 #include "platform/system_info.h"
@@ -34,6 +35,8 @@ namespace ui {
 class Renderer;
 }
 namespace media {
+class AmdFsr;
+class NvDlssFg;
 class NvDlssSr;
 class NvDlssnr;
 class NvReflex;
@@ -61,6 +64,7 @@ private:
     bool EnsureStreamSurface();
     brp::Win32Window* ActiveWindow() const;
     brp::Presenter* ActivePresenter() const;
+    bool PresentVideoDx12();
     void ApplyTargetTo(brp::Presenter* presenter) const;
     void ApplyEnhance();
     void Frame();
@@ -88,6 +92,9 @@ private:
     void ToggleWatch(bool watching);
     bool OpenAudio();
     bool EnsureDlssSr(int input_width, int input_height);
+    bool EnsureFsr(int input_width, int input_height);
+    bool EnsureDlssFgDx12(int width, int height);
+    bool TickDlssFgDx12();
     bool EnsureDlssFg(int width, int height);
     void StopDlssFg();
     void RecordVideoShown();
@@ -131,6 +138,7 @@ private:
     void ApplyReflex();
     std::unique_ptr<brp::Win32Window> stream_window_;
     std::unique_ptr<brp::Presenter> stream_presenter_;
+    std::unique_ptr<brp::Dx12Video> stream_dx12_;
     std::unique_ptr<brp::ui::Renderer> renderer_;
     std::unique_ptr<AppHost> host_;
     std::shared_ptr<StreamingService> streaming_;
@@ -191,6 +199,23 @@ private:
     HHOOK keyboard_hook_ = nullptr;
     std::wstring audio_note_;
     std::unique_ptr<brp::media::NvDlssSr> dlss_sr_;
+    std::unique_ptr<brp::media::AmdFsr> fsr_;
+    bool fsr_ready_ = false;
+    bool fsr_failed_ = false;
+    int fsr_in_w_ = 0;
+    int fsr_in_h_ = 0;
+    std::string fsr_provider_;
+    std::unique_ptr<brp::media::NvDlssFg> dlss_fg_dx12_;
+    bool fg_dx12_failed_ = false;
+    int fg_dx12_w_ = 0;
+    int fg_dx12_h_ = 0;
+    bool fg_dx12_reset_ = true;
+    struct FgPending {
+        HANDLE shared = nullptr;
+        bool generated = false;
+        double due = 0.0;
+    };
+    std::deque<FgPending> fg_pending_;
     std::unique_ptr<brp::media::NvReflex> reflex_;
     int reflex_applied_ = -1;
     bool reflex_failed_ = false;

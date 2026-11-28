@@ -46,6 +46,8 @@ AiBackend ReadBackend(const FlatMap& flat, const std::string& key, AiBackend fal
     if (value == "none") return AiBackend::None;
     if (value == "dlss-sr") return AiBackend::DlssSr;
     if (value == "dlss-fg") return AiBackend::DlssFg;
+    if (value == "fsr") return AiBackend::Fsr;
+    if (value == "fsr-fg") return AiBackend::FsrFg;
     if (value == "nvidia-vfg") return AiBackend::NvidiaVfg;
     return fallback;
 }
@@ -115,6 +117,10 @@ void AppSettings::Validate(std::vector<std::string>& warnings,
     if (ai.sr_preset < 0 || ai.sr_preset > 4) {
         errors.push_back("ai.dlss_preset must be 0..4");
     }
+    if (ai.sr_model != "auto" && ai.sr_model != "dlss" && ai.sr_model != "fsr4" &&
+        ai.sr_model != "fsr3") {
+        errors.push_back("ai.sr_model must be auto, dlss, fsr4 or fsr3");
+    }
     if (ai.fg_multiplier < 2 || ai.fg_multiplier > 6) {
         errors.push_back("ai.fg_multiplier must be 2..6");
     }
@@ -152,18 +158,9 @@ void AppSettings::Validate(std::vector<std::string>& warnings,
         errors.push_back("gpu.frame_buffers must be 1..4");
     }
 
-    if (ai.frame_generation && ai.fg_backend == AiBackend::DlssFg &&
-        ai.super_resolution && ai.sr_output == Resolution::R2160) {
-        warnings.push_back(
-            "the DLSS-G worker is capped at 1440p; SR 2160p cannot feed it");
-    }
     if (ai.super_resolution && ai.sr_output == Resolution::R2160 &&
         video.output == Resolution::R1080) {
         warnings.push_back("super resolution is 2160p but the output is 1080p");
-    }
-    if (ai.super_resolution && ai.fg_backend == AiBackend::DlssFg &&
-        ai.sr_model != "dlss") {
-        warnings.push_back("DLSS Frame Generation expects the DLSS SR chain");
     }
     if (!ai.super_resolution && ai.sr_output != Resolution::Native) {
         warnings.push_back("super resolution output is set while SR is off");

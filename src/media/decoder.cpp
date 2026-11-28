@@ -16,6 +16,8 @@ extern "C" {
 #include <thread>
 
 #include <d3d11.h>
+#include <dxgi1_6.h>
+#include <wrl/client.h>
 #include <libavutil/hwcontext_d3d11va.h>
 
 namespace brp::media {
@@ -465,6 +467,12 @@ void Decoder::ReleaseVideoProcessor() {
             texture = nullptr;
         }
     }
+    for (auto& handle : vp_gpu_handle_) {
+        if (handle) {
+            ::CloseHandle(handle);
+            handle = nullptr;
+        }
+    }
     vp_gpu_slot_ = 0;
     if (vp_stage_) {
         static_cast<ID3D11Texture2D*>(vp_stage_)->Release();
@@ -591,9 +599,12 @@ bool Decoder::ConvertWithVideoProcessor(const void* frame_ptr, DecodedFrame& out
             return false;
         }
         // Two GPU-resident targets for the AI-off path. The presenter samples
-        // these directly, so the picture never returns to system memory.
+        // these directly, so the picture never returns to system memory. The
+        // NT handle lets the DX12 surface sample the same texture without a
+        // copy.
         D3D11_TEXTURE2D_DESC gd = od;
         gd.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        gd.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
         for (int i = 0; i < 2; ++i) {
             hr = dev->device->CreateTexture2D(
                 &gd, nullptr, reinterpret_cast<ID3D11Texture2D**>(&vp_gpu_tex_[i]));
@@ -607,6 +618,15 @@ bool Decoder::ConvertWithVideoProcessor(const void* frame_ptr, DecodedFrame& out
             if (FAILED(hr) || !vp_gpu_srv_[i]) {
                 ReleaseVideoProcessor();
                 return false;
+            }
+            Microsoft::WRL::ComPtr<IDXGIResource1> dxgi;
+            if (SUCCEEDED(reinterpret_cast<ID3D11Texture2D*>(vp_gpu_tex_[i])
+                              ->QueryInterface(IID_PPV_ARGS(&dxgi)))) {
+                HANDLE handle = nullptr;
+                if (SUCCEEDED(dxgi->CreateSharedHandle(nullptr, GENERIC_ALL, nullptr,
+                                                       &handle))) {
+                    vp_gpu_handle_[i] = handle;
+                }
             }
         }
         vp_gpu_slot_ = 0;
@@ -707,6 +727,7 @@ bool Decoder::ConvertWithVideoProcessor(const void* frame_ptr, DecodedFrame& out
         out.content_hash = 0;
         out.duplicate = false;
         out.gpu_view = vp_gpu_srv_[gpu_slot];
+        out.gpu_shared = vp_gpu_handle_[gpu_slot];
         vp_gpu_slot_ = (gpu_slot + 1) & 1;
         out.width = out_w;
         out.height = out_h;
@@ -718,6 +739,7 @@ bool Decoder::ConvertWithVideoProcessor(const void* frame_ptr, DecodedFrame& out
     }
 
     out.gpu_view = nullptr;
+    out.gpu_shared = nullptr;
     auto* immediate = static_cast<ID3D11DeviceContext*>(vp_immediate_);
     immediate->CopyResource(stage, out_tex);
     D3D11_MAPPED_SUBRESOURCE mapped{};
@@ -848,6 +870,7 @@ bool Decoder::Convert(const void* frame_ptr, DecodedFrame& out) {
     int dst_linesize[4] = {source->width * 4, 0, 0, 0};
     sws_scale(Sws(scaler_), source->data, source->linesize, 0, source->height, dst, dst_linesize);
     out.gpu_view = nullptr;
+    out.gpu_shared = nullptr;
     out.content_hash = SampleFrameHash(out.rgba.data(), out.width, out.height);
     out.duplicate = have_content_hash_ && out.content_hash == last_content_hash_;
     last_content_hash_ = out.content_hash;

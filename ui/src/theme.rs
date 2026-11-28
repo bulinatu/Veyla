@@ -40,6 +40,8 @@ pub struct Palette {
     pub accent_deep: u32,
     pub pink: u32,
     pub cyan: u32,
+    /// Top of the backdrop gradient, a very dark tint of the palette.
+    pub wash: u32,
     /// Aurora blob colours, back to front.
     pub blobs: [u32; 6],
 }
@@ -51,6 +53,7 @@ pub const PALETTES: [Palette; 6] = [
         accent_deep: 0x4F46E5,
         pink: 0xF472B6,
         cyan: 0x22D3EE,
+        wash: 0x160B33,
         blobs: [0x7C3AED, 0x4F46E5, 0xDB2777, 0x0891B2, 0xA855F7, 0x6D28D9],
     },
     Palette {
@@ -59,6 +62,7 @@ pub const PALETTES: [Palette; 6] = [
         accent_deep: 0x1D4ED8,
         pink: 0x38BDF8,
         cyan: 0x22D3EE,
+        wash: 0x0B1A3A,
         blobs: [0x1D4ED8, 0x0369A1, 0x0EA5E9, 0x22D3EE, 0x2563EB, 0x1E3A8A],
     },
     Palette {
@@ -67,6 +71,7 @@ pub const PALETTES: [Palette; 6] = [
         accent_deep: 0x047857,
         pink: 0x5EEAD4,
         cyan: 0x22D3EE,
+        wash: 0x06251D,
         blobs: [0x059669, 0x047857, 0x0D9488, 0x22D3EE, 0x34D399, 0x065F46],
     },
     Palette {
@@ -75,6 +80,7 @@ pub const PALETTES: [Palette; 6] = [
         accent_deep: 0xC2410C,
         pink: 0xF87171,
         cyan: 0xFBBF24,
+        wash: 0x2A1005,
         blobs: [0xEA580C, 0xC2410C, 0xDC2626, 0xF59E0B, 0xFB923C, 0x9A3412],
     },
     Palette {
@@ -83,6 +89,7 @@ pub const PALETTES: [Palette; 6] = [
         accent_deep: 0xBE185D,
         pink: 0xF9A8D4,
         cyan: 0xFB7185,
+        wash: 0x2A0A1A,
         blobs: [0xDB2777, 0xBE185D, 0xE11D48, 0xF472B6, 0xEC4899, 0x831843],
     },
     Palette {
@@ -91,6 +98,7 @@ pub const PALETTES: [Palette; 6] = [
         accent_deep: 0x334155,
         pink: 0x94A3B8,
         cyan: 0x38BDF8,
+        wash: 0x0D1420,
         blobs: [0x334155, 0x1E293B, 0x475569, 0x0EA5E9, 0x64748B, 0x0F172A],
     },
 ];

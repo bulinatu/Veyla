@@ -67,3 +67,8 @@ third_party/neuralscreen/
 
 # Rust build output
 ui/target/
+
+# FSR signed runtimes (downloaded with the AMD FSR SDK 2.4 package)
+third_party/amd-fsr/signedbin/
+# D3D12 debug layer (dev only; D3D12Core.dll is shipped)
+third_party/agility-sdk/x64/d3d12SDKLayers.dll

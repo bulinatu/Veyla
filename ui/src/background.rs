@@ -106,9 +106,9 @@ fn blob_stack(blob: &Blob) -> Div {
     // melts into the backdrop over half the radius instead of showing a
     // stack of hard concentric edges. That soft shoulder is what the eye
     // reads as blur.
-    const STEPS: usize = 44;
-    const SHOULDER: f32 = 0.58;
-    let peak = (blob.alpha as f32 / 255.0) * 3.6;
+    const STEPS: usize = 72;
+    const SHOULDER: f32 = 0.78;
+    let peak = (blob.alpha as f32 / 255.0) * 3.2;
     let mut prev = 0.0f32;
     for step in 0..STEPS {
         let s = (step + 1) as f32 / STEPS as f32;
@@ -168,7 +168,7 @@ pub fn aurora(animated: bool, reduce_motion: bool) -> AnyElement {
     root = root.child(
         div().absolute().size_full().bg(gpui::linear_gradient(
             155.0,
-            gpui::linear_color_stop(rgba(0x160B33FF), 0.0),
+            gpui::linear_color_stop(rgba((theme::palette().wash << 8) | 0xFF), 0.0),
             gpui::linear_color_stop(rgba(0x050509FF), 1.0),
         )),
     );

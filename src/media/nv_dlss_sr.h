@@ -62,6 +62,11 @@ public:
     bool runtime_loaded() const { return runtime_loaded_; }
     bool ready() const { return feature_ != nullptr; }
     double last_ms() const { return last_ms_; }
+    // NT shared handle for the last returned DX11 output texture. The DX12
+    // surface opens it and samples it without a readback.
+    HANDLE SharedHandle() const;
+    int SharedWidth() const { return out_width_; }
+    int SharedHeight() const { return out_height_; }
     int in_width() const { return in_width_; }
     int in_height() const { return in_height_; }
     int out_width() const { return out_width_; }
@@ -119,6 +124,7 @@ private:
     static constexpr int kOutputSlots = 2;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> output11_[kOutputSlots];
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> output_srv_[kOutputSlots];
+    HANDLE output_handles_[kOutputSlots] = {nullptr, nullptr};
     Microsoft::WRL::ComPtr<ID3D12Resource> output12_[kOutputSlots];
     int output_slot_ = 0;
     int last_output_slot_ = 0;

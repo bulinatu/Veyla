@@ -4,6 +4,15 @@
 
 #include <string_view>
 
+// Agility SDK opt-in. The engine creates the DX12 device, so the exports live
+// here; D3D12\D3D12Core.dll ships next to the executable. This is what makes
+// shader model 6.6 (and therefore FSR 4) available independently of the inbox
+// runtime.
+extern "C" {
+__declspec(dllexport) extern const UINT D3D12SDKVersion = 620;
+__declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\";
+}
+
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR command_line, int) {
     // This is a latency-sensitive client, not an idle desktop app: keep it out
     // of Windows' background execution throttling and give its threads a fair
