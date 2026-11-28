@@ -20,6 +20,7 @@
 #include <d3d11.h>
 #include <d3d11_4.h>
 #include <iphlpapi.h>
+#include <icmpapi.h>
 #include <netioapi.h>
 #include <mmsystem.h>
 #include <shellapi.h>
@@ -77,7 +78,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"3.0.0-beta9";
+constexpr wchar_t kVersion[] = L"3.0.0-beta10";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
@@ -100,6 +101,32 @@ std::string JsonEscape(const std::string& text) {
 // Type of the adapter that carries the default route. Wi-Fi and Ethernet need
 // different bitrates: 100 Mbps over the air queues up in the access point and
 // shows up as input delay, which is the one thing this app must not add.
+int PingMs(const std::string& host) {
+    IN_ADDR address{};
+    address.S_un.S_addr = ::inet_addr(host.c_str());
+    if (address.S_un.S_addr == INADDR_NONE) {
+        return -1;
+    }
+    HANDLE icmp = ::IcmpCreateFile();
+    if (icmp == INVALID_HANDLE_VALUE) {
+        return -1;
+    }
+    char payload[32] = {};
+    unsigned char reply[sizeof(ICMP_ECHO_REPLY) + 32 + 8] = {};
+    const DWORD count = ::IcmpSendEcho(icmp, address.S_un.S_addr, payload,
+                                       sizeof(payload), nullptr, reply, sizeof(reply),
+                                       1000);
+    int ms = -1;
+    if (count > 0) {
+        const auto* echo = reinterpret_cast<const ICMP_ECHO_REPLY*>(reply);
+        if (echo->Status == IP_SUCCESS) {
+            ms = static_cast<int>(echo->RoundTripTime);
+        }
+    }
+    ::IcmpCloseHandle(icmp);
+    return ms;
+}
+
 std::string NetworkLinkName() {
     IN_ADDR dest{};
     dest.S_un.S_addr = 0x08080808;  // 8.8.8.8; used for routing only, no packet
@@ -4379,7 +4406,8 @@ void NextApp::StartPadThread() {
     pad_thread_ = std::thread([this]() {
         using Clock = std::chrono::steady_clock;
         Clock::time_point last_haptics = Clock::now();
-        Clock::time_point last_wifi = Clock::now() - std::chrono::seconds(30);
+        Clock::time_point last_wifi = Clock::now() - std::chrono::seconds(5);
+        Clock::time_point last_ping = Clock::now() - std::chrono::seconds(5);
         bool haptics_on = false;
         DWORD task_index = 0;
         HANDLE mmcss = ::AvSetMmThreadCharacteristicsW(L"Games", &task_index);
@@ -4405,7 +4433,7 @@ void NextApp::StartPadThread() {
             // thread and log only material changes, so a drop can be matched to
             // a signal/rate event without spamming the file.
             const auto wifi_now = Clock::now();
-            if (wifi_now - last_wifi > std::chrono::seconds(30)) {
+            if (wifi_now - last_wifi > std::chrono::seconds(5)) {
                 last_wifi = wifi_now;
                 const WifiInfo info = ProbeWifi();
                 bool changed = false;
@@ -4415,12 +4443,22 @@ void NextApp::StartPadThread() {
                               info.rssi_dbm != wifi_.rssi_dbm ||
                               info.channel != wifi_.channel ||
                               info.rx_rate_kbps != wifi_.rx_rate_kbps ||
-                              info.tx_rate_kbps != wifi_.tx_rate_kbps;
+                              info.tx_rate_kbps != wifi_.tx_rate_kbps ||
+                              info.error != wifi_.error ||
+                              info.source != wifi_.source;
                     wifi_ = info;
                 }
-                if (changed) {
+                // While streaming, keep a 5 s time series: a drop needs the
+                // signal at that moment, not just when it changed.
+                if (changed || info.connected) {
                     LogDebug(FormatWifi(info));
                 }
+            }
+            if (streaming_ && streaming_->Connected() &&
+                wifi_now - last_ping > std::chrono::seconds(5)) {
+                last_ping = wifi_now;
+                const std::string host = streaming_->Profile().host;
+                ping_ms_.store(host.empty() ? -1 : PingMs(host));
             }
             if (streaming_ && streaming_->Connected()) {
                 streaming_->SendController(pad_.snapshot());
@@ -4872,9 +4910,9 @@ void NextApp::ConnectStream() {
             std::lock_guard<std::mutex> lock(wifi_mutex_);
             wifi_ = wifi;
         }
-        if (wifi.connected) {
-            LogInfo(FormatWifi(wifi));
-        }
+        // Always log the probe result: "not connected" with a reason is as
+        // useful as a full association line when Wi-Fi telemetry fails.
+        LogInfo(FormatWifi(wifi));
         const std::string fg =
             settings_.ai.frame_generation
                 ? std::string(ToString(settings_.ai.fg_backend))
@@ -5089,14 +5127,16 @@ void NextApp::PublishBridgeStatus() {
             line, sizeof(line),
             "present: state=%s connected=%d, source %.1f fps, shown %d fps, "
             "loss %.2f%%, drops %d, decode %.1f/%.1f ms, age %.1f ms, "
-            "cadence %.1f/%.1f ms, misses %llu/s, link=%s, input %.1f/%.1f ms",
+            "cadence %.1f/%.1f ms, misses %llu/s, link=%s, input %.1f/%.1f ms, "
+            "ping=%dms",
             stream.state.c_str(), stream.connected ? 1 : 0, stream.source_fps,
             display_rate_, stream.loss_percent, stream.decoder_drops,
             stream.decode_ms, stream.decode_ms_max, last_age_ms_, cadence_p50_,
             cadence_p99_, present_misses_rate_,
             link_type_.empty() ? "unknown" : link_type_.c_str(),
             streaming_ ? streaming_->InputResponseMs() : 0.0,
-            streaming_ ? streaming_->InputResponseAvgMs() : 0.0);
+            streaming_ ? streaming_->InputResponseAvgMs() : 0.0,
+            ping_ms_.load());
         LogDebug(line);
     }
     std::string json;

@@ -18,6 +18,9 @@ struct WifiInfo {
     int rx_rate_kbps = 0;
     int tx_rate_kbps = 0;
     int channel = 0;
+    // Diagnostics when the WLAN API cannot report the association.
+    std::string error;
+    std::string source;  // wlanapi / ifentry
 };
 
 WifiInfo ProbeWifi();

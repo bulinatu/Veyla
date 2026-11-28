@@ -96,6 +96,16 @@ private:
     std::string pairing_message_;
     session::Streaming::StreamStats stats_{};
     std::chrono::steady_clock::time_point last_stats_{};
+    // Session totals: the disconnect summary is the quickest way to see what a
+    // whole run looked like without reading every second.
+    double session_seconds_ = 0.0;
+    long long session_frames_ = 0;
+    long long session_lost_ = 0;
+    long long session_drops_ = 0;
+    double session_kbps_sum_ = 0.0;
+    int session_fps_min_ = 0;
+    int session_fps_max_ = 0;
+    int session_fps_samples_ = 0;
     // Drop/stutter warnings are throttled so a bad second does not fill the log.
     std::chrono::steady_clock::time_point last_warn_{};
     std::filesystem::path next_path_;

@@ -775,6 +775,20 @@ bool Streaming::TakeNewestFrame(media::DecodedFrame& out) {
     return true;
 }
 
+void Streaming::NoteLoss() {
+    const auto now = std::chrono::steady_clock::now();
+    const double seconds =
+        std::chrono::duration<double>(now - started_).count();
+    // Lost packets are the air link's fault, not a slow producer. A deeper
+    // queue gives RUDP retransmits time to land instead of presenting a gap.
+    buffer_target_.store(std::min(3, std::max(1, buffer_target_.load()) + 1));
+    ordered_target_.store(std::min(3, ordered_target_.load() + 1));
+    last_drop_ = seconds;
+    last_ordered_drop_ = seconds;
+    last_recovery_ = seconds;
+    last_ordered_recovery_ = seconds;
+}
+
 bool Streaming::TakeFrameNow(media::DecodedFrame& out) {
     std::lock_guard<std::mutex> lock(frame_mutex_);
     if (frames_.empty()) {

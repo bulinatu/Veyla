@@ -262,6 +262,7 @@ private:
     int stats_ticks_ = 0;  // presentation stats line every ~5 s at Debug
     WifiInfo wifi_;        // latest WLAN association, refreshed by the pad thread
     std::mutex wifi_mutex_;
+    std::atomic<int> ping_ms_{-1};  // ICMP RTT to the console, every ~5 s
     double bridge_status_at_ = -1.0;
     bool publish_devices_ = false;
     bool overlay_pause_fg_ = false;

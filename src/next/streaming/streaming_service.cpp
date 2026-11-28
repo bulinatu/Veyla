@@ -171,6 +171,14 @@ Status StreamingService::Connect(const ConsoleSettings& console) {
         message_ = "Connecting to " + profile.host;
         stats_ = {};
         last_stats_ = std::chrono::steady_clock::now();
+        session_seconds_ = 0.0;
+        session_frames_ = 0;
+        session_lost_ = 0;
+        session_drops_ = 0;
+        session_kbps_sum_ = 0.0;
+        session_fps_min_ = 0;
+        session_fps_max_ = 0;
+        session_fps_samples_ = 0;
     }
     connecting_.store(true);
     connect_thread_ = std::thread([this, profile]() {
@@ -223,10 +231,32 @@ void StreamingService::Disconnect() {
         streaming_.state() != session::StreamState::Idle || connecting_.load();
     JoinConnect();
     streaming_.Stop();
+    std::string summary;
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (was_active && session_seconds_ > 0.5 && session_frames_ > 0) {
+            char line[360] = {};
+            const double avg_fps =
+                static_cast<double>(session_frames_) / session_seconds_;
+            const double lost_pct =
+                100.0 * static_cast<double>(session_lost_) /
+                static_cast<double>(session_frames_);
+            const double avg_mbps =
+                session_kbps_sum_ / std::max(1.0, session_seconds_) / 1000.0;
+            std::snprintf(
+                line, sizeof(line),
+                "stream: summary %.0fs, %lld frames, %.1f fps avg (min %d, max %d), "
+                "%lld lost (%.2f%%), %lld drops, %.1f Mbps avg",
+                session_seconds_, session_frames_, avg_fps, session_fps_min_,
+                session_fps_max_, session_lost_, lost_pct, session_drops_,
+                avg_mbps);
+            summary = line;
+        }
         message_ = "Disconnected";
         stats_ = {};
+    }
+    if (!summary.empty()) {
+        LogInfo(summary);
     }
     if (was_active) {
         LogInfo("stream: disconnected");
@@ -374,10 +404,26 @@ void StreamingService::Poll() {
     if (streaming_.state() == session::StreamState::Streaming &&
         now - last_stats_ > std::chrono::seconds(1)) {
         const session::Streaming::StreamStats stats = streaming_.ConsumeStats();
+        const double fps = stats.elapsed > 0.0 ? stats.frames / stats.elapsed : 0.0;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             stats_ = stats;
             last_stats_ = now;
+            session_seconds_ += stats.elapsed;
+            session_frames_ += stats.frames;
+            session_lost_ += stats.lost;
+            session_drops_ += stats.buffer_drops;
+            session_kbps_sum_ += stats.kbps;
+            if (stats.frames > 0) {
+                const int fps_i = static_cast<int>(fps + 0.5);
+                if (session_fps_samples_ == 0 || fps_i < session_fps_min_) {
+                    session_fps_min_ = fps_i;
+                }
+                if (fps_i > session_fps_max_) {
+                    session_fps_max_ = fps_i;
+                }
+                ++session_fps_samples_;
+            }
             if (message_ == "Waiting for the first frame" && stats.frames > 0) {
                 message_ = "Streaming";
             }
@@ -386,7 +432,6 @@ void StreamingService::Poll() {
         // drop counter the presentation path relies on. A degraded second is
         // repeated at Warning (throttled) so it is visible on the default level
         // too.
-        const double fps = stats.elapsed > 0.0 ? stats.frames / stats.elapsed : 0.0;
         const double lost_pct =
             stats.frames > 0
                 ? 100.0 * static_cast<double>(stats.lost) / stats.frames
@@ -400,6 +445,9 @@ void StreamingService::Poll() {
             stats.queue, stats.buffer, stats.buffer_drops, stats.arrival_ms,
             stats.arrival_outliers, stats.kbps);
         LogDebug(line);
+        if (stats.lost > 0) {
+            streaming_.NoteLoss();
+        }
         // Outliers are normal on Wi-Fi and the buffer absorbs them; warning on
         // every burst made the log look broken while the picture was fine. Warn
         // only when frames were actually lost/dropped, decode stalled, or the
