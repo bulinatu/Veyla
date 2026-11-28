@@ -38,8 +38,12 @@ public:
     NvDlssFg& operator=(const NvDlssFg&) = delete;
 
     // feature_dir contains nvngx_dlssg.dll (and usually nvngx.dll).
+    // shared_device12 is the D3D12 device NGX was already initialized with by
+    // DLSS SR. NGX has one global init per process; without sharing the device
+    // the second Init fails with OutOfDate.
     bool Start(ID3D11Device* device, const std::wstring& feature_dir, int width,
-               int height, int multiplier, std::string& detail);
+               int height, int multiplier, std::string& detail,
+               ID3D12Device* shared_device12 = nullptr);
     void Stop();
 
     // Uploads RGBA, evaluates the feature and waits for the GPU. Frames() is
@@ -54,10 +58,12 @@ public:
     // Global screen-space motion in pixels (current minus previous). Video has
     // no engine motion vectors; a global estimate still lets the generator
     // interpolate pans instead of repeating the real frame.
-    void SetGlobalMotion(float dx, float dy) {
+    void SetGlobalMotion(float dx, float dy, bool reliable = true) {
         motion_x_ = dx;
         motion_y_ = dy;
+        interpolation_ok_ = reliable;
     }
+    bool interpolation_enabled() const { return interpolation_ok_; }
 
     const std::vector<Frame>& Frames() const { return frames_; }
     int width() const { return width_; }
@@ -69,6 +75,7 @@ public:
     int requested_multiplier() const { return requested_multiplier_; }
     int actual_generated() const { return generated_; }
     bool available() const { return feature_ != nullptr; }
+    bool HasOpticalFlow() const { return of_ != nullptr; }
     const std::string& status() const { return status_; }
     double last_ms() const { return last_ms_; }
 
@@ -96,6 +103,7 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D12Device> device12_;
+    ID3D12Device* shared_device12_ = nullptr;
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> queue_;
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator_;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> list_;
@@ -124,6 +132,7 @@ private:
     D3D12_GPU_DESCRIPTOR_HANDLE motion_gpu_{};
     float motion_x_ = 0.0f;
     float motion_y_ = 0.0f;
+    bool interpolation_ok_ = true;
     ID3D12Resource* motion_source_ = nullptr;
     Microsoft::WRL::ComPtr<ID3D12Resource> real_;
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> generated_tex_;

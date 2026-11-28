@@ -1,4 +1,5 @@
 #include "media/nv_dlss_fg.h"
+#include "media/ngx_state.h"
 
 #include <algorithm>
 #include <chrono>
@@ -77,13 +78,15 @@ NvDlssFg::~NvDlssFg() {
 }
 
 bool NvDlssFg::Start(ID3D11Device* device, const std::wstring& feature_dir, int width,
-                     int height, int multiplier, std::string& detail) {
+                     int height, int multiplier, std::string& detail,
+                     ID3D12Device* shared_device12) {
     Stop();
     if (!device || width <= 0 || height <= 0) {
         detail = "DLSS-G needs a device and a frame size";
         return false;
     }
     device_ = device;
+    shared_device12_ = shared_device12;
     width_ = width;
     height_ = height;
     multiplier_ = std::clamp(multiplier, 2, 6);
@@ -183,9 +186,9 @@ bool NvDlssFg::Start(ID3D11Device* device, const std::wstring& feature_dir, int 
         of_failed_ = true;
     }
     if (std::getenv("VEYLA_NVOF") == nullptr) {
-        // The driver's D3D12 optical-flow command list is not stable in this
-        // process yet; keep it behind an opt-in until the Close failure is
-        // resolved. Native DLSS-G itself runs fine with flat motion.
+        // The driver's D3D12 optical-flow command list still fails to Close on
+        // this runtime. Keep it opt-in for development; the global estimate is
+        // the production fallback.
         of_.reset();
         of_failed_ = true;
     }
@@ -214,7 +217,14 @@ bool NvDlssFg::EnsureDevice(std::string& detail) {
                      desc.VendorId);
     }
     HRESULT created = E_FAIL;
-    if (adapter) {
+    // NGX is already initialized by DLSS SR on one D3D12 device. Reuse that
+    // exact device: NGX rejects a second Init with a different device.
+    ID3D12Device* existing =
+        shared_device12_ ? shared_device12_ : NgxInitializedDevice();
+    if (existing) {
+        device12_ = existing;
+        created = S_OK;
+    } else if (adapter) {
         const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_12_1,
                                             D3D_FEATURE_LEVEL_12_0,
                                             D3D_FEATURE_LEVEL_11_0};
@@ -258,22 +268,26 @@ bool NvDlssFg::EnsureCore(std::string& detail) {
     common.PathListInfo.Length = 1;
     const std::wstring app_dir = ExeDirectory();
     NVSDK_NGX_Result result = NVSDK_NGX_Result_Fail;
-    if (api_->init_project) {
-        result = api_->init_project(
-            "veyla", NVSDK_NGX_ENGINE_TYPE_CUSTOM, "3.0", app_dir.c_str(),
-            device12_.Get(), &common, NVSDK_NGX_Version_API);
-        if (NVSDK_NGX_FAILED(result)) {
-            std::fprintf(stderr, "[dlssg] Init_with_ProjectID 0x%X, trying Init\n",
-                         static_cast<unsigned>(result));
+    const bool already_initialized = NgxInitialized();
+    if (!already_initialized) {
+        if (api_->init_project) {
+            result = api_->init_project(
+                "veyla", NVSDK_NGX_ENGINE_TYPE_CUSTOM, "3.0", app_dir.c_str(),
+                device12_.Get(), &common, NVSDK_NGX_Version_API);
+            if (NVSDK_NGX_FAILED(result)) {
+                std::fprintf(stderr, "[dlssg] Init_with_ProjectID 0x%X, trying Init\n",
+                             static_cast<unsigned>(result));
+            }
         }
-    }
-    if (NVSDK_NGX_FAILED(result)) {
-        result = api_->init(kAppId, app_dir.c_str(), device12_.Get(), &common,
-                            NVSDK_NGX_Version_API);
-    }
-    if (NVSDK_NGX_FAILED(result)) {
-        detail = "NGX Init for DLSS-G failed (0x" + std::to_string(result) + ")";
-        return false;
+        if (NVSDK_NGX_FAILED(result)) {
+            result = api_->init(kAppId, app_dir.c_str(), device12_.Get(), &common,
+                                NVSDK_NGX_Version_API);
+        }
+        if (NVSDK_NGX_FAILED(result)) {
+            detail = "NGX Init for DLSS-G failed (0x" + std::to_string(result) + ")";
+            return false;
+        }
+        MarkNgxInitialized(device12_.Get());
     }
     NVSDK_NGX_Parameter* params = nullptr;
     if (NVSDK_NGX_FAILED(api_->get_cap(&params)) || !params) {
@@ -702,7 +716,9 @@ bool NvDlssFg::Evaluate(bool reset, std::string& detail) {
     params->Set("DLSSG.CameraPinholeOffsetY", 0.0f);
     params->Set("DLSSG.UI", static_cast<ID3D12Resource*>(nullptr));
     params->Set("DLSSG.MvecDilated", 0u);
-    params->Set("DLSSG.OutputDisableInterpolation", 0u);
+    // The shell repeats the real frame when the estimate is unreliable; the
+    // flag also asks the runtime not to warp a generated frame if one is used.
+    params->Set("DLSSG.OutputDisableInterpolation", interpolation_ok_ ? 0u : 1u);
     params->Set("DLSSG.NotRenderingGameFrames", 0u);
     params->Set("DLSSG.DynamicResolution", 0u);
     // Global motion is expressed in pixels; tell the runtime the scale.

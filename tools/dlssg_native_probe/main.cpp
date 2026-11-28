@@ -66,6 +66,8 @@ int main(int argc, char** argv) {
                  : L"C:\\Users\\Cosmin\\Desktop\\BetterRemotePlay\\dist\\Veyla\\nr\\native";
     const int multiplier = argc > 2 ? std::atoi(argv[2]) : 2;
     const bool shared_mode = argc > 3 && std::string(argv[3]) == "shared";
+    const bool zero_motion = argc > 4 && std::string(argv[4]) == "zero";
+    const bool no_interp = argc > 5 && std::string(argv[5]) == "nointerp";
 
     Microsoft::WRL::ComPtr<ID3D11Device> d3d11;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
@@ -161,8 +163,15 @@ int main(int argc, char** argv) {
         }
         auto rgba = Frame(1920, 1080, tick);
         // The test pattern moves the bar 12 px per tick; feed the same global
-        // motion the shell estimates for a video pan.
-        fg.SetGlobalMotion(12.0f, 0.0f);
+        // motion the shell estimates for a video pan. "zero" leaves the field
+        // empty so the runtime's own OFA has to estimate the motion.
+        if (zero_motion) {
+            if (no_interp) {
+                fg.SetGlobalMotion(0.0f, 0.0f, false);
+            }
+        } else {
+            fg.SetGlobalMotion(12.0f, 0.0f, !no_interp);
+        }
         bool processed = false;
         if (shared_mode) {
             const int slot = tick & 1;
@@ -189,6 +198,10 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "DrawShared: %s\n", video.status().c_str());
                 tick = 100000;
                 break;
+            }
+            if (!frame.generated && tick == 59) {
+                video.CaptureToBmp(
+                    "C:\\Users\\Cosmin\\AppData\\Local\\Temp\\opencode\\dlssg_native_probe_prev.bmp");
             }
             if (tick == 60 && !frame.generated) {
                 video.CaptureToBmp("C:\\Users\\Cosmin\\AppData\\Local\\Temp\\opencode\\dlssg_native_probe.bmp");

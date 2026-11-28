@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 project(BetterRemotePlay VERSION 3.0.0 LANGUAGES CXX)
 # The display/update string for the beta. The numeric project version stays
 # 3.0.0 so packaging and the delta keep the usual shape.
-set(BRP_APP_VERSION_STRING "3.0.0-beta13")
+set(BRP_APP_VERSION_STRING "3.0.0-beta14")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,6 +18,7 @@ add_library(brp_media STATIC
     src/media/dx12_video.cpp
     src/media/amd_fsr.cpp
     src/media/nv_dlss_fg.cpp
+src/media/ngx_state.cpp
     src/media/nv_of.cpp
     src/media/nv_vfx.cpp
     src/media/nv_dlss_sr.cpp

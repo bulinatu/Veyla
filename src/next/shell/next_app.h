@@ -90,6 +90,11 @@ private:
     bool PullFrameRaw(media::DecodedFrame& out);
     void StartPadThread();
     void StopPadThread();
+    // Development only (VEYLA_DEV_PAD): overlays a synthetic pad state for a
+    // few seconds so the camera can be moved without touching the user's
+    // controller. Never active in a normal launch.
+    void SetPadOverride(float rx, float ry, std::uint32_t buttons, double seconds);
+    void ApplyPadOverride(brp::PadState& state);
     void ToggleWatch(bool watching);
     bool OpenAudio();
     bool EnsureDlssSr(int input_width, int input_height);
@@ -173,6 +178,11 @@ private:
     std::atomic<bool> pad_run_{false};
     std::atomic<int> haptic_strength_{3};
     std::atomic<int> pad_rate_hz_{250};
+    std::mutex pad_override_mutex_;
+    float pad_override_rx_ = 0.0f;
+    float pad_override_ry_ = 0.0f;
+    std::uint32_t pad_override_buttons_ = 0;
+    double pad_override_until_ = -1.0;
     media::DecodedFrame video_frame_;
     bool have_frame_ = false;
     double video_phase_ = 0.0;
@@ -262,7 +272,12 @@ private:
     int stats_ticks_ = 0;  // presentation stats line every ~5 s at Debug
     double fg_process_ms_sum_ = 0.0;
     double fg_motion_ms_sum_ = 0.0;
+    double fg_timing_start_ = 0.0;
     int fg_timing_samples_ = 0;
+    double motion_shift_sum_ = 0.0;
+    double motion_shift_max_ = 0.0;
+    int motion_bad_ = 0;
+    int motion_samples_ = 0;
     WifiInfo wifi_;        // latest WLAN association, refreshed by the pad thread
     std::mutex wifi_mutex_;
     // Global screen-space motion for DLSS-G, estimated from consecutive frames.
@@ -270,7 +285,8 @@ private:
     std::vector<std::uint8_t> motion_prev_;
     int motion_w_ = 0;
     int motion_h_ = 0;
-    void UpdateGlobalMotion(int width, int height, int out_width, int out_height);
+    void UpdateGlobalMotion(int width, int height, int out_width, int out_height,
+                            bool apply_vector);
     std::atomic<int> ping_ms_{-1};  // ICMP RTT to the console, every ~5 s
     double bridge_status_at_ = -1.0;
     bool publish_devices_ = false;

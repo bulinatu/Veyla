@@ -79,7 +79,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"3.0.0-beta13";
+constexpr wchar_t kVersion[] = L"3.0.0-beta14";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
@@ -4089,10 +4089,19 @@ bool NextApp::PresentVideoDx12() {
         const int fg_width = sr_ok ? sr_width : width;
         const int fg_height = sr_ok ? sr_height : height;
         if (EnsureDlssFgDx12(fg_width, fg_height)) {
-            // Video has no engine motion vectors: estimate a global screen
-            // shift so the generator interpolates pans instead of repeating.
+            // Video has no engine motion vectors. Measure only how far the
+            // frame moved: a slow pan can be interpolated by DLSS-G's own
+            // optical flow, a fast one cannot and repeats the real frame.
             const auto motion_start = std::chrono::steady_clock::now();
-            UpdateGlobalMotion(width, height, fg_width, fg_height);
+            // DLSS-G's own optical-flow accelerator handles camera pans and
+            // independently moving objects far better than one screen-wide
+            // vector. Feed an empty field and let the runtime estimate the
+            // motion; the global estimate stays as a development fallback.
+            if (std::getenv("VEYLA_FG_GLOBAL") != nullptr) {
+                UpdateGlobalMotion(width, height, fg_width, fg_height, true);
+            } else {
+                UpdateGlobalMotion(width, height, fg_width, fg_height, false);
+            }
             const auto process_start = std::chrono::steady_clock::now();
             std::string detail;
             const bool processed =
@@ -4107,15 +4116,31 @@ bool NextApp::PresentVideoDx12() {
             fg_process_ms_sum_ +=
                 std::chrono::duration<double, std::milli>(process_end - process_start)
                     .count();
+            if (fg_timing_samples_ == 0) {
+                fg_timing_start_ = now_;
+            }
             if (++fg_timing_samples_ >= 60) {
+                const double span = std::max(0.001, now_ - fg_timing_start_);
                 LogPrintf(LogLevel::Info,
-                          "dlssg: process %.1f ms, motion %.1f ms, generated %d",
+                          "dlssg: process %.1f ms, motion %.1f ms, %.1f fps, "
+                          "shown %.1f fps, generated %d, interp %d, shift %.1f/%.1f px, "
+                          "bad %d/%d",
                           fg_process_ms_sum_ / fg_timing_samples_,
                           fg_motion_ms_sum_ / fg_timing_samples_,
-                          dlss_fg_dx12_->actual_generated());
+                          fg_timing_samples_ / span,
+                          static_cast<double>(display_rate_),
+                          dlss_fg_dx12_->actual_generated(),
+                          dlss_fg_dx12_->interpolation_enabled() ? 1 : 0,
+                          motion_samples_ > 0 ? motion_shift_sum_ / motion_samples_ : 0.0,
+                          motion_shift_max_, motion_bad_, motion_samples_);
                 fg_process_ms_sum_ = 0.0;
                 fg_motion_ms_sum_ = 0.0;
+                fg_timing_start_ = now_;
                 fg_timing_samples_ = 0;
+                motion_shift_sum_ = 0.0;
+                motion_shift_max_ = 0.0;
+                motion_bad_ = 0;
+                motion_samples_ = 0;
             }
             if (processed) {
                 fg_dx12_reset_ = false;
@@ -4126,9 +4151,18 @@ bool NextApp::PresentVideoDx12() {
                                                : static_cast<double>(settings_.streaming.fps);
                     const double interval = 1.0 / std::max(24.0, content);
                     const int generated = static_cast<int>(frames.size()) - 1;
+                    // When the motion is too fast for a clean interpolation,
+                    // repeat the real frame at the generated slot. The output
+                    // cadence stays 2x, but no warped frame is shown.
+                    const bool interpolate =
+                        dlss_fg_dx12_->interpolation_enabled();
                     for (int i = 1; i <= generated; ++i) {
+                        const HANDLE handle =
+                            interpolate
+                                ? frames[static_cast<std::size_t>(i)].shared
+                                : frames[0].shared;
                         fg_pending_.push_back(
-                            {frames[static_cast<std::size_t>(i)].shared, true,
+                            {handle, true,
                              now_ + interval * static_cast<double>(i) /
                                         static_cast<double>(generated)});
                     }
@@ -4423,6 +4457,32 @@ void NextApp::ToggleWatch(bool watching) {
     }
 }
 
+void NextApp::SetPadOverride(float rx, float ry, std::uint32_t buttons,
+                            double seconds) {
+    std::lock_guard<std::mutex> lock(pad_override_mutex_);
+    pad_override_rx_ = rx;
+    pad_override_ry_ = ry;
+    pad_override_buttons_ = buttons;
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    pad_override_until_ =
+        std::chrono::duration<double>(now).count() + std::max(0.0, seconds);
+}
+
+void NextApp::ApplyPadOverride(brp::PadState& state) {
+    std::lock_guard<std::mutex> lock(pad_override_mutex_);
+    if (pad_override_until_ < 0.0) {
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    if (std::chrono::duration<double>(now).count() >= pad_override_until_) {
+        pad_override_until_ = -1.0;
+        return;
+    }
+    state.rx = pad_override_rx_;
+    state.ry = pad_override_ry_;
+    state.buttons |= pad_override_buttons_;
+}
+
 void NextApp::StartPadThread() {
     if (pad_run_.load()) {
         return;
@@ -4491,7 +4551,9 @@ void NextApp::StartPadThread() {
                 ping_ms_.store(host.empty() ? -1 : PingMs(host));
             }
             if (streaming_ && streaming_->Connected()) {
-                streaming_->SendController(pad_.snapshot());
+                brp::PadState sent = pad_.snapshot();
+                ApplyPadOverride(sent);
+                streaming_->SendController(sent);
                 brp::PadConsoleFeedback feedback = streaming_->Feedback();
                 uint16_t left = 0;
                 uint16_t right = 0;
@@ -4696,12 +4758,12 @@ bool NextApp::EnsureDlssSr(int input_width, int input_height) {
 }
 
 void NextApp::UpdateGlobalMotion(int width, int height, int out_width,
-                                 int out_height) {
+                                 int out_height, bool apply_vector) {
     if (!dlss_fg_dx12_ || video_frame_.rgba.empty() || width < 32 ||
         height < 32 || out_width <= 0 || out_height <= 0) {
         return;
     }
-    const int lw = std::min(480, width);
+    const int lw = std::min(320, width);
     const int lh = std::max(16, height * lw / width);
     if (motion_w_ != lw || motion_h_ != lh) {
         motion_w_ = lw;
@@ -4723,6 +4785,7 @@ void NextApp::UpdateGlobalMotion(int width, int height, int out_width,
     }
     if (motion_prev_.size() != motion_low_.size()) {
         motion_prev_ = motion_low_;
+        dlss_fg_dx12_->SetGlobalMotion(0.0f, 0.0f, true);
         return;
     }
     auto sad = [&](int dx, int dy, int stride) -> long long {
@@ -4744,22 +4807,23 @@ void NextApp::UpdateGlobalMotion(int width, int height, int out_width,
         const int minimum = (lw * lh) / (stride * stride * 8);
         return samples >= minimum ? (sum * 1000) / samples : (1LL << 60);
     };
+    const long long zero_score = sad(0, 0, 2);
     int best_dx = 0;
     int best_dy = 0;
     long long best = 1LL << 62;
     for (int dy = -4; dy <= 4; ++dy) {
         for (int dx = -4; dx <= 4; ++dx) {
-            const long long score = sad(dx * 2, dy * 2, 2);
+            const long long score = sad(dx * 3, dy * 3, 3);
             if (score < best) {
                 best = score;
-                best_dx = dx * 2;
-                best_dy = dy * 2;
+                best_dx = dx * 3;
+                best_dy = dy * 3;
             }
         }
     }
     for (int dy = -2; dy <= 2; ++dy) {
         for (int dx = -2; dx <= 2; ++dx) {
-            const long long score = sad(best_dx + dx, best_dy + dy, 1);
+            const long long score = sad(best_dx + dx, best_dy + dy, 2);
             if (score < best) {
                 best = score;
                 best_dx += dx;
@@ -4769,8 +4833,28 @@ void NextApp::UpdateGlobalMotion(int width, int height, int out_width,
     }
     const float sx = static_cast<float>(best_dx) * width / lw;
     const float sy = static_cast<float>(best_dy) * height / lh;
-    dlss_fg_dx12_->SetGlobalMotion(sx * out_width / width,
-                                   sy * out_height / height);
+    const float out_dx = sx * out_width / width;
+    const float out_dy = sy * out_height / height;
+    const float shift = std::sqrt(out_dx * out_dx + out_dy * out_dy);
+    // OFA handles a slow pan well, but a fast pan exceeds what the generator
+    // can interpolate without ghosting. A static or slow frame is safe; a fast
+    // pan or a cut the search cannot explain is not.
+    const bool reliable =
+        shift < 10.0f && (zero_score < 2000 || best < zero_score * 9 / 10);
+    motion_shift_sum_ += shift;
+    if (shift > motion_shift_max_) {
+        motion_shift_max_ = shift;
+    }
+    if (!reliable) {
+        ++motion_bad_;
+    }
+    ++motion_samples_;
+    if (apply_vector) {
+        dlss_fg_dx12_->SetGlobalMotion(out_dx, out_dy, reliable);
+    } else {
+        // OFA estimates the field itself; only the reliability flag is used.
+        dlss_fg_dx12_->SetGlobalMotion(0.0f, 0.0f, reliable);
+    }
     motion_prev_ = motion_low_;
 }
 
@@ -4782,6 +4866,11 @@ bool NextApp::EnsureDlssFgDx12(int width, int height) {
     if (settings_.ai.SrWantsFsr(system_.gpu.nvidia)) {
         // DLSS-G is only valid next to DLSS SR. The UI blocks the pair, but a
         // config from an older build must not reach the generator either.
+        return false;
+    }
+    if (!settings_.ai.super_resolution) {
+        // Frame generation is defined as a companion to DLSS SR; without the
+        // upscaler the generator has no shared input and must stay off.
         return false;
     }
     if (fg_dx12_failed_) {
@@ -4812,7 +4901,8 @@ bool NextApp::EnsureDlssFgDx12(int width, int height) {
     dlss_fg_dx12_ = std::make_unique<brp::media::NvDlssFg>();
     std::string detail;
     if (!dlss_fg_dx12_->Start(decode_device_, system_.nr_dir, width, height, multiplier,
-                              detail)) {
+                              detail,
+                              dlss_sr_ ? dlss_sr_->device12() : nullptr)) {
         dlss_fg_dx12_.reset();
         fg_dx12_failed_ = true;
         LogPrintf(LogLevel::Warning, "[next] native DLSS-G: %s", detail.c_str());
@@ -4822,6 +4912,8 @@ bool NextApp::EnsureDlssFgDx12(int width, int height) {
     fg_dx12_w_ = width;
     fg_dx12_h_ = height;
     fg_pending_.clear();
+    LogPrintf(LogLevel::Info, "[next] native DLSS-G %dx at %dx%d",
+              dlss_fg_dx12_->requested_multiplier(), width, height);
     Toast(std::to_wstring(dlss_fg_dx12_->requested_multiplier()) +
           L"x DLSS-G active (DX12)");
     return true;
@@ -5070,7 +5162,25 @@ void NextApp::DisconnectStream() {
 }
 
 void NextApp::HandleBridgeCommand(const std::string& command) {
-    if (command == "connect") {
+    if (command.rfind("pad_test ", 0) == 0 &&
+        std::getenv("VEYLA_DEV_PAD") != nullptr) {
+        // Development harness: pad_test <rx> <ry> <seconds> <button-mask>
+        float rx = 0.0f;
+        float ry = 0.0f;
+        double seconds = 0.0;
+        unsigned buttons = 0;
+        if (std::sscanf(command.c_str() + 9, "%f %f %lf %u", &rx, &ry, &seconds,
+                        &buttons) >= 3) {
+            SetPadOverride(std::clamp(rx, -1.0f, 1.0f),
+                           std::clamp(ry, -1.0f, 1.0f), buttons, seconds);
+            LogPrintf(LogLevel::Info,
+                      "dev pad: rx=%.2f ry=%.2f buttons=0x%X for %.1f s", rx, ry,
+                      buttons, seconds);
+        }
+    } else if (command == "pad_release" &&
+               std::getenv("VEYLA_DEV_PAD") != nullptr) {
+        SetPadOverride(0.0f, 0.0f, 0u, 0.0);
+    } else if (command == "connect") {
         if (!streaming_ || !streaming_->Connected()) {
             ConnectStream();
         }

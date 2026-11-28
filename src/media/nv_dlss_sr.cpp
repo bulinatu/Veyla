@@ -1,4 +1,5 @@
 #include "media/nv_dlss_sr.h"
+#include "media/ngx_state.h"
 
 #include <dxgi.h>
 #include <dxgi1_2.h>
@@ -165,9 +166,19 @@ bool NvDlssSr::EnsureDevice(std::string& detail) {
         detail = "cannot resolve the D3D11 adapter";
         return false;
     }
-    const HRESULT hr =
-        D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device12_));
-    if (FAILED(hr)) {
+    // Prefer the highest feature level so the same device can also host the
+    // native DLSS-G feature.
+    HRESULT created = E_FAIL;
+    const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_12_1,
+                                        D3D_FEATURE_LEVEL_12_0,
+                                        D3D_FEATURE_LEVEL_11_0};
+    for (const auto level : levels) {
+        created = D3D12CreateDevice(adapter.Get(), level, IID_PPV_ARGS(&device12_));
+        if (SUCCEEDED(created)) {
+            break;
+        }
+    }
+    if (FAILED(created)) {
         detail = "D3D12CreateDevice failed";
         return false;
     }
@@ -222,6 +233,7 @@ bool NvDlssSr::EnsureCore(std::string& detail) {
     }
     parameters_ = parameters;
     core_ready_ = true;
+    MarkNgxInitialized(device12_.Get());
     return true;
 }
 

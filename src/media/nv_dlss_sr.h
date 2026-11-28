@@ -65,6 +65,9 @@ public:
     // NT shared handle for the last returned DX11 output texture. The DX12
     // surface opens it and samples it without a readback.
     HANDLE SharedHandle() const;
+    // The D3D12 device NGX was initialized with. Native DLSS-G must run on the
+    // same device; a second NGX Init with another device is rejected.
+    ID3D12Device* device12() const { return device12_.Get(); }
     int SharedWidth() const { return out_width_; }
     int SharedHeight() const { return out_height_; }
     int in_width() const { return in_width_; }

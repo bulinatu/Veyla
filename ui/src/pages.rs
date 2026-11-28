@@ -1345,7 +1345,7 @@ impl Root {
         if dlss_backend {
             fg_rows.push(widgets::kv(
                 "Native DLSS-G",
-                "Runs in-process on DX12; a global motion estimate drives the generated frames.",
+                "Runs in-process on DX12; optical flow interpolates slow pans and fast pans repeat the real frame.",
             ));
             fg_rows.push(self.seg_int_row(
                 "ai.fg_multiplier",

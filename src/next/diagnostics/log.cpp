@@ -109,6 +109,10 @@ void Logger::Log(LogLevel level, const std::string& message) {
         RotateLocked();
         if (file_.is_open()) {
             file_ << line << '\n';
+            // A crash or a force-kill used to lose the tail of the log because
+            // the ofstream stayed buffered. Info lines are rare, so flushing
+            // each one costs nothing and keeps the diagnostics after a hang.
+            file_.flush();
         }
         sink = sink_;
     }

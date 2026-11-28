@@ -283,17 +283,17 @@ bool NvOf::RegisterOutput(std::string& detail) {
         detail = "NvOF flow buffer is missing";
         return false;
     }
+    // Register the stable flow buffer once. Re-registering it on every frame
+    // with a new fence value made the driver's internal video-encode command
+    // list fail to Close; the per-execute output fence point below handles the
+    // wait.
     if (flow_handle_) {
-        NV_OF_UNREGISTER_RESOURCE_PARAMS_D3D12 unregister{};
-        unregister.hOFGpuBuffer = reinterpret_cast<NvOFGPUBufferHandle>(flow_handle_);
-        api_->fn.nvOFUnregisterResourceD3D12(&unregister);
-        flow_handle_ = nullptr;
+        return true;
     }
-    const uint64_t value = ++of_value_;
     NV_OF_REGISTER_RESOURCE_PARAMS_D3D12 params{};
     params.resource = flow_.Get();
     params.inputFencePoint = {of_fence_.Get(), 0};
-    params.outputFencePoint = {of_fence_.Get(), value};
+    params.outputFencePoint = {of_fence_.Get(), 0};
     params.hOFGpuBuffer = reinterpret_cast<NvOFGPUBufferHandle*>(&flow_handle_);
     if (api_->fn.nvOFRegisterResourceD3D12(of_, &params) != NV_OF_SUCCESS) {
         detail = "NvOFRegisterResourceD3D12(output) failed";

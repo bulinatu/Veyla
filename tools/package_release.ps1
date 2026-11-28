@@ -153,8 +153,28 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 3.0.0 beta 13 - standalone build
+Veyla 3.0.0 beta 14 - standalone build
 =======================================
+
+What changed in 3.0.0 beta 14
+-----------------------------
+- Native DLSS-G now initializes reliably next to DLSS SR. NGX allows only one
+  initialization per process; the generator used to call it again with a
+  second D3D12 device and the driver answered OutOfDate, so frame generation
+  silently stayed off. DLSS SR and DLSS-G now share one NGX session and one
+  device.
+- The generator uses its own optical-flow accelerator for camera pans and
+  independently moving objects instead of a single screen-wide motion vector.
+  The old global estimate is kept as a development fallback.
+- A fast camera pan no longer shows warped or double edges. When the frame
+  moves too far for a clean interpolation, the real frame is repeated in the
+  generated slot, so the 2x cadence stays but nothing is warped.
+- The log line is now written every second and includes the output rate and
+  the measured shift: `dlssg: process/motion/fps/shown/generated/interp/shift`.
+- Log lines are flushed immediately, so a hung or force-closed app no longer
+  loses its last diagnostics.
+- A 4x/6x request stays stable: the driver's clamped count is kept and the
+  feature is not recreated.
 
 What changed in 3.0.0 beta 13
 -----------------------------
