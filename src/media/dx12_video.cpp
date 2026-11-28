@@ -529,22 +529,29 @@ bool Dx12Video::OpenShared(HANDLE handle, std::string& detail) {
         detail = "shared handle is null";
         return false;
     }
-    if (shared_handle_ == handle && shared_resource_) {
-        return true;
+    for (auto& entry : shared_sources_) {
+        if (entry.handle == handle) {
+            shared_resource_ = entry.resource;
+            return true;
+        }
     }
-    ReleaseShared();
-    if (FAILED(device_->OpenSharedHandle(handle, IID_PPV_ARGS(&shared_resource_)))) {
+    Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+    if (FAILED(device_->OpenSharedHandle(handle, IID_PPV_ARGS(&resource)))) {
         detail = "OpenSharedHandle failed";
         return false;
     }
-    shared_handle_ = handle;
-    SetDebugName(shared_resource_.Get(), L"Veyla shared source");
+    SetDebugName(resource.Get(), L"Veyla shared source");
+    if (shared_sources_.size() >= 4) {
+        shared_sources_.erase(shared_sources_.begin());
+    }
+    shared_sources_.push_back({handle, resource});
+    shared_resource_ = std::move(resource);
     return true;
 }
 
 void Dx12Video::ReleaseShared() {
+    shared_sources_.clear();
     shared_resource_.Reset();
-    shared_handle_ = nullptr;
 }
 
 bool Dx12Video::DrawShared(HANDLE shared, int width, int height, bool pq) {

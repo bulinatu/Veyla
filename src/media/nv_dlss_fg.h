@@ -62,7 +62,11 @@ public:
     const std::vector<Frame>& Frames() const { return frames_; }
     int width() const { return width_; }
     int height() const { return height_; }
-    int requested_multiplier() const { return multiplier_; }
+    // What the caller asked for, before the driver clamps the frame count. The
+    // shell compares this value; returning the clamped one made it recreate the
+    // feature every frame (5 fps) when a multiplier above the driver maximum
+    // was selected.
+    int requested_multiplier() const { return requested_multiplier_; }
     int actual_generated() const { return generated_; }
     bool available() const { return feature_ != nullptr; }
     const std::string& status() const { return status_; }
@@ -83,6 +87,7 @@ private:
     int width_ = 0;
     int height_ = 0;
     int multiplier_ = 2;
+    int requested_multiplier_ = 2;
     int generated_ = 1;
     int max_generated_ = 1;
     double last_ms_ = 0.0;
@@ -102,8 +107,13 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12Resource> input_;
     Microsoft::WRL::ComPtr<ID3D12Resource> previous_input_;
-    Microsoft::WRL::ComPtr<ID3D12Resource> shared_input_;
-    HANDLE shared_handle_ = nullptr;
+    // DLSS SR rotates two shared output textures; reopen each handle once and
+    // keep the D3D12 views instead of opening every frame.
+    struct SharedInput {
+        HANDLE handle = nullptr;
+        Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+    };
+    std::vector<SharedInput> shared_inputs_;
     Microsoft::WRL::ComPtr<ID3D12Resource> upload_;
     std::uint8_t* upload_ptr_ = nullptr;
     Microsoft::WRL::ComPtr<ID3D12Resource> depth_;

@@ -6,11 +6,13 @@
 
 #include <windows.h>
 #include <d3d11.h>
+#include <dxgi1_2.h>
 #include <wrl/client.h>
 
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -63,6 +65,7 @@ int main(int argc, char** argv) {
         argc > 1 ? std::wstring(argv[1], argv[1] + std::strlen(argv[1]))
                  : L"C:\\Users\\Cosmin\\Desktop\\BetterRemotePlay\\dist\\Veyla\\nr\\native";
     const int multiplier = argc > 2 ? std::atoi(argv[2]) : 2;
+    const bool shared_mode = argc > 3 && std::string(argv[3]) == "shared";
 
     Microsoft::WRL::ComPtr<ID3D11Device> d3d11;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
@@ -80,8 +83,40 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "Start: %s\n", detail.c_str());
         return 2;
     }
-    std::printf("DLSS-G started: %dx, generated %d\n", fg.requested_multiplier(),
-                fg.actual_generated());
+    std::printf("DLSS-G started: %dx, generated %d%s\n", fg.requested_multiplier(),
+                fg.actual_generated(), shared_mode ? " (shared input)" : "");
+
+    // Two rotating shared textures, like the DLSS SR output slots the shell
+    // feeds in production.
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> shared_textures[2];
+    HANDLE shared_handles[2] = {nullptr, nullptr};
+    if (shared_mode) {
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = 1920;
+        desc.Height = 1080;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        desc.CPUAccessFlags = 0;
+        desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED |
+                         D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+        for (int i = 0; i < 2; ++i) {
+            if (FAILED(d3d11->CreateTexture2D(&desc, nullptr, &shared_textures[i]))) {
+                std::fprintf(stderr, "shared texture %d failed\n", i);
+                return 5;
+            }
+            Microsoft::WRL::ComPtr<IDXGIResource1> resource;
+            if (FAILED(shared_textures[i].As(&resource)) ||
+                FAILED(resource->CreateSharedHandle(nullptr, GENERIC_ALL, nullptr,
+                                                    &shared_handles[i]))) {
+                std::fprintf(stderr, "shared handle %d failed\n", i);
+                return 5;
+            }
+        }
+    }
 
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
@@ -128,7 +163,18 @@ int main(int argc, char** argv) {
         // The test pattern moves the bar 12 px per tick; feed the same global
         // motion the shell estimates for a video pan.
         fg.SetGlobalMotion(12.0f, 0.0f);
-        if (!fg.Process(rgba.data(), 1920, 1080, tick == 0, detail)) {
+        bool processed = false;
+        if (shared_mode) {
+            const int slot = tick & 1;
+            context->UpdateSubresource(shared_textures[slot].Get(), 0, nullptr,
+                                       rgba.data(), 1920 * 4, 0);
+            context->Flush();
+            processed = fg.ProcessShared(shared_handles[slot], 1920, 1080,
+                                         tick == 0, detail);
+        } else {
+            processed = fg.Process(rgba.data(), 1920, 1080, tick == 0, detail);
+        }
+        if (!processed) {
             ++failures;
             if (failures < 4) {
                 std::fprintf(stderr, "Process: %s\n", detail.c_str());

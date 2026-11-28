@@ -79,7 +79,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"3.0.0-beta12";
+constexpr wchar_t kVersion[] = L"3.0.0-beta13";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
@@ -4091,13 +4091,32 @@ bool NextApp::PresentVideoDx12() {
         if (EnsureDlssFgDx12(fg_width, fg_height)) {
             // Video has no engine motion vectors: estimate a global screen
             // shift so the generator interpolates pans instead of repeating.
+            const auto motion_start = std::chrono::steady_clock::now();
             UpdateGlobalMotion(width, height, fg_width, fg_height);
+            const auto process_start = std::chrono::steady_clock::now();
             std::string detail;
             const bool processed =
                 sr_ok ? dlss_fg_dx12_->ProcessShared(sr_handle, fg_width, fg_height,
                                                      fg_dx12_reset_, detail)
                       : dlss_fg_dx12_->Process(video_frame_.rgba.data(), fg_width,
                                                fg_height, fg_dx12_reset_, detail);
+            const auto process_end = std::chrono::steady_clock::now();
+            fg_motion_ms_sum_ +=
+                std::chrono::duration<double, std::milli>(process_start - motion_start)
+                    .count();
+            fg_process_ms_sum_ +=
+                std::chrono::duration<double, std::milli>(process_end - process_start)
+                    .count();
+            if (++fg_timing_samples_ >= 60) {
+                LogPrintf(LogLevel::Info,
+                          "dlssg: process %.1f ms, motion %.1f ms, generated %d",
+                          fg_process_ms_sum_ / fg_timing_samples_,
+                          fg_motion_ms_sum_ / fg_timing_samples_,
+                          dlss_fg_dx12_->actual_generated());
+                fg_process_ms_sum_ = 0.0;
+                fg_motion_ms_sum_ = 0.0;
+                fg_timing_samples_ = 0;
+            }
             if (processed) {
                 fg_dx12_reset_ = false;
                 const auto& frames = dlss_fg_dx12_->Frames();

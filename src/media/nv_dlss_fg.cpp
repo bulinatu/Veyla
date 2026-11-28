@@ -87,6 +87,7 @@ bool NvDlssFg::Start(ID3D11Device* device, const std::wstring& feature_dir, int 
     width_ = width;
     height_ = height;
     multiplier_ = std::clamp(multiplier, 2, 6);
+    requested_multiplier_ = multiplier_;
     const std::filesystem::path dir(feature_dir);
     const std::wstring core_dir = NgxCoreDirectory();
     std::filesystem::path feature = dir / L"nvngx_dlssg.dll";
@@ -582,20 +583,33 @@ bool NvDlssFg::ProcessShared(HANDLE shared, int width, int height, bool reset,
     if (!Wait(detail)) {
         return false;
     }
-    if (shared_handle_ != shared || !shared_input_) {
-        shared_input_.Reset();
-        if (FAILED(device12_->OpenSharedHandle(shared, IID_PPV_ARGS(&shared_input_)))) {
+    ID3D12Resource* input = nullptr;
+    for (auto& entry : shared_inputs_) {
+        if (entry.handle == shared) {
+            input = entry.resource.Get();
+            break;
+        }
+    }
+    if (!input) {
+        // Keep the last few SR slots; the producer rotates two textures.
+        if (shared_inputs_.size() >= 4) {
+            shared_inputs_.erase(shared_inputs_.begin());
+        }
+        SharedInput entry;
+        entry.handle = shared;
+        if (FAILED(device12_->OpenSharedHandle(shared, IID_PPV_ARGS(&entry.resource)))) {
             detail = "DLSS-G cannot open the shared SR output";
             return false;
         }
-        shared_handle_ = shared;
+        input = entry.resource.Get();
+        shared_inputs_.push_back(std::move(entry));
     }
     if (FAILED(allocator_->Reset()) || FAILED(list_->Reset(allocator_.Get(), nullptr))) {
         detail = "DLSS-G shared command reset failed";
         return false;
     }
     const double started = NowMs();
-    eval_input_ = shared_input_.Get();
+    eval_input_ = input;
     motion_source_ = motion_.Get();
     if (!Evaluate(reset, detail)) {
         return false;
@@ -846,8 +860,7 @@ void NvDlssFg::Stop() {
     real_.Reset();
     motion_of_.Reset();
     motion_source_ = nullptr;
-    shared_input_.Reset();
-    shared_handle_ = nullptr;
+    shared_inputs_.clear();
     of_.reset();
     previous_input_.Reset();
     motion_.Reset();

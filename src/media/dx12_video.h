@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace brp {
 
@@ -128,7 +129,13 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource> upload_;
     std::uint8_t* upload_ptr_ = nullptr;
 
-    HANDLE shared_handle_ = nullptr;
+    // The real/generated frames and the SR rotation hand us a few stable
+    // handles; keep their D3D12 views instead of reopening every frame.
+    struct SharedSource {
+        HANDLE handle = nullptr;
+        Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+    };
+    std::vector<SharedSource> shared_sources_;
     Microsoft::WRL::ComPtr<ID3D12Resource> shared_resource_;
 
     // Present statistics, same meaning as in Presenter.

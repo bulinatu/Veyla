@@ -153,8 +153,19 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 3.0.0 beta 12 - standalone build
+Veyla 3.0.0 beta 13 - standalone build
 =======================================
+
+What changed in 3.0.0 beta 13
+-----------------------------
+- Fixed the 5 fps collapse with native DLSS-G. The shell compared the
+  requested multiplier with the driver-clamped one, so a 4x/6x selection
+  recreated the feature every frame. It now compares the request and keeps the
+  driver's clamped count.
+- Shared-input views are cached. DLSS SR rotates two output textures; the
+  generator and the DX12 surface used to reopen the handles every frame.
+- A `dlssg: process/motion/generated` line is written every ~5 s so a slow
+  generator can be identified from the log.
 
 What changed in 3.0.0 beta 12
 -----------------------------

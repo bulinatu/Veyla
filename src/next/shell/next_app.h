@@ -260,6 +260,9 @@ private:
     std::string link_type_ = "unknown";
     int link_ticks_ = 39;  // compute on the first status publish
     int stats_ticks_ = 0;  // presentation stats line every ~5 s at Debug
+    double fg_process_ms_sum_ = 0.0;
+    double fg_motion_ms_sum_ = 0.0;
+    int fg_timing_samples_ = 0;
     WifiInfo wifi_;        // latest WLAN association, refreshed by the pad thread
     std::mutex wifi_mutex_;
     // Global screen-space motion for DLSS-G, estimated from consecutive frames.
