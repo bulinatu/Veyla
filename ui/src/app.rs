@@ -600,8 +600,10 @@ impl Root {
         // The console caps at 1080p; 60 fps halves the input interval.
         settings.set_str("streaming.input", "1080p");
         settings.set_int("streaming.fps", 60);
-        // Buffer 0 measured 58 ms less frame age than the primed queue.
-        settings.set_int("streaming.frame_buffer", 0);
+        // On a cable, buffer 0 measured 58 ms less frame age. Over Wi-Fi the
+        // queue needs one frame of slack; the session grows it further (up to 3)
+        // when frames arrive in bursts.
+        settings.set_int("streaming.frame_buffer", if wifi { 1 } else { 0 });
         // Wi-Fi queues in the access point long before its nominal link rate:
         // 100 Mbps over the air turns into exactly the input delay this app
         // exists to avoid. 30 Mbps keeps 1080p60 HEVC clean.

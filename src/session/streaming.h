@@ -191,6 +191,9 @@ private:
     int last_queue_ = 0;
     double last_drought_ = -100.0;
     double last_recovery_ = 0.0;
+    // Last time the queue had to drop a frame. A jittery link must not start
+    // shrinking the buffer again a few seconds after every burst.
+    double last_drop_ = -100.0;
 
     // per-interval video telemetry
     std::atomic<int> stats_frames_{0};

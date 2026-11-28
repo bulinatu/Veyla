@@ -224,6 +224,7 @@ bool Streaming::Start(const Profile& profile, int width, int height, int bitrate
     primed_ = false;
     last_drought_ = -100.0;
     last_recovery_ = 0.0;
+    last_drop_ = -100.0;
     last_queue_ = 0;
     stats_frames_.store(0);
     stats_lost_.store(0);
@@ -805,9 +806,10 @@ bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, bool paced) {
     const double seconds =
         std::chrono::duration<double>(now - started_).count();
     const int max_buffer = std::clamp(buffer, 0, 6);
-    // Adaptive ceiling: one step above the chosen buffer, never above 3, so a
-    // jittery link can buy a frame of slack without touching the setting.
-    const int ceiling = max_buffer == 0 ? 0 : std::min(max_buffer + 1, 3);
+    // Adaptive ceiling: up to two frames above the setting, never above 3. A
+    // bursty Wi-Fi link gets ~33 ms of slack without the user touching the
+    // setting; 0 stays the explicit lowest-latency mode.
+    const int ceiling = max_buffer == 0 ? 0 : std::min(max_buffer + 2, 3);
 
     if (frames_.empty()) {
         primed_ = false;
@@ -842,8 +844,9 @@ bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, bool paced) {
         return true;
     }
 
-    // Stable for five seconds: give latency back, one frame at a time.
-    if (seconds - last_recovery_ >= 5.0) {
+    // Give latency back one frame at a time, but only after a calm period: a
+    // jittery link used to drop, shrink after 5 s and drop again forever.
+    if (seconds - last_recovery_ >= 5.0 && seconds - last_drop_ >= 10.0) {
         const int target = buffer_target_.load();
         if (target > 1) {
             buffer_target_.store(target - 1);
@@ -870,6 +873,14 @@ bool Streaming::TakeFrame(media::DecodedFrame& out, int buffer, bool paced) {
     // frame age before the AI or the presenter even sees it. Drop one per tick
     // when the queue is over target; the producer refills on the next decode.
     if (static_cast<int>(frames_.size()) > wanted) {
+        const int depth = buffer_target_.load();
+        if (depth < ceiling) {
+            // The producer arrived in a burst. Buying one frame of slack costs
+            // ~16.7 ms and avoids throwing the burst away and showing a stutter.
+            buffer_target_.store(depth + 1);
+        }
+        last_recovery_ = seconds;
+        last_drop_ = seconds;
         frames_.pop_front();
         buffer_drops_.fetch_add(1);
     }

@@ -153,8 +153,19 @@ foreach ($dll in @("vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threa
 
 # --- readme -----------------------------------------------------------------
 $readme = @"
-Veyla 3.0.0 beta 6 - standalone build
+Veyla 3.0.0 beta 7 - standalone build
 =======================================
+
+What changed in 3.0.0 beta 7
+----------------------------
+- The frame buffer now adapts to a bursty link instead of dropping frames. When
+  frames arrive in a burst and the queue would overflow, the session raises its
+  internal buffer by one (up to 3) and only gives the latency back after 10 s
+  without a drop. Wi-Fi jitter no longer turns into stutter.
+- Optimize sets frame buffer 1 on Wi-Fi and 0 on a cable. 0 stays the explicit
+  lowest-latency mode.
+- The periodic presentation log line now includes the active link type.
+- The beta 6 diagnostic log ("All" level) is unchanged.
 
 What changed in 3.0.0 beta 6
 ----------------------------

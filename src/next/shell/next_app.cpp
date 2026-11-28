@@ -77,7 +77,7 @@ void HideNvidiaOverlay() {
         ::ShowWindow(overlay, SW_HIDE);
     }
 }
-constexpr wchar_t kVersion[] = L"3.0.0-beta6";
+constexpr wchar_t kVersion[] = L"3.0.0-beta7";
 // Saved profiles are a convenience, not a library. Twelve keeps the list one
 // glance long; the shell and the control centre both show "n / 12".
 constexpr std::size_t kMaxProfiles = 12;
@@ -5034,11 +5034,12 @@ void NextApp::PublishBridgeStatus() {
             line, sizeof(line),
             "present: state=%s connected=%d, source %.1f fps, shown %d fps, "
             "loss %.2f%%, drops %d, decode %.1f/%.1f ms, age %.1f ms, "
-            "cadence %.1f/%.1f ms, misses %llu/s",
+            "cadence %.1f/%.1f ms, misses %llu/s, link=%s",
             stream.state.c_str(), stream.connected ? 1 : 0, stream.source_fps,
             display_rate_, stream.loss_percent, stream.decoder_drops,
             stream.decode_ms, stream.decode_ms_max, last_age_ms_, cadence_p50_,
-            cadence_p99_, present_misses_rate_);
+            cadence_p99_, present_misses_rate_,
+            link_type_.empty() ? "unknown" : link_type_.c_str());
         LogDebug(line);
     }
     std::string json;

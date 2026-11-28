@@ -956,7 +956,7 @@ impl Root {
                 self.seg_int_row(
                     "streaming.frame_buffer",
                     "Frame buffer",
-                    "0 is lowest; 1 adds ~2 source intervals (~60 ms at 30 fps)",
+                    "0 is lowest latency; 1+ adds one source interval per step and absorbs link jitter (auto-grows on drops)",
                     &[(0, "0"), (1, "1"), (2, "2"), (3, "3")],
                     cx,
                 ),
