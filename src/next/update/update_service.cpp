@@ -499,8 +499,35 @@ int ComparePrerelease(const std::vector<std::string>& a,
         } else if (left_number != right_number) {
             // numeric identifiers have lower precedence than alphanumeric ones
             return left_number ? -1 : 1;
-        } else if (left != right) {
-            return left < right ? -1 : 1;
+        } else {
+            // "beta2" vs "beta10": same alpha prefix, numeric suffix compared
+            // as a number, not as text.
+            std::size_t left_digits = left.size();
+            while (left_digits > 0 &&
+                   std::isdigit(static_cast<unsigned char>(left[left_digits - 1]))) {
+                --left_digits;
+            }
+            std::size_t right_digits = right.size();
+            while (right_digits > 0 &&
+                   std::isdigit(static_cast<unsigned char>(right[right_digits - 1]))) {
+                --right_digits;
+            }
+            const std::string left_prefix = left.substr(0, left_digits);
+            const std::string right_prefix = right.substr(0, right_digits);
+            if (left_prefix != right_prefix) {
+                return left_prefix < right_prefix ? -1 : 1;
+            }
+            const bool left_has_number = left_digits < left.size();
+            const bool right_has_number = right_digits < right.size();
+            if (left_has_number && right_has_number) {
+                const long long l = std::strtoll(left.c_str() + left_digits, nullptr, 10);
+                const long long r = std::strtoll(right.c_str() + right_digits, nullptr, 10);
+                if (l != r) return l < r ? -1 : 1;
+            } else if (left_has_number != right_has_number) {
+                return left_has_number ? 1 : -1;
+            } else if (left != right) {
+                return left < right ? -1 : 1;
+            }
         }
     }
     return 0;
